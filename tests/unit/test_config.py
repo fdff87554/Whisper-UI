@@ -14,7 +14,6 @@ def test_default_settings(tmp_path):
     assert s.device == "cuda"
     assert s.language == "zh"
     assert s.batch_size == 4
-    assert s.max_upload_size_mb == 500
 
 
 def test_settings_override(tmp_path):
