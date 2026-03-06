@@ -1,0 +1,29 @@
+FROM nvidia/cuda:12.3.2-base-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /app
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        python3.12 python3.12-venv python3-pip \
+        ffmpeg curl && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
+    ln -sf /usr/bin/python3 /usr/bin/python
+
+COPY pyproject.toml ./
+COPY src/ ./src/
+COPY docker/entrypoint-worker.sh ./entrypoint-worker.sh
+RUN chmod +x ./entrypoint-worker.sh
+
+RUN pip install --no-cache-dir ".[worker]"
+
+ENV HF_HOME=/cache/huggingface
+ENV PYTHONUNBUFFERED=1
+
+HEALTHCHECK --interval=60s --timeout=10s --retries=3 \
+    CMD python -c "from redis import Redis; import os; r=Redis.from_url(os.environ.get('REDIS_URL','redis://redis:6379/0')); r.ping()" || exit 1
+
+ENTRYPOINT ["./entrypoint-worker.sh"]

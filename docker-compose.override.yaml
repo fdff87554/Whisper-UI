@@ -1,0 +1,18 @@
+# Development overrides - bind mount source code for live reload
+services:
+  frontend:
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+      - ./.streamlit:/app/.streamlit
+    command:
+      - streamlit
+      - run
+      - src/whisper_ui/app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+      - --server.runOnSave=true
+  worker:
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data

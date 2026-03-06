@@ -46,3 +46,4 @@ node_modules/
 # Project
 logs/
 tmp/
+data/

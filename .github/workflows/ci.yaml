@@ -1,0 +1,21 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install mise
+        uses: jdx/mise-action@v2
+      - name: Install dependencies
+        run: pip install ".[dev]"
+      - name: Lint
+        run: |
+          ruff format --check .
+          ruff check .
+      - name: Test
+        run: pytest --tb=short -q
