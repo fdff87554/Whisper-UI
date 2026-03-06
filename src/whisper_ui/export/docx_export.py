@@ -5,6 +5,7 @@ import logging
 
 from whisper_ui.core.exceptions import ExportError
 from whisper_ui.core.models import TranscriptResult
+from whisper_ui.ui.labels import EXPORT_DOCX_HEADING
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class DocxExporter:
             raise ExportError("python-docx is not installed. Install it with: pip install python-docx") from err
 
         doc = Document()
-        doc.add_heading("Transcript", level=1)
+        doc.add_heading(EXPORT_DOCX_HEADING, level=1)
 
         current_speaker: str | None = None
         for seg in result.segments:

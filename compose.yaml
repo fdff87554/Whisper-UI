@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.frontend
       args:
-        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple/}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     ports:
       - "8501:8501"
     environment:
@@ -34,7 +34,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.worker
       args:
-        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple/}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     environment:
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_PATH=/app/data/db/whisper_ui.db
@@ -43,7 +43,7 @@ services:
       - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
       - COMPUTE_TYPE=${COMPUTE_TYPE:-int8_float16}
       - DEVICE=${DEVICE:-cuda}
-      - BATCH_SIZE=${BATCH_SIZE:-4}
+      - BATCH_SIZE=${BATCH_SIZE:-2}
       - LANGUAGE=${LANGUAGE:-zh}
       - HF_TOKEN=${HF_TOKEN:-}
     volumes:

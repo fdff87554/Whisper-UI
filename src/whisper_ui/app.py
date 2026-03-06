@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import streamlit as st
 
+from whisper_ui.ui.labels import PAGE_JOBS, PAGE_UPLOAD, PAGE_VIEWER
+
 
 def main() -> None:
     st.set_page_config(
@@ -10,9 +12,9 @@ def main() -> None:
         layout="wide",
     )
 
-    upload_page = st.Page("pages/1_upload.py", title="Upload", default=True)
-    jobs_page = st.Page("pages/2_jobs.py", title="Jobs")
-    viewer_page = st.Page("pages/3_viewer.py", title="Viewer")
+    upload_page = st.Page("pages/1_upload.py", title=PAGE_UPLOAD, default=True)
+    jobs_page = st.Page("pages/2_jobs.py", title=PAGE_JOBS)
+    viewer_page = st.Page("pages/3_viewer.py", title=PAGE_VIEWER)
 
     pg = st.navigation([upload_page, jobs_page, viewer_page])
     pg.run()

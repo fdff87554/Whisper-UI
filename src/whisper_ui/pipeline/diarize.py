@@ -6,6 +6,7 @@ from typing import Any
 
 from whisper_ui.core.exceptions import DiarizationError
 from whisper_ui.pipeline.base import ProgressCallback
+from whisper_ui.ui.labels import DIARIZE_DONE, DIARIZE_LOADING, DIARIZE_RUNNING, DIARIZE_SKIPPED
 
 logger = logging.getLogger(__name__)
 
@@ -25,22 +26,22 @@ class DiarizeStage:
             logger.warning("No HF_TOKEN provided, skipping diarization.")
             context["diarize_result"] = None
             if on_progress:
-                on_progress(1.0, "Diarization skipped (no HF token).")
+                on_progress(1.0, DIARIZE_SKIPPED)
             return context
 
         if on_progress:
-            on_progress(0.0, "Loading diarization model...")
+            on_progress(0.0, DIARIZE_LOADING)
 
         try:
-            import whisperx
+            from whisperx.diarize import DiarizationPipeline
 
-            self._pipeline = whisperx.DiarizationPipeline(
-                use_auth_token=self._hf_token,
+            self._pipeline = DiarizationPipeline(
+                token=self._hf_token,
                 device=self._device,
             )
 
             if on_progress:
-                on_progress(0.2, "Running speaker diarization...")
+                on_progress(0.2, DIARIZE_RUNNING)
 
             audio_path = context["audio_path"]
             num_speakers = context.get("num_speakers")
@@ -52,7 +53,7 @@ class DiarizeStage:
             diarize_segments = self._pipeline(**kwargs)
 
             if on_progress:
-                on_progress(1.0, "Diarization complete.")
+                on_progress(1.0, DIARIZE_DONE)
 
             context["diarize_result"] = diarize_segments
             return context

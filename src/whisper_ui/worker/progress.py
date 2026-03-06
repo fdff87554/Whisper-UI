@@ -4,6 +4,8 @@ import logging
 
 from redis import Redis
 
+from whisper_ui.ui.labels import PIPELINE_COMPLETE
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,7 +30,7 @@ class RedisProgressReporter:
             self._key,
             mapping={
                 "progress": "1.0",
-                "message": "Complete",
+                "message": PIPELINE_COMPLETE,
                 "status": "completed",
                 "result_path": result_path,
             },

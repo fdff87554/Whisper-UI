@@ -6,6 +6,21 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
+WHISPER_MODELS: list[str] = [
+    "tiny",
+    "tiny.en",
+    "base",
+    "base.en",
+    "small",
+    "small.en",
+    "medium",
+    "medium.en",
+    "large-v1",
+    "large-v2",
+    "large-v3",
+    "large-v3-turbo",
+]
+
 
 class JobStatus(StrEnum):
     PENDING = "pending"
@@ -54,6 +69,7 @@ class Job:
     progress: float = 0.0
     progress_message: str = ""
     language: str = "zh"
+    model_name: str = "large-v3"
     num_speakers: int | None = None
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
