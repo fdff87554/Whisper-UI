@@ -19,17 +19,4 @@ class JsonExporter:
         return "application/json"
 
     def export(self, result: TranscriptResult) -> bytes:
-        payload = {
-            "language": result.language,
-            "duration": result.duration,
-            "segments": [
-                {
-                    "start": s.start,
-                    "end": s.end,
-                    "text": s.text,
-                    "speaker": s.speaker,
-                }
-                for s in result.segments
-            ],
-        }
-        return json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+        return json.dumps(result.to_dict(), ensure_ascii=False, indent=2).encode("utf-8")
