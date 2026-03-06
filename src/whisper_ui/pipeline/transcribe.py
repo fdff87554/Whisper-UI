@@ -6,6 +6,7 @@ from typing import Any
 
 from whisper_ui.core.exceptions import TranscriptionError
 from whisper_ui.pipeline.base import ProgressCallback
+from whisper_ui.ui.labels import TRANSCRIBE_DONE, TRANSCRIBE_LOADING, TRANSCRIBE_RUNNING
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class TranscribeStage:
         batch_size = context.get("batch_size", 4)
 
         if on_progress:
-            on_progress(0.0, "Loading transcription model...")
+            on_progress(0.0, TRANSCRIBE_LOADING)
 
         try:
             import whisperx
@@ -40,13 +41,13 @@ class TranscribeStage:
             )
 
             if on_progress:
-                on_progress(0.1, "Transcribing audio...")
+                on_progress(0.1, TRANSCRIBE_RUNNING)
 
             audio = whisperx.load_audio(audio_path)
             result = self._model.transcribe(audio, batch_size=batch_size, language=language)
 
             if on_progress:
-                on_progress(1.0, "Transcription complete.")
+                on_progress(1.0, TRANSCRIBE_DONE)
 
             context["transcription_result"] = result
             context["whisperx_audio"] = audio

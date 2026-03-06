@@ -14,6 +14,7 @@ _JOB_COLUMNS = [
     "progress",
     "progress_message",
     "language",
+    "model_name",
     "num_speakers",
     "created_at",
     "updated_at",
@@ -35,6 +36,8 @@ class JobDatabase:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
         init_db(self._conn)
 
     def close(self) -> None:

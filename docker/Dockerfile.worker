@@ -1,24 +1,27 @@
-FROM nvidia/cuda:12.3.2-base-ubuntu22.04
+FROM pytorch/pytorch:2.10.0-cuda12.8-cudnn9-runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-WORKDIR /app
-
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        python3.12 python3.12-venv python3-pip \
-        ffmpeg curl && \
+    apt-get install -y --no-install-recommends ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
-RUN ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
-    ln -sf /usr/bin/python3 /usr/bin/python
+WORKDIR /app
 
 COPY pyproject.toml ./
 COPY src/ ./src/
 COPY docker/entrypoint-worker.sh ./entrypoint-worker.sh
 RUN chmod +x ./entrypoint-worker.sh
 
-RUN pip install --no-cache-dir ".[worker]"
+ARG PIP_INDEX_URL=
+ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+
+# torch/torchaudio are pre-installed by the base image (2.10.0+cu128).
+# Install whisperx without deps first to avoid its torch~=2.8.0 constraint
+# triggering a downgrade; torch 2.10.0 is backward-compatible.
+# Then install the remaining worker dependencies normally.
+RUN pip install --no-cache-dir --break-system-packages --no-deps "whisperx>=3.8,<3.9" && \
+    pip install --no-cache-dir --break-system-packages ".[worker]"
 
 ENV HF_HOME=/cache/huggingface
 ENV PYTHONUNBUFFERED=1

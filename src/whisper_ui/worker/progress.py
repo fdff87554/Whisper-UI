@@ -4,6 +4,8 @@ import logging
 
 from redis import Redis
 
+from whisper_ui.ui.labels import PIPELINE_COMPLETE
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,17 +24,19 @@ class RedisProgressReporter:
                 "status": "processing",
             },
         )
+        self._redis.expire(self._key, 7200)
 
     def complete(self, result_path: str) -> None:
         self._redis.hset(
             self._key,
             mapping={
                 "progress": "1.0",
-                "message": "Complete",
+                "message": PIPELINE_COMPLETE,
                 "status": "completed",
                 "result_path": result_path,
             },
         )
+        self._redis.expire(self._key, 86400)
 
     def fail(self, error: str) -> None:
         self._redis.hset(
@@ -44,6 +48,7 @@ class RedisProgressReporter:
                 "error": error[:1000],
             },
         )
+        self._redis.expire(self._key, 86400)
 
     @staticmethod
     def get_progress(redis: Redis, job_id: str) -> dict[str, str]:

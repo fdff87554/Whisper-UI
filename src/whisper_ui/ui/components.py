@@ -4,6 +4,7 @@ import streamlit as st
 
 from whisper_ui.core.models import JobStatus, Segment, TranscriptResult
 from whisper_ui.export.factory import available_formats, get_exporter
+from whisper_ui.ui.labels import STATUS_LABELS, VIEWER_NO_SEGMENTS
 
 
 def render_job_status_badge(status: JobStatus) -> None:
@@ -15,7 +16,8 @@ def render_job_status_badge(status: JobStatus) -> None:
         JobStatus.FAILED: "red",
     }
     color = colors.get(status, "gray")
-    st.markdown(f":{color}[{status.value.upper()}]")
+    label = STATUS_LABELS.get(status.value, status.value.upper())
+    st.markdown(f":{color}[{label}]")
 
 
 def render_progress(progress: float, message: str) -> None:
@@ -24,7 +26,7 @@ def render_progress(progress: float, message: str) -> None:
 
 def render_transcript(result: TranscriptResult) -> None:
     if not result.segments:
-        st.info("No segments found in transcript.")
+        st.info(VIEWER_NO_SEGMENTS)
         return
 
     for seg in result.segments:

@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.frontend
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     ports:
       - "8501:8501"
     environment:
@@ -10,6 +12,8 @@ services:
       - DATABASE_PATH=/app/data/db/whisper_ui.db
       - UPLOAD_DIR=/app/data/uploads
       - OUTPUT_DIR=/app/data/outputs
+      - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
+      - LANGUAGE=${LANGUAGE:-zh}
     volumes:
       - app-data:/app/data
     depends_on:
@@ -18,6 +22,7 @@ services:
     restart: unless-stopped
   redis:
     image: redis:7-alpine
+    command: redis-server --appendonly yes
     volumes:
       - redis-data:/data
     healthcheck:
@@ -30,6 +35,8 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.worker
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     environment:
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_PATH=/app/data/db/whisper_ui.db
@@ -38,7 +45,7 @@ services:
       - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
       - COMPUTE_TYPE=${COMPUTE_TYPE:-int8_float16}
       - DEVICE=${DEVICE:-cuda}
-      - BATCH_SIZE=${BATCH_SIZE:-4}
+      - BATCH_SIZE=${BATCH_SIZE:-2}
       - LANGUAGE=${LANGUAGE:-zh}
       - HF_TOKEN=${HF_TOKEN:-}
     volumes:

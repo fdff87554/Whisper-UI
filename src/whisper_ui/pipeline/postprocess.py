@@ -5,6 +5,7 @@ from typing import Any
 
 from whisper_ui.core.models import Segment, TranscriptResult
 from whisper_ui.pipeline.base import ProgressCallback
+from whisper_ui.ui.labels import POSTPROCESS_DONE, POSTPROCESS_EMPTY, POSTPROCESS_RUNNING
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +21,13 @@ class PostprocessStage:
 
     def execute(self, context: dict[str, Any], on_progress: ProgressCallback | None = None) -> dict[str, Any]:
         if on_progress:
-            on_progress(0.0, "Post-processing results...")
+            on_progress(0.0, POSTPROCESS_RUNNING)
 
         raw = context.get("final_result") or context.get("aligned_result") or context.get("transcription_result")
         if raw is None:
             context["transcript_result"] = TranscriptResult()
             if on_progress:
-                on_progress(1.0, "No results to post-process.")
+                on_progress(1.0, POSTPROCESS_EMPTY)
             return context
 
         segments = self._build_segments(raw)
@@ -41,7 +42,7 @@ class PostprocessStage:
         )
 
         if on_progress:
-            on_progress(1.0, "Post-processing complete.")
+            on_progress(1.0, POSTPROCESS_DONE)
 
         context["transcript_result"] = result
         return context
