@@ -1,0 +1,16 @@
+[project]
+name = "whisper-ui"
+version = "0.0.1"
+description = "STT project using OpenAI Whisper with Streamlit UI"
+requires-python = ">=3.12"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
