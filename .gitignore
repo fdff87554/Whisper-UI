@@ -42,3 +42,7 @@ node_modules/
 
 # mise
 .mise.local.toml
+
+# Project
+logs/
+tmp/
