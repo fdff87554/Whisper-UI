@@ -1,22 +1,102 @@
 # Whisper-UI
 
-This is a small project for using Whisper model through Streamlit UI.
+Speech-to-text system using [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
+(large-v3, INT8) with speaker diarization via
+[pyannote-audio](https://github.com/pyannote/pyannote-audio),
+a [Streamlit](https://streamlit.io/) web interface,
+and Docker GPU deployment.
 
-## Plan
+## Features
+
+- Upload audio/video files for transcription
+- Speaker diarization with pyannote speaker-diarization-3.1
+- Real-time progress tracking via Redis
+- Export to SRT, VTT, TXT, JSON, DOCX
+- Docker Compose deployment with NVIDIA GPU support
+
+## Architecture
 
 ```text
-當前專案是一個基於 OpenAI 的 Whisper Model 所開發的 STT Project，核心目標是希望可以藉由此專案更好的進行會議記錄的整理，期待可以藉由 Whisper Model 進行音檔的語音轉文字，且如果可以，會希望可以做到說話人員的識別與分離，結合後續延伸的一些功能之後，做到匯入音檔並幫我直接準備成合適的會議記錄。
++------------------+     +------------------+     +------------------+
+|    Streamlit     |     |      Redis       |     |   GPU Worker     |
+|    Frontend      |<--->|   (queue+state)  |<--->|  (RQ + Pipeline) |
+|   (CPU only)     |     |                  |     |  (NVIDIA GPU)    |
++------------------+     +------------------+     +------------------+
+        |                                                  |
+        +------ Shared Volume: app-data (uploads/outputs/db) ------+
+```
 
-但在此之前，目前我希望先完成最前面的規劃與技術的確認，包含
-1. 我希望利用 Streamlit Dash 作為整個框架的 GUI，這個 GUI 希望可以做到方便的檔案上傳，明確地轉換狀況與進度的追蹤，轉和後的資料預覽 & 文字資料的下載。
-2. 服務可以利用 Docker 維護與建置，開發完成後的服務可以包裝成 Docker image，並上傳到 github 做維護，當希望使用時，可以直接下載並部署。
-3. 希望可以支援最少 Nvidia 的 GPU 調度與使用，如果有辦法，可以額外支援 AMD GPU 調度使用，但優先支援使用 NV GPU 加速。
+## Quick Start
 
-請問是有辦法做到的嗎？如果可以做到，那
-1. 模型管理會怎麼管理？是否有類似 Ollama 的方案可以穩定且統一的模型管理？如果沒有，OpenAI 的 Whisper Model 有官方 GitHub 可以使用 (https://github.com/openai/whisper)，請優先使用這些官方資料
-2. 人聲分離的部分是否有推薦的模型跟解決方案？
+### Prerequisites
 
-請你給我一份完整的評估，這份評估應該包含詳細的資料整理 (含資料來源)，詳細的思考、比對、評估的理由與步驟，來告訴與協助我了解為何你會有這次的總結與結論、建議。
-也希望你在準備好結論後，能再用另一個角度自我檢查一次，如發現可能錯誤或矛盾，可以修正並說明你為何改變原本想法。
-在回答時如果資料不足或你不確定，請直接標明為「不確定」或「需要查證」，不要補齊或編造細節，如果有需要跟我確認來進一步離解與梳理需求的話，可以隨時跟我確認。
+- Docker and Docker Compose
+- NVIDIA GPU with 8GB+ VRAM
+- [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+- HuggingFace token (for speaker diarization)
+
+### Setup
+
+1. Copy environment file and configure:
+
+   ```bash
+   cp .env.example .env
+   # Edit .env and set HF_TOKEN
+   ```
+
+2. Accept pyannote model agreements:
+
+   - <https://huggingface.co/pyannote/speaker-diarization-3.1>
+   - <https://huggingface.co/pyannote/segmentation-3.0>
+
+3. Start all services:
+
+   ```bash
+   docker compose up -d
+   ```
+
+4. Open <http://localhost:8501> in your browser.
+
+## Local Development
+
+```bash
+# Install mise (tool manager)
+mise install
+
+# Install Python dependencies
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+
+# Run linting
+ruff format . && ruff check .
+
+# Start Streamlit (requires Redis running)
+streamlit run src/whisper_ui/app.py
+```
+
+## Tech Stack
+
+| Component           | Technology                                  |
+| ------------------- | ------------------------------------------- |
+| STT Engine          | faster-whisper large-v3 (INT8) via WhisperX |
+| Speaker Diarization | pyannote-audio 3.3.2                        |
+| Task Queue          | RQ + Redis                                  |
+| Frontend            | Streamlit                                   |
+| Storage             | SQLite + local filesystem                   |
+| Containerization    | Docker Compose + NVIDIA Container Toolkit   |
+
+## Project Structure
+
+```text
+src/whisper_ui/
+  app.py              # Streamlit entry point
+  pages/              # Streamlit multipage UI
+  core/               # Config, models, exceptions
+  pipeline/           # STT processing stages
+  worker/             # RQ task definitions
+  storage/            # SQLite + file I/O
+  export/             # SRT/VTT/TXT/JSON/DOCX exporters
+  ui/                 # Shared UI components
 ```

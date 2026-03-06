@@ -1,0 +1,61 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    ports:
+      - "8501:8501"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_PATH=/app/data/db/whisper_ui.db
+      - UPLOAD_DIR=/app/data/uploads
+      - OUTPUT_DIR=/app/data/outputs
+    volumes:
+      - app-data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_PATH=/app/data/db/whisper_ui.db
+      - UPLOAD_DIR=/app/data/uploads
+      - OUTPUT_DIR=/app/data/outputs
+      - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
+      - COMPUTE_TYPE=${COMPUTE_TYPE:-int8_float16}
+      - DEVICE=${DEVICE:-cuda}
+      - BATCH_SIZE=${BATCH_SIZE:-4}
+      - LANGUAGE=${LANGUAGE:-zh}
+      - HF_TOKEN=${HF_TOKEN:-}
+    volumes:
+      - app-data:/app/data
+      - model-cache:/cache/huggingface
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+volumes:
+  app-data:
+  redis-data:
+  model-cache:
