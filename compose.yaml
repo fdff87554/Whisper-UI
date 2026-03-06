@@ -12,6 +12,8 @@ services:
       - DATABASE_PATH=/app/data/db/whisper_ui.db
       - UPLOAD_DIR=/app/data/uploads
       - OUTPUT_DIR=/app/data/outputs
+      - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
+      - LANGUAGE=${LANGUAGE:-zh}
     volumes:
       - app-data:/app/data
     depends_on:

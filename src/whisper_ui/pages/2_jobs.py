@@ -75,6 +75,9 @@ def job_list() -> None:
                                 st.toast(JOBS_RETRY_SUBMITTED.format(name=job.filename))
                                 st.rerun()
                             except Exception as e:
+                                job.status = JobStatus.FAILED
+                                job.error = str(e)[:1000]
+                                db.update_job(job)
                                 st.error(JOBS_RETRY_ERROR.format(error=e))
 
             if job.status in (JobStatus.QUEUED, JobStatus.PROCESSING):
