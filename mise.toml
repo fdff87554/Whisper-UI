@@ -1,0 +1,14 @@
+[tools]
+python = "3.12"
+node = "lts"
+ruff = "latest"
+yamlfmt = "latest"
+shfmt = "latest"
+shellcheck = "latest"
+taplo = "latest"
+"npm:prettier" = "latest"
+"npm:markdownlint-cli2" = "latest"
+
+[env]
+_.python.venv = { path = ".venv", create = true }
+PIP_INDEX_URL = "https://pypi.cs.nycu.edu.tw/simple/"
