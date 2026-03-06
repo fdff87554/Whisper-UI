@@ -46,7 +46,7 @@ def process_transcription(job_id: str) -> str:
             AlignStage(device=settings.device),
             DiarizeStage(hf_token=settings.hf_token, device=settings.device),
             AssignSpeakersStage(),
-            PostprocessStage(),
+            PostprocessStage(convert_to_traditional=(job.language == "zh")),
         ]
 
         def on_progress(progress: float, message: str) -> None:

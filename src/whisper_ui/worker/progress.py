@@ -33,6 +33,7 @@ class RedisProgressReporter:
                 "result_path": result_path,
             },
         )
+        self._redis.expire(self._key, 86400)
 
     def fail(self, error: str) -> None:
         self._redis.hset(
@@ -44,6 +45,7 @@ class RedisProgressReporter:
                 "error": error[:1000],
             },
         )
+        self._redis.expire(self._key, 86400)
 
     @staticmethod
     def get_progress(redis: Redis, job_id: str) -> dict[str, str]:
