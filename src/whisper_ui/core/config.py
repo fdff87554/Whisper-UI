@@ -35,9 +35,6 @@ class Settings(BaseSettings):
     # HuggingFace
     hf_token: str = ""
 
-    # Streamlit
-    max_upload_size_mb: int = 500
-
 
 def get_settings() -> Settings:
     return Settings()

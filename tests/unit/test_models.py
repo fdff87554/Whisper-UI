@@ -38,6 +38,28 @@ def test_transcript_result():
     assert result.duration == 1.0
 
 
+def test_transcript_result_to_dict():
+    result = TranscriptResult(
+        segments=[
+            Segment(start=0.0, end=1.5, text="Hello", speaker="SPEAKER_00"),
+            Segment(start=1.5, end=3.0, text="World"),
+        ],
+        language="en",
+        duration=3.0,
+    )
+    d = result.to_dict()
+    assert d["language"] == "en"
+    assert d["duration"] == 3.0
+    assert len(d["segments"]) == 2
+    assert d["segments"][0] == {
+        "start": 0.0,
+        "end": 1.5,
+        "text": "Hello",
+        "speaker": "SPEAKER_00",
+    }
+    assert d["segments"][1]["speaker"] is None
+
+
 def test_job_status_values():
     assert JobStatus.PENDING == "pending"
     assert JobStatus.COMPLETED == "completed"

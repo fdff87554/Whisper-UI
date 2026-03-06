@@ -18,4 +18,4 @@ jobs:
           ruff format --check .
           ruff check .
       - name: Test
-        run: pytest --tb=short -q
+        run: python -m pytest --tb=short -q

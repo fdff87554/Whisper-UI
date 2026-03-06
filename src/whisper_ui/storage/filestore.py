@@ -17,7 +17,7 @@ class FileStore:
     def save_upload(self, job_id: str, filename: str, data: bytes) -> Path:
         job_dir = self._upload_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
-        dest = job_dir / filename
+        dest = job_dir / Path(filename).name
         dest.write_bytes(data)
         return dest
 
@@ -25,20 +25,7 @@ class FileStore:
         job_dir = self._output_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
         dest = job_dir / "result.json"
-        payload = {
-            "language": result.language,
-            "duration": result.duration,
-            "segments": [
-                {
-                    "start": s.start,
-                    "end": s.end,
-                    "text": s.text,
-                    "speaker": s.speaker,
-                }
-                for s in result.segments
-            ],
-        }
-        dest.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        dest.write_text(json.dumps(result.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
         return dest
 
     def load_result(self, job_id: str) -> TranscriptResult | None:
@@ -54,7 +41,7 @@ class FileStore:
         )
 
     def get_upload_path(self, job_id: str, filename: str) -> Path:
-        return self._upload_dir / job_id / filename
+        return self._upload_dir / job_id / Path(filename).name
 
     def get_output_dir(self, job_id: str) -> Path:
         return self._output_dir / job_id

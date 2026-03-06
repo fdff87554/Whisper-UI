@@ -9,17 +9,17 @@ from whisper_ui.worker.progress import RedisProgressReporter
 
 st.header("Jobs")
 
-db = get_db()
-jobs = db.list_jobs(limit=50)
-
-if not jobs:
-    st.info("No jobs yet. Go to **Upload** to submit a file.")
-    st.stop()
-
 
 @st.fragment(run_every=2)
 def job_list() -> None:
+    db = get_db()
+    jobs = db.list_jobs(limit=50)
     redis = get_redis()
+
+    if not jobs:
+        st.info("No jobs yet. Go to **Upload** to submit a file.")
+        return
+
     for job in jobs:
         with st.container(border=True):
             col1, col2, col3 = st.columns([3, 1, 1])
