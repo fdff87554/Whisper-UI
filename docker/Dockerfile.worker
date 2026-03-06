@@ -25,6 +25,7 @@ COPY src/ ./src/
 COPY docker/entrypoint-worker.sh ./entrypoint-worker.sh
 RUN chmod +x ./entrypoint-worker.sh
 
+ARG PIP_INDEX_URL=https://pypi.org/simple/
 # Install with CUDA-enabled PyTorch from official index
 RUN python3 -m pip install --no-cache-dir ".[worker]" \
     --extra-index-url https://download.pytorch.org/whl/cu121

@@ -6,6 +6,7 @@ COPY pyproject.toml ./
 COPY src/ ./src/
 COPY .streamlit/ ./.streamlit/
 
+ARG PIP_INDEX_URL=https://pypi.org/simple/
 RUN pip install --no-cache-dir ".[frontend]"
 
 EXPOSE 8501
