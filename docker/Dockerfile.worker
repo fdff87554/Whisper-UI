@@ -4,21 +4,30 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /app
 
+# Install Python 3.12 via deadsnakes PPA (Ubuntu 22.04 only has 3.10)
 RUN apt-get update && \
+    apt-get install -y --no-install-recommends software-properties-common && \
+    add-apt-repository -y ppa:deadsnakes/ppa && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
-        python3.12 python3.12-venv python3-pip \
+        python3.12 python3.12-venv python3.12-dev \
         ffmpeg curl && \
     rm -rf /var/lib/apt/lists/*
 
+# Set Python 3.12 as default and install pip via ensurepip
 RUN ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
-    ln -sf /usr/bin/python3 /usr/bin/python
+    ln -sf /usr/bin/python3 /usr/bin/python && \
+    python3 -m ensurepip --upgrade && \
+    python3 -m pip install --upgrade pip
 
 COPY pyproject.toml ./
 COPY src/ ./src/
 COPY docker/entrypoint-worker.sh ./entrypoint-worker.sh
 RUN chmod +x ./entrypoint-worker.sh
 
-RUN pip install --no-cache-dir ".[worker]"
+# Install with CUDA-enabled PyTorch from official index
+RUN python3 -m pip install --no-cache-dir ".[worker]" \
+    --extra-index-url https://download.pytorch.org/whl/cu121
 
 ENV HF_HOME=/cache/huggingface
 ENV PYTHONUNBUFFERED=1
