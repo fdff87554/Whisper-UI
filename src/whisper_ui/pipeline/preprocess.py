@@ -7,6 +7,7 @@ from typing import Any
 
 from whisper_ui.core.exceptions import PreprocessError
 from whisper_ui.pipeline.base import ProgressCallback
+from whisper_ui.ui.labels import PREPROCESS_CONVERTING, PREPROCESS_DONE
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ class PreprocessStage:
             raise PreprocessError(f"Unsupported file format: {input_path.suffix}")
 
         if on_progress:
-            on_progress(0.0, "Converting audio to 16kHz mono WAV...")
+            on_progress(0.0, PREPROCESS_CONVERTING)
 
         output_path = input_path.with_suffix(".16k.wav")
 
@@ -53,7 +54,7 @@ class PreprocessStage:
         duration = _get_duration(output_path)
 
         if on_progress:
-            on_progress(1.0, "Audio preprocessing complete.")
+            on_progress(1.0, PREPROCESS_DONE)
 
         context["audio_path"] = str(output_path)
         context["duration"] = duration

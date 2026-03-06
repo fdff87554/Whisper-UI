@@ -15,6 +15,7 @@ from whisper_ui.pipeline.preprocess import PreprocessStage
 from whisper_ui.pipeline.transcribe import TranscribeStage
 from whisper_ui.storage.database import JobDatabase
 from whisper_ui.storage.filestore import FileStore
+from whisper_ui.ui.labels import PIPELINE_COMPLETE
 from whisper_ui.worker.progress import RedisProgressReporter
 
 logger = logging.getLogger(__name__)
@@ -39,7 +40,7 @@ def process_transcription(job_id: str) -> str:
         stages = [
             PreprocessStage(),
             TranscribeStage(
-                model_name=settings.whisper_model,
+                model_name=job.model_name,
                 compute_type=settings.compute_type,
                 device=settings.device,
             ),
@@ -69,7 +70,7 @@ def process_transcription(job_id: str) -> str:
 
         job.status = JobStatus.COMPLETED
         job.progress = 1.0
-        job.progress_message = "Complete"
+        job.progress_message = PIPELINE_COMPLETE
         job.result_path = str(result_path)
         job.duration = result.duration
         db.update_job(job)

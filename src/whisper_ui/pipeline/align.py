@@ -6,6 +6,7 @@ from typing import Any
 
 from whisper_ui.core.exceptions import AlignmentError
 from whisper_ui.pipeline.base import ProgressCallback
+from whisper_ui.ui.labels import ALIGN_DONE, ALIGN_LOADING, ALIGN_RUNNING
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ class AlignStage:
 
     def execute(self, context: dict[str, Any], on_progress: ProgressCallback | None = None) -> dict[str, Any]:
         if on_progress:
-            on_progress(0.0, "Loading alignment model...")
+            on_progress(0.0, ALIGN_LOADING)
 
         try:
             import whisperx
@@ -37,7 +38,7 @@ class AlignStage:
             )
 
             if on_progress:
-                on_progress(0.3, "Aligning timestamps...")
+                on_progress(0.3, ALIGN_RUNNING)
 
             result = whisperx.align(
                 transcription["segments"],
@@ -49,7 +50,7 @@ class AlignStage:
             )
 
             if on_progress:
-                on_progress(1.0, "Alignment complete.")
+                on_progress(1.0, ALIGN_DONE)
 
             context["aligned_result"] = result
             return context
