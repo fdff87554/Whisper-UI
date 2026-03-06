@@ -20,7 +20,7 @@ ENV PIP_INDEX_URL=${PIP_INDEX_URL}
 # Install whisperx without deps first to avoid its torch~=2.8.0 constraint
 # triggering a downgrade; torch 2.10.0 is backward-compatible.
 # Then install the remaining worker dependencies normally.
-RUN pip install --no-cache-dir --break-system-packages --no-deps "whisperx>=3.7.7,<3.9" && \
+RUN pip install --no-cache-dir --break-system-packages --no-deps "whisperx>=3.8,<3.9" && \
     pip install --no-cache-dir --break-system-packages ".[worker]"
 
 ENV HF_HOME=/cache/huggingface

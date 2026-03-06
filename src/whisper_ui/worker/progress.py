@@ -24,6 +24,7 @@ class RedisProgressReporter:
                 "status": "processing",
             },
         )
+        self._redis.expire(self._key, 7200)
 
     def complete(self, result_path: str) -> None:
         self._redis.hset(
