@@ -8,6 +8,7 @@ from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
 from whisper_ui.ui.labels import (
     UPLOAD_CHOOSE_FILE,
     UPLOAD_CONVERT_TRADITIONAL,
+    UPLOAD_CONVERT_TRADITIONAL_HELP,
     UPLOAD_DESCRIPTION,
     UPLOAD_DIARIZATION_HELP,
     UPLOAD_DIARIZATION_UNAVAILABLE,
@@ -71,6 +72,7 @@ with st.form("upload_form"):
         convert_to_traditional = st.checkbox(
             UPLOAD_CONVERT_TRADITIONAL,
             value=(language == "zh"),
+            help=UPLOAD_CONVERT_TRADITIONAL_HELP,
         )
 
     submitted = st.form_submit_button(UPLOAD_START)

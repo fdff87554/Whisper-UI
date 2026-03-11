@@ -14,6 +14,7 @@ services:
       - OUTPUT_DIR=/app/data/outputs
       - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
       - LANGUAGE=${LANGUAGE:-zh}
+      - HF_TOKEN=${HF_TOKEN:-}
     volumes:
       - app-data:/app/data
     depends_on:

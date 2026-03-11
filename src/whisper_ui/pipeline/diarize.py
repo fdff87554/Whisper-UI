@@ -10,6 +10,7 @@ from whisper_ui.core.messages import (
     DIARIZE_LOADING,
     DIARIZE_RUNNING,
     DIARIZE_SKIPPED,
+    DIARIZE_SKIPPED_DISABLED,
 )
 from whisper_ui.pipeline.base import ProgressCallback
 
@@ -17,9 +18,10 @@ logger = logging.getLogger(__name__)
 
 
 class DiarizeStage:
-    def __init__(self, hf_token: str = "", device: str = "cuda") -> None:
+    def __init__(self, hf_token: str = "", device: str = "cuda", *, enabled: bool = True) -> None:
         self._hf_token = hf_token
         self._device = device
+        self._enabled = enabled
         self._pipeline = None
 
     @property
@@ -27,6 +29,13 @@ class DiarizeStage:
         return "diarize"
 
     def execute(self, context: dict[str, Any], on_progress: ProgressCallback | None = None) -> dict[str, Any]:
+        if not self._enabled:
+            logger.info("Diarization disabled by user, skipping.")
+            context["diarize_result"] = None
+            if on_progress:
+                on_progress(1.0, DIARIZE_SKIPPED_DISABLED)
+            return context
+
         if not self._hf_token:
             logger.warning("No HF_TOKEN provided, skipping diarization.")
             context["diarize_result"] = None

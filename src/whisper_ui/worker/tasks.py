@@ -37,7 +37,6 @@ def process_transcription(job_id: str) -> str:
     db.update_job(job)
 
     try:
-        hf_token = settings.hf_token if job.enable_diarization else ""
         stages = [
             PreprocessStage(),
             TranscribeStage(
@@ -46,7 +45,11 @@ def process_transcription(job_id: str) -> str:
                 device=settings.device,
             ),
             AlignStage(device=settings.device),
-            DiarizeStage(hf_token=hf_token, device=settings.device),
+            DiarizeStage(
+                hf_token=settings.hf_token,
+                device=settings.device,
+                enabled=job.enable_diarization,
+            ),
             AssignSpeakersStage(),
             PostprocessStage(convert_to_traditional=job.convert_to_traditional),
         ]
