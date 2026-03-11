@@ -6,6 +6,80 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
+SUPPORTED_LANGUAGES: list[str] = [
+    "zh",
+    "en",
+    "ja",
+    "ko",
+    "fr",
+    "de",
+    "es",
+    "pt",
+    "it",
+    "nl",
+    "ru",
+    "pl",
+    "uk",
+    "ar",
+    "hi",
+    "th",
+    "vi",
+    "id",
+    "ms",
+    "tr",
+    "sv",
+    "da",
+    "no",
+    "fi",
+    "cs",
+    "sk",
+    "el",
+    "ro",
+    "hu",
+    "bg",
+    "hr",
+    "he",
+    "ca",
+    "ta",
+]
+
+LANGUAGE_LABELS: dict[str, str] = {
+    "zh": "中文 Chinese (zh)",
+    "en": "English (en)",
+    "ja": "日本語 Japanese (ja)",
+    "ko": "한국어 Korean (ko)",
+    "fr": "Français (fr)",
+    "de": "Deutsch (de)",
+    "es": "Español (es)",
+    "pt": "Português (pt)",
+    "it": "Italiano (it)",
+    "nl": "Nederlands (nl)",
+    "ru": "Русский (ru)",
+    "pl": "Polski (pl)",
+    "uk": "Українська (uk)",
+    "ar": "العربية (ar)",
+    "hi": "हिन्दी (hi)",
+    "th": "ไทย (th)",
+    "vi": "Tiếng Việt (vi)",
+    "id": "Bahasa Indonesia (id)",
+    "ms": "Bahasa Melayu (ms)",
+    "tr": "Türkçe (tr)",
+    "sv": "Svenska (sv)",
+    "da": "Dansk (da)",
+    "no": "Norsk (no)",
+    "fi": "Suomi (fi)",
+    "cs": "Čeština (cs)",
+    "sk": "Slovenčina (sk)",
+    "el": "Ελληνικά (el)",
+    "ro": "Română (ro)",
+    "hu": "Magyar (hu)",
+    "bg": "Български (bg)",
+    "hr": "Hrvatski (hr)",
+    "he": "עברית (he)",
+    "ca": "Català (ca)",
+    "ta": "தமிழ் (ta)",
+}
+
 WHISPER_MODELS: list[str] = [
     "tiny",
     "tiny.en",
@@ -59,6 +133,15 @@ class TranscriptResult:
             ],
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TranscriptResult:
+        segments = [Segment(**s) for s in data.get("segments", [])]
+        return cls(
+            segments=segments,
+            language=data.get("language", "zh"),
+            duration=data.get("duration", 0.0),
+        )
+
 
 @dataclass
 class Job:
@@ -71,6 +154,8 @@ class Job:
     language: str = "zh"
     model_name: str = "large-v3"
     num_speakers: int | None = None
+    enable_diarization: bool = True
+    convert_to_traditional: bool = True
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     error: str | None = None

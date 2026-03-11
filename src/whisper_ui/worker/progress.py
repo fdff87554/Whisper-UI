@@ -4,7 +4,7 @@ import logging
 
 from redis import Redis
 
-from whisper_ui.ui.labels import PIPELINE_COMPLETE
+from whisper_ui.core.messages import PIPELINE_COMPLETE
 
 logger = logging.getLogger(__name__)
 

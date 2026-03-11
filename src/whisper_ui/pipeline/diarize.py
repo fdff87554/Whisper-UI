@@ -5,16 +5,23 @@ import logging
 from typing import Any
 
 from whisper_ui.core.exceptions import DiarizationError
+from whisper_ui.core.messages import (
+    DIARIZE_DONE,
+    DIARIZE_LOADING,
+    DIARIZE_RUNNING,
+    DIARIZE_SKIPPED,
+    DIARIZE_SKIPPED_DISABLED,
+)
 from whisper_ui.pipeline.base import ProgressCallback
-from whisper_ui.ui.labels import DIARIZE_DONE, DIARIZE_LOADING, DIARIZE_RUNNING, DIARIZE_SKIPPED
 
 logger = logging.getLogger(__name__)
 
 
 class DiarizeStage:
-    def __init__(self, hf_token: str = "", device: str = "cuda") -> None:
+    def __init__(self, hf_token: str = "", device: str = "cuda", *, enabled: bool = True) -> None:
         self._hf_token = hf_token
         self._device = device
+        self._enabled = enabled
         self._pipeline = None
 
     @property
@@ -22,6 +29,13 @@ class DiarizeStage:
         return "diarize"
 
     def execute(self, context: dict[str, Any], on_progress: ProgressCallback | None = None) -> dict[str, Any]:
+        if not self._enabled:
+            logger.info("Diarization disabled by user, skipping.")
+            context["diarize_result"] = None
+            if on_progress:
+                on_progress(1.0, DIARIZE_SKIPPED_DISABLED)
+            return context
+
         if not self._hf_token:
             logger.warning("No HF_TOKEN provided, skipping diarization.")
             context["diarize_result"] = None
@@ -61,6 +75,14 @@ class DiarizeStage:
         except ImportError as err:
             raise DiarizationError("whisperx is not installed.") from err
         except Exception as e:
+            error_str = str(e)
+            if "401" in error_str or "Unauthorized" in error_str:
+                raise DiarizationError(
+                    f"Diarization failed (authorization error): {e}. "
+                    "Please verify your HF_TOKEN and accept the model agreements at: "
+                    "https://huggingface.co/pyannote/speaker-diarization-3.1 and "
+                    "https://huggingface.co/pyannote/segmentation-3.0"
+                ) from e
             raise DiarizationError(f"Diarization failed: {e}") from e
 
     def cleanup(self) -> None:

@@ -16,6 +16,11 @@ UPLOAD_CHOOSE_FILE = "選擇檔案"
 UPLOAD_LANGUAGE = "語言"
 UPLOAD_MODEL = "模型"
 UPLOAD_NUM_SPEAKERS = "說話者人數（0 = 自動偵測）"
+UPLOAD_ENABLE_DIARIZATION = "啟用說話者分離"
+UPLOAD_DIARIZATION_HELP = "需要 HuggingFace Token 並接受模型使用協議"
+UPLOAD_DIARIZATION_UNAVAILABLE = "說話者分離不可用（未設定 HF_TOKEN）"
+UPLOAD_CONVERT_TRADITIONAL = "轉換為繁體中文"
+UPLOAD_CONVERT_TRADITIONAL_HELP = "將簡體中文轉錄結果轉換為繁體中文（僅對中文生效）"
 UPLOAD_START = "開始轉錄"
 UPLOAD_SUBMITTED = "任務已提交：**{name}**"
 UPLOAD_GO_TO_JOBS = "前往**任務列表**頁面追蹤進度。"
@@ -33,6 +38,10 @@ JOBS_RETRY_CONFIRM = "確定要重新執行此任務嗎？"
 JOBS_RETRY_CONFIRM_BUTTON = "確認重新執行"
 JOBS_RETRY_SUBMITTED = "已重新提交任務：**{name}**"
 JOBS_RETRY_ERROR = "無法重新提交任務：{error}"
+JOBS_DELETE = "刪除"
+JOBS_DELETE_CONFIRM = "確定要刪除此任務嗎？此操作無法復原。"
+JOBS_DELETE_CONFIRM_BUTTON = "確認刪除"
+JOBS_DELETE_SUCCESS = "已刪除任務：**{name}**"
 
 # -- Viewer page --
 VIEWER_HEADER = "轉錄結果檢視器"
@@ -53,34 +62,3 @@ STATUS_LABELS: dict[str, str] = {
     "completed": "已完成",
     "failed": "失敗",
 }
-
-# -- Pipeline progress messages --
-PREPROCESS_CONVERTING = "正在將音訊轉換為 16kHz 單聲道 WAV..."
-PREPROCESS_DONE = "音訊預處理完成。"
-
-TRANSCRIBE_LOADING = "正在載入轉錄模型..."
-TRANSCRIBE_RUNNING = "正在轉錄音訊..."
-TRANSCRIBE_DONE = "轉錄完成。"
-
-ALIGN_LOADING = "正在載入對齊模型..."
-ALIGN_RUNNING = "正在對齊時間戳記..."
-ALIGN_DONE = "對齊完成。"
-
-DIARIZE_LOADING = "正在載入說話者分離模型..."
-DIARIZE_RUNNING = "正在進行說話者分離..."
-DIARIZE_DONE = "說話者分離完成。"
-DIARIZE_SKIPPED = "已跳過說話者分離（未提供 HF Token）。"
-
-ASSIGN_RUNNING = "正在分配說話者至段落..."
-ASSIGN_DONE = "說話者分配完成。"
-ASSIGN_SKIPPED = "已跳過說話者分配。"
-ASSIGN_FAILED = "說話者分配失敗，使用未分配的段落。"
-
-POSTPROCESS_RUNNING = "正在後處理結果..."
-POSTPROCESS_DONE = "後處理完成。"
-POSTPROCESS_EMPTY = "無結果可供後處理。"
-
-PIPELINE_COMPLETE = "完成"
-
-# -- Export --
-EXPORT_DOCX_HEADING = "轉錄結果"

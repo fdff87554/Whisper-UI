@@ -5,6 +5,7 @@ import logging
 from redis import Redis
 
 from whisper_ui.core.config import get_settings
+from whisper_ui.core.messages import PIPELINE_COMPLETE
 from whisper_ui.core.models import JobStatus
 from whisper_ui.pipeline.align import AlignStage
 from whisper_ui.pipeline.assign_speakers import AssignSpeakersStage
@@ -15,7 +16,6 @@ from whisper_ui.pipeline.preprocess import PreprocessStage
 from whisper_ui.pipeline.transcribe import TranscribeStage
 from whisper_ui.storage.database import JobDatabase
 from whisper_ui.storage.filestore import FileStore
-from whisper_ui.ui.labels import PIPELINE_COMPLETE
 from whisper_ui.worker.progress import RedisProgressReporter
 
 logger = logging.getLogger(__name__)
@@ -45,9 +45,13 @@ def process_transcription(job_id: str) -> str:
                 device=settings.device,
             ),
             AlignStage(device=settings.device),
-            DiarizeStage(hf_token=settings.hf_token, device=settings.device),
+            DiarizeStage(
+                hf_token=settings.hf_token,
+                device=settings.device,
+                enabled=job.enable_diarization,
+            ),
             AssignSpeakersStage(),
-            PostprocessStage(convert_to_traditional=(job.language == "zh")),
+            PostprocessStage(convert_to_traditional=job.convert_to_traditional),
         ]
 
         def on_progress(progress: float, message: str) -> None:

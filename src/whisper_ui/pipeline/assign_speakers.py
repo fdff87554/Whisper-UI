@@ -3,8 +3,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from whisper_ui.core.messages import ASSIGN_DONE, ASSIGN_FAILED, ASSIGN_RUNNING, ASSIGN_SKIPPED
 from whisper_ui.pipeline.base import ProgressCallback
-from whisper_ui.ui.labels import ASSIGN_DONE, ASSIGN_FAILED, ASSIGN_RUNNING, ASSIGN_SKIPPED
 
 logger = logging.getLogger(__name__)
 

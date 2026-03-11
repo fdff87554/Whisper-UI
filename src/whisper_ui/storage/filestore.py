@@ -4,7 +4,7 @@ import json
 import shutil
 from pathlib import Path
 
-from whisper_ui.core.models import Segment, TranscriptResult
+from whisper_ui.core.models import TranscriptResult
 
 
 class FileStore:
@@ -33,12 +33,7 @@ class FileStore:
         if not path.exists():
             return None
         data = json.loads(path.read_text(encoding="utf-8"))
-        segments = [Segment(**s) for s in data["segments"]]
-        return TranscriptResult(
-            segments=segments,
-            language=data.get("language", "zh"),
-            duration=data.get("duration", 0.0),
-        )
+        return TranscriptResult.from_dict(data)
 
     def get_upload_path(self, job_id: str, filename: str) -> Path:
         return self._upload_dir / job_id / Path(filename).name

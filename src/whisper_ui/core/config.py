@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 from pathlib import Path
 
 from pydantic import Field
@@ -36,5 +37,6 @@ class Settings(BaseSettings):
     hf_token: str = ""
 
 
+@functools.lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
