@@ -4,6 +4,13 @@ import logging
 
 from redis import Redis
 
+from whisper_ui.core.constants import (
+    ERROR_MAX_LENGTH,
+    MESSAGE_MAX_LENGTH,
+    REDIS_COMPLETED_EXPIRY,
+    REDIS_FAILED_EXPIRY,
+    REDIS_PROCESSING_EXPIRY,
+)
 from whisper_ui.core.messages import PIPELINE_COMPLETE
 
 logger = logging.getLogger(__name__)
@@ -24,7 +31,7 @@ class RedisProgressReporter:
                 "status": "processing",
             },
         )
-        self._redis.expire(self._key, 7200)
+        self._redis.expire(self._key, REDIS_PROCESSING_EXPIRY)
 
     def complete(self, result_path: str) -> None:
         self._redis.hset(
@@ -36,19 +43,19 @@ class RedisProgressReporter:
                 "result_path": result_path,
             },
         )
-        self._redis.expire(self._key, 86400)
+        self._redis.expire(self._key, REDIS_COMPLETED_EXPIRY)
 
     def fail(self, error: str) -> None:
         self._redis.hset(
             self._key,
             mapping={
                 "progress": "0.0",
-                "message": error[:500],
+                "message": error[:MESSAGE_MAX_LENGTH],
                 "status": "failed",
-                "error": error[:1000],
+                "error": error[:ERROR_MAX_LENGTH],
             },
         )
-        self._redis.expire(self._key, 86400)
+        self._redis.expire(self._key, REDIS_FAILED_EXPIRY)
 
     @staticmethod
     def get_progress(redis: Redis, job_id: str) -> dict[str, str]:

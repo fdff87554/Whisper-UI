@@ -4,6 +4,7 @@ import gc
 import logging
 from typing import Any
 
+from whisper_ui.core.device import release_gpu_memory
 from whisper_ui.core.exceptions import TranscriptionError
 from whisper_ui.core.messages import TRANSCRIBE_DONE, TRANSCRIBE_LOADING, TRANSCRIBE_RUNNING
 from whisper_ui.pipeline.base import ProgressCallback
@@ -63,10 +64,4 @@ class TranscribeStage:
             del self._model
             self._model = None
             gc.collect()
-            try:
-                import torch
-
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            except ImportError:
-                pass
+            release_gpu_memory()

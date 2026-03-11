@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from whisper_ui.core.constants import FFMPEG_CONVERT_TIMEOUT, FFPROBE_TIMEOUT, STDERR_MAX_LENGTH
 from whisper_ui.core.exceptions import PreprocessError
 from whisper_ui.core.messages import PREPROCESS_CONVERTING, PREPROCESS_DONE
 from whisper_ui.pipeline.base import ProgressCallback
@@ -43,9 +44,9 @@ class PreprocessStage:
                 "pcm_s16le",
                 str(output_path),
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=FFMPEG_CONVERT_TIMEOUT)
             if result.returncode != 0:
-                raise PreprocessError(f"FFmpeg failed: {result.stderr[:500]}")
+                raise PreprocessError(f"FFmpeg failed: {result.stderr[:STDERR_MAX_LENGTH]}")
         except FileNotFoundError as err:
             raise PreprocessError("FFmpeg not found. Please install FFmpeg.") from err
         except subprocess.TimeoutExpired as err:
@@ -79,7 +80,7 @@ def _get_duration(path: Path) -> float:
             ],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=FFPROBE_TIMEOUT,
         )
         return float(result.stdout.strip())
     except (ValueError, subprocess.TimeoutExpired, FileNotFoundError):

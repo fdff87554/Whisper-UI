@@ -5,6 +5,7 @@ import logging
 from redis import Redis
 
 from whisper_ui.core.config import get_settings
+from whisper_ui.core.constants import ERROR_DISPLAY_LENGTH, ERROR_MAX_LENGTH
 from whisper_ui.core.messages import PIPELINE_COMPLETE
 from whisper_ui.core.models import JobStatus
 from whisper_ui.pipeline.align import AlignStage
@@ -87,8 +88,8 @@ def process_transcription(job_id: str) -> str:
         error_msg = str(e)
         logger.exception("Job %s failed: %s", job_id, error_msg)
         job.status = JobStatus.FAILED
-        job.error = error_msg[:1000]
-        job.progress_message = f"Failed: {error_msg[:200]}"
+        job.error = error_msg[:ERROR_MAX_LENGTH]
+        job.progress_message = f"Failed: {error_msg[:ERROR_DISPLAY_LENGTH]}"
         db.update_job(job)
         reporter.fail(error_msg)
         return f"Job {job_id} failed: {error_msg}"

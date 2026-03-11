@@ -3,6 +3,13 @@ from __future__ import annotations
 import streamlit as st
 from rq import Queue
 
+from whisper_ui.core.constants import (
+    DEFAULT_JOB_LIST_LIMIT,
+    ERROR_DISPLAY_LENGTH,
+    ERROR_MAX_LENGTH,
+    JOB_ID_DISPLAY_LENGTH,
+    TIMESTAMP_DISPLAY_LENGTH,
+)
 from whisper_ui.core.models import JobStatus
 from whisper_ui.ui.components import render_job_status_badge, render_progress
 from whisper_ui.ui.labels import (
@@ -31,7 +38,7 @@ st.header(JOBS_HEADER)
 def job_list() -> None:
     db = get_db()
     filestore = get_filestore()
-    jobs = db.list_jobs(limit=50)
+    jobs = db.list_jobs(limit=DEFAULT_JOB_LIST_LIMIT)
     redis = get_redis()
 
     if not jobs:
@@ -44,7 +51,8 @@ def job_list() -> None:
 
             with col1:
                 st.markdown(f"**{job.filename}**")
-                st.caption(f"ID: {job.id[:8]}... | {job.language} | {job.model_name} | {job.created_at[:19]}")
+                job_ts = job.created_at[:TIMESTAMP_DISPLAY_LENGTH]
+                st.caption(f"ID: {job.id[:JOB_ID_DISPLAY_LENGTH]}... | {job.language} | {job.model_name} | {job_ts}")
 
             with col2:
                 render_job_status_badge(job.status)
@@ -81,7 +89,7 @@ def job_list() -> None:
                                 st.rerun()
                             except Exception as e:
                                 job.status = JobStatus.FAILED
-                                job.error = str(e)[:1000]
+                                job.error = str(e)[:ERROR_MAX_LENGTH]
                                 db.update_job(job)
                                 st.error(JOBS_RETRY_ERROR.format(error=e))
 
@@ -106,7 +114,7 @@ def job_list() -> None:
                 render_progress(progress, message)
 
             if job.status == JobStatus.FAILED and job.error:
-                st.error(JOBS_ERROR.format(error=job.error[:200]))
+                st.error(JOBS_ERROR.format(error=job.error[:ERROR_DISPLAY_LENGTH]))
 
 
 job_list()
