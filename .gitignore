@@ -43,6 +43,13 @@ node_modules/
 # mise
 .mise.local.toml
 
+# Markdown (ignore all, whitelist specific files)
+*.md
+!README.md
+!CONTRIBUTING.md
+!SECURITY.md
+!LICENSE.md
+
 # Project
 logs/
 tmp/
