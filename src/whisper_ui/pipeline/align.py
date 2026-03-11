@@ -5,8 +5,8 @@ import logging
 from typing import Any
 
 from whisper_ui.core.exceptions import AlignmentError
+from whisper_ui.core.messages import ALIGN_DONE, ALIGN_LOADING, ALIGN_RUNNING
 from whisper_ui.pipeline.base import ProgressCallback
-from whisper_ui.ui.labels import ALIGN_DONE, ALIGN_LOADING, ALIGN_RUNNING
 
 logger = logging.getLogger(__name__)
 

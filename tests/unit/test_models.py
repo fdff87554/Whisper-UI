@@ -60,6 +60,46 @@ def test_transcript_result_to_dict():
     assert d["segments"][1]["speaker"] is None
 
 
+def test_transcript_result_from_dict():
+    data = {
+        "language": "ja",
+        "duration": 5.5,
+        "segments": [
+            {"start": 0.0, "end": 2.0, "text": "Hello", "speaker": "SPEAKER_00"},
+            {"start": 2.0, "end": 5.5, "text": "World", "speaker": None},
+        ],
+    }
+    result = TranscriptResult.from_dict(data)
+    assert result.language == "ja"
+    assert result.duration == 5.5
+    assert len(result.segments) == 2
+    assert result.segments[0].text == "Hello"
+    assert result.segments[0].speaker == "SPEAKER_00"
+    assert result.segments[1].speaker is None
+
+
+def test_transcript_result_roundtrip():
+    original = TranscriptResult(
+        segments=[Segment(start=1.0, end=2.0, text="test", speaker="S1")],
+        language="en",
+        duration=2.0,
+    )
+    restored = TranscriptResult.from_dict(original.to_dict())
+    assert restored.language == original.language
+    assert restored.duration == original.duration
+    assert len(restored.segments) == len(original.segments)
+    assert restored.segments[0].text == original.segments[0].text
+
+
+def test_job_diarization_fields():
+    job = Job(enable_diarization=False, convert_to_traditional=False)
+    assert job.enable_diarization is False
+    assert job.convert_to_traditional is False
+    job2 = Job()
+    assert job2.enable_diarization is True
+    assert job2.convert_to_traditional is True
+
+
 def test_job_status_values():
     assert JobStatus.PENDING == "pending"
     assert JobStatus.COMPLETED == "completed"

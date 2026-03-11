@@ -6,6 +6,10 @@ from rq import Queue
 from whisper_ui.core.models import JobStatus
 from whisper_ui.ui.components import render_job_status_badge, render_progress
 from whisper_ui.ui.labels import (
+    JOBS_DELETE,
+    JOBS_DELETE_CONFIRM,
+    JOBS_DELETE_CONFIRM_BUTTON,
+    JOBS_DELETE_SUCCESS,
     JOBS_EMPTY,
     JOBS_ERROR,
     JOBS_HEADER,
@@ -17,7 +21,7 @@ from whisper_ui.ui.labels import (
     JOBS_VIEW,
     JOBS_WAITING,
 )
-from whisper_ui.ui.state import get_db, get_redis
+from whisper_ui.ui.state import get_db, get_filestore, get_redis
 from whisper_ui.worker.progress import RedisProgressReporter
 
 st.header(JOBS_HEADER)
@@ -26,6 +30,7 @@ st.header(JOBS_HEADER)
 @st.fragment(run_every=2)
 def job_list() -> None:
     db = get_db()
+    filestore = get_filestore()
     jobs = db.list_jobs(limit=50)
     redis = get_redis()
 
@@ -79,6 +84,20 @@ def job_list() -> None:
                                 job.error = str(e)[:1000]
                                 db.update_job(job)
                                 st.error(JOBS_RETRY_ERROR.format(error=e))
+
+                if job.status in (JobStatus.COMPLETED, JobStatus.FAILED):
+                    with st.popover(JOBS_DELETE, key=f"del_pop_{job.id}"):
+                        st.markdown(JOBS_DELETE_CONFIRM)
+                        if st.button(
+                            JOBS_DELETE_CONFIRM_BUTTON,
+                            key=f"del_confirm_{job.id}",
+                            type="primary",
+                        ):
+                            filestore.delete_job_files(job.id)
+                            db.delete_job(job.id)
+                            redis.delete(f"job:{job.id}")
+                            st.toast(JOBS_DELETE_SUCCESS.format(name=job.filename))
+                            st.rerun()
 
             if job.status in (JobStatus.QUEUED, JobStatus.PROCESSING):
                 progress_data = RedisProgressReporter.get_progress(redis, job.id)

@@ -12,7 +12,11 @@ services:
       - --server.address=0.0.0.0
       - --server.port=8501
       - --server.runOnSave=true
-  worker:
+  worker-gpu:
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+  worker-cpu:
     volumes:
       - ./src:/app/src
       - ./data:/app/data

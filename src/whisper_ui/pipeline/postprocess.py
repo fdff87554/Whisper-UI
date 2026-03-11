@@ -3,9 +3,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from whisper_ui.core.messages import POSTPROCESS_DONE, POSTPROCESS_EMPTY, POSTPROCESS_RUNNING
 from whisper_ui.core.models import Segment, TranscriptResult
 from whisper_ui.pipeline.base import ProgressCallback
-from whisper_ui.ui.labels import POSTPROCESS_DONE, POSTPROCESS_EMPTY, POSTPROCESS_RUNNING
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class PostprocessStage:
 
         segments = self._build_segments(raw)
 
-        if self._convert_to_traditional:
+        if self._convert_to_traditional and context.get("language") == "zh":
             segments = self._convert_chinese(segments)
 
         result = TranscriptResult(
