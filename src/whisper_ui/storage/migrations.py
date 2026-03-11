@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     language TEXT NOT NULL DEFAULT 'zh',
     model_name TEXT NOT NULL DEFAULT 'large-v3',
     num_speakers INTEGER,
+    enable_diarization INTEGER NOT NULL DEFAULT 1,
+    convert_to_traditional INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     error TEXT,
@@ -26,6 +28,8 @@ CREATE TABLE IF NOT EXISTS jobs (
 
 _MIGRATIONS: list[str] = [
     "ALTER TABLE jobs ADD COLUMN model_name TEXT NOT NULL DEFAULT 'large-v3'",
+    "ALTER TABLE jobs ADD COLUMN enable_diarization INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE jobs ADD COLUMN convert_to_traditional INTEGER NOT NULL DEFAULT 1",
 ]
 
 
@@ -40,5 +44,7 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         try:
             conn.execute(sql)
             conn.commit()
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as e:
+            if "duplicate column" in str(e).lower():
+                continue
+            raise

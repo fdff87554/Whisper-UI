@@ -117,6 +117,8 @@ class Job:
     language: str = "zh"
     model_name: str = "large-v3"
     num_speakers: int | None = None
+    enable_diarization: bool = True
+    convert_to_traditional: bool = True
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     error: str | None = None

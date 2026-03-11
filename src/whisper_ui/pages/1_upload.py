@@ -7,7 +7,11 @@ from whisper_ui.core.models import SUPPORTED_LANGUAGES, WHISPER_MODELS, Job, Job
 from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
 from whisper_ui.ui.labels import (
     UPLOAD_CHOOSE_FILE,
+    UPLOAD_CONVERT_TRADITIONAL,
     UPLOAD_DESCRIPTION,
+    UPLOAD_DIARIZATION_HELP,
+    UPLOAD_DIARIZATION_UNAVAILABLE,
+    UPLOAD_ENABLE_DIARIZATION,
     UPLOAD_GO_TO_JOBS,
     UPLOAD_HEADER,
     UPLOAD_LANGUAGE,
@@ -37,6 +41,7 @@ uploaded_file = st.file_uploader(
 
 default_model_index = WHISPER_MODELS.index(settings.whisper_model) if settings.whisper_model in WHISPER_MODELS else 0
 default_lang_index = SUPPORTED_LANGUAGES.index(settings.language) if settings.language in SUPPORTED_LANGUAGES else 0
+hf_token_available = bool(settings.hf_token)
 
 with st.form("upload_form"):
     col1, col2, col3 = st.columns(3)
@@ -52,6 +57,22 @@ with st.form("upload_form"):
             value=0,
         )
 
+    col_opt1, col_opt2 = st.columns(2)
+    with col_opt1:
+        enable_diarization = st.checkbox(
+            UPLOAD_ENABLE_DIARIZATION,
+            value=hf_token_available,
+            disabled=not hf_token_available,
+            help=UPLOAD_DIARIZATION_HELP,
+        )
+        if not hf_token_available:
+            st.caption(UPLOAD_DIARIZATION_UNAVAILABLE)
+    with col_opt2:
+        convert_to_traditional = st.checkbox(
+            UPLOAD_CONVERT_TRADITIONAL,
+            value=(language == "zh"),
+        )
+
     submitted = st.form_submit_button(UPLOAD_START)
 
 if submitted and uploaded_file is not None:
@@ -60,6 +81,8 @@ if submitted and uploaded_file is not None:
         language=language,
         model_name=model_name,
         num_speakers=num_speakers if num_speakers > 0 else None,
+        enable_diarization=enable_diarization,
+        convert_to_traditional=convert_to_traditional,
     )
 
     file_data = uploaded_file.read()

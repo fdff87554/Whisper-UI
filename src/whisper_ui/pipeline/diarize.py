@@ -66,6 +66,14 @@ class DiarizeStage:
         except ImportError as err:
             raise DiarizationError("whisperx is not installed.") from err
         except Exception as e:
+            error_str = str(e)
+            if "401" in error_str or "Unauthorized" in error_str:
+                raise DiarizationError(
+                    f"Diarization failed (authorization error): {e}. "
+                    "Please verify your HF_TOKEN and accept the model agreements at: "
+                    "https://huggingface.co/pyannote/speaker-diarization-3.1 and "
+                    "https://huggingface.co/pyannote/segmentation-3.0"
+                ) from e
             raise DiarizationError(f"Diarization failed: {e}") from e
 
     def cleanup(self) -> None:
