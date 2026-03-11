@@ -4,6 +4,7 @@ import gc
 import logging
 from typing import Any
 
+from whisper_ui.core.device import release_gpu_memory
 from whisper_ui.core.exceptions import DiarizationError
 from whisper_ui.core.messages import (
     DIARIZE_DONE,
@@ -90,10 +91,4 @@ class DiarizeStage:
             del self._pipeline
             self._pipeline = None
         gc.collect()
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except ImportError:
-            pass
+        release_gpu_memory()

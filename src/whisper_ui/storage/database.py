@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from whisper_ui.core.constants import DEFAULT_JOB_LIST_LIMIT, SQLITE_BUSY_TIMEOUT_MS
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.storage.migrations import init_db
 
@@ -41,7 +42,7 @@ class JobDatabase:
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA busy_timeout=5000")
+        self._conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
         init_db(self._conn)
 
     def close(self) -> None:
@@ -60,7 +61,7 @@ class JobDatabase:
             return None
         return _row_to_job(row)
 
-    def list_jobs(self, *, limit: int = 50, offset: int = 0) -> list[Job]:
+    def list_jobs(self, *, limit: int = DEFAULT_JOB_LIST_LIMIT, offset: int = 0) -> list[Job]:
         rows = self._conn.execute(
             "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ? OFFSET ?",
             (limit, offset),
