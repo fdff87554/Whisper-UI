@@ -4,6 +4,7 @@ import gc
 import logging
 from typing import Any
 
+from whisper_ui.core.device import release_gpu_memory
 from whisper_ui.core.exceptions import AlignmentError
 from whisper_ui.core.messages import ALIGN_DONE, ALIGN_LOADING, ALIGN_RUNNING
 from whisper_ui.pipeline.base import ProgressCallback
@@ -68,10 +69,4 @@ class AlignStage:
             del self._metadata
             self._metadata = None
         gc.collect()
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except ImportError:
-            pass
+        release_gpu_memory()
