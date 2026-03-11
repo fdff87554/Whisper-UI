@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     # Whisper
     whisper_model: str = "large-v3"
     compute_type: str = "int8_float16"
-    device: str = "cuda"
+    device: str = "auto"
     batch_size: int = 4
 
     # Language
@@ -39,4 +39,9 @@ class Settings(BaseSettings):
 
 @functools.lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    return Settings()
+    from whisper_ui.core.device import detect_device, validate_compute_type
+
+    settings = Settings()
+    resolved_device = detect_device(settings.device)
+    resolved_compute = validate_compute_type(resolved_device, settings.compute_type)
+    return settings.model_copy(update={"device": resolved_device, "compute_type": resolved_compute})

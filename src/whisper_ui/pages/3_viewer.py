@@ -4,6 +4,7 @@ from pathlib import Path
 
 import streamlit as st
 
+from whisper_ui.core.constants import DEFAULT_JOB_LIST_LIMIT, TIMESTAMP_DISPLAY_LENGTH
 from whisper_ui.core.models import JobStatus
 from whisper_ui.ui.components import render_download_buttons, render_transcript
 from whisper_ui.ui.labels import (
@@ -26,7 +27,7 @@ filestore = get_filestore()
 job_id = st.session_state.get("view_job_id")
 
 if not job_id:
-    jobs = db.list_jobs(limit=50)
+    jobs = db.list_jobs(limit=DEFAULT_JOB_LIST_LIMIT)
     completed_jobs = [j for j in jobs if j.status == JobStatus.COMPLETED]
     if not completed_jobs:
         st.info(VIEWER_NO_COMPLETED)
@@ -35,7 +36,7 @@ if not job_id:
     selected = st.selectbox(
         VIEWER_SELECT_JOB,
         options=completed_jobs,
-        format_func=lambda j: f"{j.filename} ({j.created_at[:19]})",
+        format_func=lambda j: f"{j.filename} ({j.created_at[:TIMESTAMP_DISPLAY_LENGTH]})",
     )
     if selected:
         job_id = selected.id

@@ -3,6 +3,7 @@ from __future__ import annotations
 import streamlit as st
 from rq import Queue
 
+from whisper_ui.core.constants import ERROR_MAX_LENGTH
 from whisper_ui.core.models import LANGUAGE_LABELS, SUPPORTED_LANGUAGES, WHISPER_MODELS, Job, JobStatus
 from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
 from whisper_ui.ui.labels import (
@@ -111,7 +112,7 @@ if submitted and uploaded_file is not None:
     except Exception as e:
         st.error(UPLOAD_QUEUE_ERROR.format(error=e))
         job.status = JobStatus.FAILED
-        job.error = str(e)[:1000]
+        job.error = str(e)[:ERROR_MAX_LENGTH]
         db.update_job(job)
 
 elif submitted and uploaded_file is None:
