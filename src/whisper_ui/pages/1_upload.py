@@ -3,7 +3,7 @@ from __future__ import annotations
 import streamlit as st
 from rq import Queue
 
-from whisper_ui.core.models import WHISPER_MODELS, Job, JobStatus
+from whisper_ui.core.models import SUPPORTED_LANGUAGES, WHISPER_MODELS, Job, JobStatus
 from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
 from whisper_ui.ui.labels import (
     UPLOAD_CHOOSE_FILE,
@@ -36,11 +36,12 @@ uploaded_file = st.file_uploader(
 )
 
 default_model_index = WHISPER_MODELS.index(settings.whisper_model) if settings.whisper_model in WHISPER_MODELS else 0
+default_lang_index = SUPPORTED_LANGUAGES.index(settings.language) if settings.language in SUPPORTED_LANGUAGES else 0
 
 with st.form("upload_form"):
     col1, col2, col3 = st.columns(3)
     with col1:
-        language = st.selectbox(UPLOAD_LANGUAGE, ["zh", "en", "ja", "ko", "fr", "de", "es"], index=0)
+        language = st.selectbox(UPLOAD_LANGUAGE, SUPPORTED_LANGUAGES, index=default_lang_index)
     with col2:
         model_name = st.selectbox(UPLOAD_MODEL, WHISPER_MODELS, index=default_model_index)
     with col3:

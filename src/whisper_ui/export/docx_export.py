@@ -4,8 +4,8 @@ import io
 import logging
 
 from whisper_ui.core.exceptions import ExportError
+from whisper_ui.core.messages import EXPORT_DOCX_HEADING
 from whisper_ui.core.models import TranscriptResult
-from whisper_ui.ui.labels import EXPORT_DOCX_HEADING
 
 logger = logging.getLogger(__name__)
 

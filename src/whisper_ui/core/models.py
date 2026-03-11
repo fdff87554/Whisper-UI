@@ -6,6 +6,43 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
+SUPPORTED_LANGUAGES: list[str] = [
+    "zh",
+    "en",
+    "ja",
+    "ko",
+    "fr",
+    "de",
+    "es",
+    "pt",
+    "it",
+    "nl",
+    "ru",
+    "pl",
+    "uk",
+    "ar",
+    "hi",
+    "th",
+    "vi",
+    "id",
+    "ms",
+    "tr",
+    "sv",
+    "da",
+    "no",
+    "fi",
+    "cs",
+    "sk",
+    "el",
+    "ro",
+    "hu",
+    "bg",
+    "hr",
+    "he",
+    "ca",
+    "ta",
+]
+
 WHISPER_MODELS: list[str] = [
     "tiny",
     "tiny.en",
@@ -58,6 +95,15 @@ class TranscriptResult:
                 for s in self.segments
             ],
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TranscriptResult:
+        segments = [Segment(**s) for s in data.get("segments", [])]
+        return cls(
+            segments=segments,
+            language=data.get("language", "zh"),
+            duration=data.get("duration", 0.0),
+        )
 
 
 @dataclass

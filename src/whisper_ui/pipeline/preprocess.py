@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from whisper_ui.core.exceptions import PreprocessError
+from whisper_ui.core.messages import PREPROCESS_CONVERTING, PREPROCESS_DONE
 from whisper_ui.pipeline.base import ProgressCallback
-from whisper_ui.ui.labels import PREPROCESS_CONVERTING, PREPROCESS_DONE
 
 logger = logging.getLogger(__name__)
 

@@ -5,6 +5,7 @@ import logging
 from redis import Redis
 
 from whisper_ui.core.config import get_settings
+from whisper_ui.core.messages import PIPELINE_COMPLETE
 from whisper_ui.core.models import JobStatus
 from whisper_ui.pipeline.align import AlignStage
 from whisper_ui.pipeline.assign_speakers import AssignSpeakersStage
@@ -15,7 +16,6 @@ from whisper_ui.pipeline.preprocess import PreprocessStage
 from whisper_ui.pipeline.transcribe import TranscribeStage
 from whisper_ui.storage.database import JobDatabase
 from whisper_ui.storage.filestore import FileStore
-from whisper_ui.ui.labels import PIPELINE_COMPLETE
 from whisper_ui.worker.progress import RedisProgressReporter
 
 logger = logging.getLogger(__name__)

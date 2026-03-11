@@ -5,8 +5,8 @@ import logging
 from typing import Any
 
 from whisper_ui.core.exceptions import TranscriptionError
+from whisper_ui.core.messages import TRANSCRIBE_DONE, TRANSCRIBE_LOADING, TRANSCRIBE_RUNNING
 from whisper_ui.pipeline.base import ProgressCallback
-from whisper_ui.ui.labels import TRANSCRIBE_DONE, TRANSCRIBE_LOADING, TRANSCRIBE_RUNNING
 
 logger = logging.getLogger(__name__)
 

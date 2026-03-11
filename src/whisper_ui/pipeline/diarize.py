@@ -5,8 +5,13 @@ import logging
 from typing import Any
 
 from whisper_ui.core.exceptions import DiarizationError
+from whisper_ui.core.messages import (
+    DIARIZE_DONE,
+    DIARIZE_LOADING,
+    DIARIZE_RUNNING,
+    DIARIZE_SKIPPED,
+)
 from whisper_ui.pipeline.base import ProgressCallback
-from whisper_ui.ui.labels import DIARIZE_DONE, DIARIZE_LOADING, DIARIZE_RUNNING, DIARIZE_SKIPPED
 
 logger = logging.getLogger(__name__)
 
