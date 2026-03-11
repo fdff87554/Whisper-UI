@@ -30,5 +30,14 @@ def test_postprocess_builds_segments():
     assert transcript.duration == 2.0
 
 
+def test_postprocess_skips_conversion_for_non_zh():
+    """convert_to_traditional=True should have no effect when language is not zh."""
+    stage = PostprocessStage(convert_to_traditional=True)
+    raw = {"segments": [{"start": 0.0, "end": 1.0, "text": "Hello world"}]}
+    context = {"final_result": raw, "language": "en", "duration": 1.0}
+    result = stage.execute(context)
+    assert result["transcript_result"].segments[0].text == "Hello world"
+
+
 def test_postprocess_name():
     assert PostprocessStage().name == "postprocess"

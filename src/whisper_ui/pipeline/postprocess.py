@@ -32,7 +32,7 @@ class PostprocessStage:
 
         segments = self._build_segments(raw)
 
-        if self._convert_to_traditional:
+        if self._convert_to_traditional and context.get("language") == "zh":
             segments = self._convert_chinese(segments)
 
         result = TranscriptResult(

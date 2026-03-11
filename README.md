@@ -59,8 +59,8 @@ docker compose --profile gpu up -d
 
 ```bash
 cp .env.example .env
-# Edit .env: adjust WHISPER_MODEL (smaller models like 'base' or 'small'
-# are recommended for CPU)
+# Edit .env: uncomment and set WHISPER_MODEL=base
+# (smaller models like 'base' or 'small' are recommended for CPU)
 
 docker compose --profile cpu up -d
 ```
