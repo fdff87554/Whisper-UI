@@ -67,6 +67,29 @@ docker compose --profile cpu up -d
 
 Open <http://localhost:8501> in your browser.
 
+### Pre-built Images
+
+Pre-built Docker images are published to GHCR on each release.
+`docker compose up` pulls them automatically; if unavailable, it falls back to a local build.
+
+| Image | Description |
+| ----- | ----------- |
+| `ghcr.io/fdff87554/whisper-ui-frontend` | Streamlit web interface |
+| `ghcr.io/fdff87554/whisper-ui-worker` | GPU worker (CUDA) |
+| `ghcr.io/fdff87554/whisper-ui-worker-cpu` | CPU worker |
+
+**Pin a specific version** by setting `WHISPER_UI_VERSION` in your `.env` file:
+
+```bash
+WHISPER_UI_VERSION=0.1.0
+```
+
+**Build locally** instead of pulling (optional):
+
+```bash
+docker compose --profile gpu build
+```
+
 ## Configuration
 
 All settings are configured via environment variables (`.env` file):
@@ -80,6 +103,7 @@ All settings are configured via environment variables (`.env` file):
 | `LANGUAGE`      | `zh`                                | Default language code                        |
 | `HF_TOKEN`      | (empty)                             | HuggingFace token for speaker diarization    |
 | `PIP_INDEX_URL` | (empty)                             | Custom PyPI mirror for Docker builds         |
+| `WHISPER_UI_VERSION` | `latest`                       | Docker image version tag to pull             |
 
 **Whisper models:** `tiny`, `tiny.en`, `base`, `base.en`, `small`, `small.en`, `medium`, `medium.en`, `large-v1`, `large-v2`, `large-v3`, `large-v3-turbo`
 
