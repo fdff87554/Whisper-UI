@@ -1,6 +1,7 @@
 name: Docker Publish
 on:
   push:
+    branches: [main]
     tags:
       - "v*"
 env:
@@ -18,14 +19,21 @@ jobs:
             dockerfile: docker/Dockerfile.frontend
           - image: whisper-ui-worker
             dockerfile: docker/Dockerfile.worker
+          - image: whisper-ui-worker-cpu
+            dockerfile: docker/Dockerfile.worker.cpu
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -34,6 +42,9 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=edge,branch=main
+
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
@@ -42,3 +53,5 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}:buildcache,mode=max
