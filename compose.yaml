@@ -31,7 +31,8 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
-  worker:
+  worker-gpu:
+    profiles: [gpu]
     build:
       context: .
       dockerfile: docker/Dockerfile.worker
@@ -44,7 +45,7 @@ services:
       - OUTPUT_DIR=/app/data/outputs
       - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
       - COMPUTE_TYPE=${COMPUTE_TYPE:-int8_float16}
-      - DEVICE=${DEVICE:-cuda}
+      - DEVICE=cuda
       - BATCH_SIZE=${BATCH_SIZE:-2}
       - LANGUAGE=${LANGUAGE:-zh}
       - HF_TOKEN=${HF_TOKEN:-}
@@ -61,6 +62,31 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+    restart: unless-stopped
+  worker-cpu:
+    profiles: [cpu]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker.cpu
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_PATH=/app/data/db/whisper_ui.db
+      - UPLOAD_DIR=/app/data/uploads
+      - OUTPUT_DIR=/app/data/outputs
+      - WHISPER_MODEL=${WHISPER_MODEL:-base}
+      - COMPUTE_TYPE=${COMPUTE_TYPE:-int8}
+      - DEVICE=cpu
+      - BATCH_SIZE=${BATCH_SIZE:-4}
+      - LANGUAGE=${LANGUAGE:-zh}
+      - HF_TOKEN=${HF_TOKEN:-}
+    volumes:
+      - app-data:/app/data
+      - model-cache:/cache/huggingface
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 volumes:
   app-data:
