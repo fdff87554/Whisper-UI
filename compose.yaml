@@ -46,7 +46,7 @@ services:
       - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
       - COMPUTE_TYPE=${COMPUTE_TYPE:-int8_float16}
       - DEVICE=cuda
-      - BATCH_SIZE=${BATCH_SIZE:-2}
+      - BATCH_SIZE=${BATCH_SIZE:-4}
       - LANGUAGE=${LANGUAGE:-zh}
       - HF_TOKEN=${HF_TOKEN:-}
     volumes:
