@@ -69,8 +69,8 @@ Open <http://localhost:8501> in your browser.
 
 ### Pre-built Images
 
-Pre-built Docker images are available on GHCR — no local build required.
-`docker compose up` automatically pulls them if no local image exists.
+Pre-built Docker images are published to GHCR on each release.
+`docker compose up` pulls them automatically; if unavailable, it falls back to a local build.
 
 | Image | Description |
 | ----- | ----------- |
