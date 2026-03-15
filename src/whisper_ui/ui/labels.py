@@ -28,6 +28,10 @@ UPLOAD_QUEUE_ERROR = "無法提交任務至佇列：{error}"
 UPLOAD_NO_FILE = "請先上傳檔案。"
 UPLOAD_BATCH_SUBMITTED = "已提交 {count} 個任務"
 UPLOAD_BATCH_EXCEEDS_LIMIT = "最多一次上傳 {limit} 個檔案，目前已選 {count} 個。"
+UPLOAD_TAB_FILES = "選擇檔案"
+UPLOAD_TAB_FOLDER = "選擇資料夾"
+UPLOAD_CHOOSE_FOLDER = "選擇資料夾"
+UPLOAD_FOLDER_DESCRIPTION = "選擇包含音訊或影片檔案的資料夾，將自動篩選支援的格式並批次轉錄。"
 
 # -- Jobs page --
 JOBS_HEADER = "任務列表"

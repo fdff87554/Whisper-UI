@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import PurePosixPath
 
 import streamlit as st
 from rq import Queue
@@ -12,12 +13,14 @@ from whisper_ui.ui.labels import (
     UPLOAD_BATCH_EXCEEDS_LIMIT,
     UPLOAD_BATCH_SUBMITTED,
     UPLOAD_CHOOSE_FILE,
+    UPLOAD_CHOOSE_FOLDER,
     UPLOAD_CONVERT_TRADITIONAL,
     UPLOAD_CONVERT_TRADITIONAL_HELP,
     UPLOAD_DESCRIPTION,
     UPLOAD_DIARIZATION_HELP,
     UPLOAD_DIARIZATION_UNAVAILABLE,
     UPLOAD_ENABLE_DIARIZATION,
+    UPLOAD_FOLDER_DESCRIPTION,
     UPLOAD_GO_TO_JOBS,
     UPLOAD_HEADER,
     UPLOAD_LANGUAGE,
@@ -28,6 +31,8 @@ from whisper_ui.ui.labels import (
     UPLOAD_START,
     UPLOAD_SUBMITTED,
     UPLOAD_SUPPORTED_FORMATS,
+    UPLOAD_TAB_FILES,
+    UPLOAD_TAB_FOLDER,
 )
 from whisper_ui.ui.state import get_config, get_db, get_filestore, get_redis
 
@@ -40,11 +45,27 @@ filestore = get_filestore()
 st.markdown(UPLOAD_DESCRIPTION)
 st.caption(UPLOAD_SUPPORTED_FORMATS.format(formats=", ".join(sorted(SUPPORTED_EXTENSIONS))))
 
-uploaded_files = st.file_uploader(
-    UPLOAD_CHOOSE_FILE,
-    type=[ext.lstrip(".") for ext in SUPPORTED_EXTENSIONS],
-    accept_multiple_files=True,
-)
+_allowed_types = [ext.lstrip(".") for ext in SUPPORTED_EXTENSIONS]
+tab_files, tab_folder = st.tabs([UPLOAD_TAB_FILES, UPLOAD_TAB_FOLDER], on_change="rerun")
+
+uploaded_files = None
+if tab_files.open:
+    with tab_files:
+        uploaded_files = st.file_uploader(
+            UPLOAD_CHOOSE_FILE,
+            type=_allowed_types,
+            accept_multiple_files=True,
+            key="uploader_files",
+        )
+if tab_folder.open:
+    with tab_folder:
+        st.caption(UPLOAD_FOLDER_DESCRIPTION)
+        uploaded_files = st.file_uploader(
+            UPLOAD_CHOOSE_FOLDER,
+            type=_allowed_types,
+            accept_multiple_files="directory",
+            key="uploader_folder",
+        )
 
 default_model_index = WHISPER_MODELS.index(settings.whisper_model) if settings.whisper_model in WHISPER_MODELS else 0
 default_lang_index = SUPPORTED_LANGUAGES.index(settings.language) if settings.language in SUPPORTED_LANGUAGES else 0
@@ -102,8 +123,9 @@ if submitted and uploaded_files:
         else:
             submitted_count = 0
             for uploaded_file in uploaded_files:
+                display_name = PurePosixPath(uploaded_file.name).name
                 job = Job(
-                    filename=uploaded_file.name,
+                    filename=display_name,
                     language=language,
                     model_name=model_name,
                     num_speakers=num_speakers if num_speakers > 0 else None,
@@ -113,7 +135,7 @@ if submitted and uploaded_files:
                 )
 
                 file_data = uploaded_file.read()
-                dest = filestore.save_upload(job.id, uploaded_file.name, file_data)
+                dest = filestore.save_upload(job.id, display_name, file_data)
                 job.filepath = str(dest)
                 job.status = JobStatus.QUEUED
                 db.insert_job(job)
@@ -133,7 +155,7 @@ if submitted and uploaded_files:
 
             if submitted_count > 0:
                 if submitted_count == 1:
-                    st.success(UPLOAD_SUBMITTED.format(name=uploaded_files[0].name))
+                    st.success(UPLOAD_SUBMITTED.format(name=PurePosixPath(uploaded_files[0].name).name))
                 else:
                     st.success(UPLOAD_BATCH_SUBMITTED.format(count=submitted_count))
                 st.info(UPLOAD_GO_TO_JOBS)
