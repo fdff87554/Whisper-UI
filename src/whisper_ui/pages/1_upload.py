@@ -46,25 +46,26 @@ st.markdown(UPLOAD_DESCRIPTION)
 st.caption(UPLOAD_SUPPORTED_FORMATS.format(formats=", ".join(sorted(SUPPORTED_EXTENSIONS))))
 
 _allowed_types = [ext.lstrip(".") for ext in SUPPORTED_EXTENSIONS]
-tab_files, tab_folder = st.tabs([UPLOAD_TAB_FILES, UPLOAD_TAB_FOLDER])
-with tab_files:
-    file_uploads = st.file_uploader(
-        UPLOAD_CHOOSE_FILE,
-        type=_allowed_types,
-        accept_multiple_files=True,
-        key="uploader_files",
-    )
-with tab_folder:
-    st.caption(UPLOAD_FOLDER_DESCRIPTION)
-    folder_uploads = st.file_uploader(
-        UPLOAD_CHOOSE_FOLDER,
-        type=_allowed_types,
-        accept_multiple_files="directory",
-        key="uploader_folder",
-    )
+tab_files, tab_folder = st.tabs([UPLOAD_TAB_FILES, UPLOAD_TAB_FOLDER], on_change="rerun")
 
-uploaded_files = file_uploads or folder_uploads
-is_folder_upload = bool(folder_uploads and not file_uploads)
+uploaded_files = None
+if tab_files.open:
+    with tab_files:
+        uploaded_files = st.file_uploader(
+            UPLOAD_CHOOSE_FILE,
+            type=_allowed_types,
+            accept_multiple_files=True,
+            key="uploader_files",
+        )
+if tab_folder.open:
+    with tab_folder:
+        st.caption(UPLOAD_FOLDER_DESCRIPTION)
+        uploaded_files = st.file_uploader(
+            UPLOAD_CHOOSE_FOLDER,
+            type=_allowed_types,
+            accept_multiple_files="directory",
+            key="uploader_folder",
+        )
 
 default_model_index = WHISPER_MODELS.index(settings.whisper_model) if settings.whisper_model in WHISPER_MODELS else 0
 default_lang_index = SUPPORTED_LANGUAGES.index(settings.language) if settings.language in SUPPORTED_LANGUAGES else 0
@@ -122,7 +123,7 @@ if submitted and uploaded_files:
         else:
             submitted_count = 0
             for uploaded_file in uploaded_files:
-                display_name = PurePosixPath(uploaded_file.name).name if is_folder_upload else uploaded_file.name
+                display_name = PurePosixPath(uploaded_file.name).name
                 job = Job(
                     filename=display_name,
                     language=language,
@@ -154,8 +155,7 @@ if submitted and uploaded_files:
 
             if submitted_count > 0:
                 if submitted_count == 1:
-                    name = PurePosixPath(uploaded_files[0].name).name if is_folder_upload else uploaded_files[0].name
-                    st.success(UPLOAD_SUBMITTED.format(name=name))
+                    st.success(UPLOAD_SUBMITTED.format(name=PurePosixPath(uploaded_files[0].name).name))
                 else:
                     st.success(UPLOAD_BATCH_SUBMITTED.format(count=submitted_count))
                 st.info(UPLOAD_GO_TO_JOBS)
