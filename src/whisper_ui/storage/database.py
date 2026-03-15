@@ -24,6 +24,7 @@ _JOB_COLUMNS = [
     "error",
     "result_path",
     "duration",
+    "batch_id",
 ]
 
 
@@ -75,6 +76,13 @@ class JobDatabase:
         values.append(job.id)
         self._conn.execute(f"UPDATE jobs SET {set_clause} WHERE id = ?", values)
         self._conn.commit()
+
+    def list_jobs_by_batch(self, batch_id: str) -> list[Job]:
+        rows = self._conn.execute(
+            "SELECT * FROM jobs WHERE batch_id = ? ORDER BY created_at ASC",
+            (batch_id,),
+        ).fetchall()
+        return [_row_to_job(r) for r in rows]
 
     def delete_job(self, job_id: str) -> None:
         self._conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
