@@ -52,6 +52,7 @@ JOBS_BATCH_RETRY_ALL_CONFIRM_BUTTON = "確認全部重試"
 JOBS_BATCH_DELETE_ALL = "全部刪除"
 JOBS_BATCH_DELETE_ALL_CONFIRM = "確定要刪除此批次中所有任務嗎？此操作無法復原。"
 JOBS_BATCH_DELETE_ALL_CONFIRM_BUTTON = "確認全部刪除"
+JOBS_BATCH_RETRY_ALL_SUBMITTED = "已重新提交 {count} 個失敗任務"
 JOBS_BATCH_DELETE_ALL_SUCCESS = "已刪除整個批次（{count} 個任務）"
 
 # -- Viewer page --

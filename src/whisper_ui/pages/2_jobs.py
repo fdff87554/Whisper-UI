@@ -24,6 +24,7 @@ from whisper_ui.ui.labels import (
     JOBS_BATCH_RETRY_ALL,
     JOBS_BATCH_RETRY_ALL_CONFIRM,
     JOBS_BATCH_RETRY_ALL_CONFIRM_BUTTON,
+    JOBS_BATCH_RETRY_ALL_SUBMITTED,
     JOBS_DELETE,
     JOBS_DELETE_CONFIRM,
     JOBS_DELETE_CONFIRM_BUTTON,
@@ -45,13 +46,13 @@ from whisper_ui.worker.progress import RedisProgressReporter
 st.header(JOBS_HEADER)
 
 
-def _group_jobs_by_batch(jobs: list[Job]) -> OrderedDict[str | None, list[Job]]:
+def _group_jobs_by_batch(jobs: list[Job]) -> OrderedDict[str, list[Job]]:
     """Group jobs by batch_id, preserving display order.
 
     Jobs with batch_id=None are each placed in their own group keyed by
     their job id (prefixed with '_single:' to avoid collision with real batch ids).
     """
-    groups: OrderedDict[str | None, list[Job]] = OrderedDict()
+    groups: OrderedDict[str, list[Job]] = OrderedDict()
     for job in jobs:
         if job.batch_id is not None:
             groups.setdefault(job.batch_id, []).append(job)
@@ -110,7 +111,8 @@ def _render_job_row(job: Job, db, filestore, redis) -> None:
         st.error(JOBS_ERROR.format(error=job.error[:ERROR_DISPLAY_LENGTH]))
 
 
-def _retry_job(job: Job, db, redis) -> None:
+def _retry_job(job: Job, db, redis, *, rerun: bool = True) -> bool:
+    """Retry a failed job. Returns True if successfully enqueued."""
     try:
         job.status = JobStatus.QUEUED
         job.error = None
@@ -126,20 +128,24 @@ def _retry_job(job: Job, db, redis) -> None:
             job.id,
             job_timeout="1h",
         )
-        st.toast(JOBS_RETRY_SUBMITTED.format(name=job.filename))
-        st.rerun()
+        if rerun:
+            st.toast(JOBS_RETRY_SUBMITTED.format(name=job.filename))
+            st.rerun()
+        return True
     except Exception as e:
         job.status = JobStatus.FAILED
         job.error = str(e)[:ERROR_MAX_LENGTH]
         db.update_job(job)
         st.error(JOBS_RETRY_ERROR.format(error=e))
+        return False
 
 
-def _render_batch_header(batch_jobs: list[Job], batch_id: str, db, filestore, redis) -> None:
-    completed = sum(1 for j in batch_jobs if j.status == JobStatus.COMPLETED)
-    failed = sum(1 for j in batch_jobs if j.status == JobStatus.FAILED)
-    total = len(batch_jobs)
-    all_done = all(j.status in (JobStatus.COMPLETED, JobStatus.FAILED) for j in batch_jobs)
+def _render_batch_header(batch_id: str, db, filestore, redis) -> None:
+    all_batch_jobs = db.list_jobs_by_batch(batch_id)
+    completed = sum(1 for j in all_batch_jobs if j.status == JobStatus.COMPLETED)
+    failed = sum(1 for j in all_batch_jobs if j.status == JobStatus.FAILED)
+    total = len(all_batch_jobs)
+    all_done = all(j.status in (JobStatus.COMPLETED, JobStatus.FAILED) for j in all_batch_jobs)
 
     col1, col2, col3 = st.columns([3, 1, 1])
     with col1:
@@ -154,9 +160,14 @@ def _render_batch_header(batch_jobs: list[Job], batch_id: str, db, filestore, re
                     key=f"batch_retry_confirm_{batch_id}",
                     type="primary",
                 ):
-                    for j in batch_jobs:
-                        if j.status == JobStatus.FAILED:
-                            _retry_job(j, db, redis)
+                    retried = sum(
+                        1
+                        for j in all_batch_jobs
+                        if j.status == JobStatus.FAILED and _retry_job(j, db, redis, rerun=False)
+                    )
+                    if retried > 0:
+                        st.toast(JOBS_BATCH_RETRY_ALL_SUBMITTED.format(count=retried))
+                    st.rerun()
     with col3:
         if all_done:
             with st.popover(JOBS_BATCH_DELETE_ALL, key=f"batch_del_{batch_id}"):
@@ -166,7 +177,7 @@ def _render_batch_header(batch_jobs: list[Job], batch_id: str, db, filestore, re
                     key=f"batch_del_confirm_{batch_id}",
                     type="primary",
                 ):
-                    for j in batch_jobs:
+                    for j in all_batch_jobs:
                         filestore.delete_job_files(j.id)
                         db.delete_job(j.id)
                         redis.delete(f"job:{j.id}")
@@ -192,7 +203,7 @@ def job_list() -> None:
 
         if is_batch and len(group_jobs) > 1:
             with st.container(border=True):
-                _render_batch_header(group_jobs, str(group_key), db, filestore, redis)
+                _render_batch_header(str(group_key), db, filestore, redis)
                 for job in group_jobs:
                     with st.container(border=True):
                         _render_job_row(job, db, filestore, redis)
