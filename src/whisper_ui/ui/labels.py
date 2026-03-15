@@ -32,6 +32,8 @@ UPLOAD_TAB_FILES = "選擇檔案"
 UPLOAD_TAB_FOLDER = "選擇資料夾"
 UPLOAD_CHOOSE_FOLDER = "選擇資料夾"
 UPLOAD_FOLDER_DESCRIPTION = "選擇包含音訊或影片檔案的資料夾，將自動篩選支援的格式並批次轉錄。"
+UPLOAD_FOLDER_FILTERED = "已自動篩選：略過 {skipped} 個不支援的檔案，保留 {remaining} 個支援的檔案。"
+UPLOAD_NO_SUPPORTED_FILES = "所選資料夾中沒有支援格式的檔案。"
 
 # -- Jobs page --
 JOBS_HEADER = "任務列表"
