@@ -201,7 +201,7 @@ def job_list() -> None:
     for group_key, group_jobs in groups.items():
         is_batch = not str(group_key).startswith("_single:")
 
-        if is_batch and len(group_jobs) > 1:
+        if is_batch:
             with st.container(border=True):
                 _render_batch_header(str(group_key), db, filestore, redis)
                 for job in group_jobs:
