@@ -50,3 +50,32 @@ def test_list_jobs_with_limit(db: JobDatabase):
         db.insert_job(Job(filename=f"file{i}.mp3", filepath=f"/tmp/file{i}.mp3"))
     jobs = db.list_jobs(limit=2)
     assert len(jobs) == 2
+
+
+def test_row_to_job_ignores_unknown_db_fields(db: JobDatabase):
+    """Simulate a version mismatch where the DB has columns the Job dataclass doesn't know about."""
+    job = Job(filename="test.mp3", filepath="/tmp/test.mp3")
+    db.insert_job(job)
+
+    # Add an unknown column to the jobs table (simulates a newer frontend schema)
+    db._conn.execute("ALTER TABLE jobs ADD COLUMN future_field TEXT DEFAULT 'hello'")
+    db._conn.commit()
+
+    fetched = db.get_job(job.id)
+    assert fetched is not None
+    assert fetched.filename == "test.mp3"
+    assert fetched.status == JobStatus.PENDING
+    assert not hasattr(fetched, "future_field")
+
+
+def test_list_jobs_ignores_unknown_db_fields(db: JobDatabase):
+    """Ensure list_jobs also handles unknown DB columns gracefully."""
+    db.insert_job(Job(filename="a.mp3", filepath="/tmp/a.mp3"))
+    db.insert_job(Job(filename="b.mp3", filepath="/tmp/b.mp3"))
+
+    db._conn.execute("ALTER TABLE jobs ADD COLUMN future_field TEXT DEFAULT 'x'")
+    db._conn.commit()
+
+    jobs = db.list_jobs()
+    assert len(jobs) == 2
+    assert all(j.filename in ("a.mp3", "b.mp3") for j in jobs)

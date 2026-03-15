@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import dataclasses
+import logging
 import sqlite3
 from pathlib import Path
 
 from whisper_ui.core.constants import DEFAULT_JOB_LIST_LIMIT, SQLITE_BUSY_TIMEOUT_MS
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.storage.migrations import init_db
+
+logger = logging.getLogger(__name__)
 
 _JOB_COLUMNS = [
     "id",
@@ -28,8 +32,15 @@ _JOB_COLUMNS = [
 ]
 
 
+_JOB_FIELD_NAMES = {f.name for f in dataclasses.fields(Job)}
+
+
 def _row_to_job(row: sqlite3.Row) -> Job:
     d = dict(row)
+    unknown = d.keys() - _JOB_FIELD_NAMES
+    if unknown:
+        logger.warning("Job %s: ignoring unknown DB fields (version mismatch?): %s", d.get("id"), unknown)
+        d = {k: v for k, v in d.items() if k in _JOB_FIELD_NAMES}
     d["status"] = JobStatus(d["status"])
     d["enable_diarization"] = bool(d.get("enable_diarization", 1))
     d["convert_to_traditional"] = bool(d.get("convert_to_traditional", 1))
