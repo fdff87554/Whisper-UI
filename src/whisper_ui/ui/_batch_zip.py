@@ -20,8 +20,7 @@ def create_batch_zip(
     """
     exporter = get_exporter(format_name)
     buf = io.BytesIO()
-    seen_names: dict[str, int] = {}
-    count = 0
+    used_filenames: set[str] = set()
 
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for job in jobs:
@@ -31,12 +30,12 @@ def create_batch_zip(
             if result is None:
                 continue
             base = Path(job.filename).stem
-            if base in seen_names:
-                seen_names[base] += 1
-                base = f"{base} ({seen_names[base]})"
-            else:
-                seen_names[base] = 0
-            zf.writestr(f"{base}{exporter.file_extension}", exporter.export(result))
-            count += 1
+            filename = f"{base}{exporter.file_extension}"
+            counter = 1
+            while filename in used_filenames:
+                filename = f"{base} ({counter}){exporter.file_extension}"
+                counter += 1
+            used_filenames.add(filename)
+            zf.writestr(filename, exporter.export(result))
 
-    return buf.getvalue() if count > 0 else None
+    return buf.getvalue() if used_filenames else None
