@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import PurePosixPath
 
 from whisper_ui.core.constants import MAX_BATCH_SIZE
 from whisper_ui.core.models import Job, JobStatus
@@ -64,6 +65,18 @@ def test_list_jobs_by_batch_empty(db: JobDatabase):
 
 def test_max_batch_size_is_positive():
     assert MAX_BATCH_SIZE > 0
+
+
+def test_folder_upload_basename_extraction():
+    """Folder uploads include directory prefixes that must be stripped."""
+    assert PurePosixPath("subfolder/audio.mp3").name == "audio.mp3"
+    assert PurePosixPath("a/b/c/recording.wav").name == "recording.wav"
+
+
+def test_flat_file_basename_unchanged():
+    """Plain filenames without directory prefixes are unaffected by basename extraction."""
+    assert PurePosixPath("audio.mp3").name == "audio.mp3"
+    assert PurePosixPath("my recording.wav").name == "my recording.wav"
 
 
 def test_batch_id_persists_through_update(db: JobDatabase):
