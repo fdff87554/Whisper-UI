@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     updated_at TEXT NOT NULL,
     error TEXT,
     result_path TEXT,
-    duration REAL
+    duration REAL,
+    batch_id TEXT
 );
 """
 
@@ -30,6 +31,7 @@ _MIGRATIONS: list[str] = [
     "ALTER TABLE jobs ADD COLUMN model_name TEXT NOT NULL DEFAULT 'large-v3'",
     "ALTER TABLE jobs ADD COLUMN enable_diarization INTEGER NOT NULL DEFAULT 1",
     "ALTER TABLE jobs ADD COLUMN convert_to_traditional INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE jobs ADD COLUMN batch_id TEXT",
 ]
 
 
