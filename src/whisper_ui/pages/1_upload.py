@@ -99,28 +99,25 @@ if submitted and uploaded_files:
             q = Queue(connection=redis)
         except Exception as e:
             st.error(UPLOAD_QUEUE_ERROR.format(error=e))
-            redis = None
-            q = None
+        else:
+            submitted_count = 0
+            for uploaded_file in uploaded_files:
+                job = Job(
+                    filename=uploaded_file.name,
+                    language=language,
+                    model_name=model_name,
+                    num_speakers=num_speakers if num_speakers > 0 else None,
+                    enable_diarization=enable_diarization,
+                    convert_to_traditional=convert_to_traditional,
+                    batch_id=batch_id,
+                )
 
-        submitted_count = 0
-        for uploaded_file in uploaded_files:
-            job = Job(
-                filename=uploaded_file.name,
-                language=language,
-                model_name=model_name,
-                num_speakers=num_speakers if num_speakers > 0 else None,
-                enable_diarization=enable_diarization,
-                convert_to_traditional=convert_to_traditional,
-                batch_id=batch_id,
-            )
+                file_data = uploaded_file.read()
+                dest = filestore.save_upload(job.id, uploaded_file.name, file_data)
+                job.filepath = str(dest)
+                job.status = JobStatus.QUEUED
+                db.insert_job(job)
 
-            file_data = uploaded_file.read()
-            dest = filestore.save_upload(job.id, uploaded_file.name, file_data)
-            job.filepath = str(dest)
-            job.status = JobStatus.QUEUED
-            db.insert_job(job)
-
-            if q is not None:
                 try:
                     q.enqueue(
                         "whisper_ui.worker.tasks.process_transcription",
@@ -134,12 +131,12 @@ if submitted and uploaded_files:
                     job.error = str(e)[:ERROR_MAX_LENGTH]
                     db.update_job(job)
 
-        if submitted_count > 0:
-            if submitted_count == 1:
-                st.success(UPLOAD_SUBMITTED.format(name=uploaded_files[0].name))
-            else:
-                st.success(UPLOAD_BATCH_SUBMITTED.format(count=submitted_count))
-            st.info(UPLOAD_GO_TO_JOBS)
+            if submitted_count > 0:
+                if submitted_count == 1:
+                    st.success(UPLOAD_SUBMITTED.format(name=uploaded_files[0].name))
+                else:
+                    st.success(UPLOAD_BATCH_SUBMITTED.format(count=submitted_count))
+                st.info(UPLOAD_GO_TO_JOBS)
 
 elif submitted and not uploaded_files:
     st.warning(UPLOAD_NO_FILE)
