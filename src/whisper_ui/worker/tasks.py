@@ -29,15 +29,14 @@ def process_transcription(job_id: str) -> str:
     db = JobDatabase(settings.database_path)
     filestore = FileStore(settings.upload_dir, settings.output_dir)
 
-    job = db.get_job(job_id)
-    if job is None:
-        reporter.fail(f"Job {job_id} not found in database.")
-        return f"Job {job_id} not found"
-
-    job.status = JobStatus.PROCESSING
-    db.update_job(job)
-
     try:
+        job = db.get_job(job_id)
+        if job is None:
+            reporter.fail(f"Job {job_id} not found in database.")
+            return f"Job {job_id} not found"
+
+        job.status = JobStatus.PROCESSING
+        db.update_job(job)
         stages = [
             PreprocessStage(),
             TranscribeStage(
