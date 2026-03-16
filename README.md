@@ -149,18 +149,18 @@ uvicorn whisper_ui.web.app:app --reload --reload-dir=src
 
 ```text
 src/whisper_ui/
-  web/                # FastAPI application
-    app.py            # Application entry point
-    deps.py           # Dependency injection (DB, Redis, templates)
-    routes/           # Route handlers (upload, jobs, viewer)
-    templates/        # Jinja2 HTML templates
-    static/           # CSS and static assets
   core/               # Config, models, exceptions
   pipeline/           # STT processing stages
   worker/             # RQ task definitions
   storage/            # SQLite + file I/O
   export/             # SRT/VTT/TXT/JSON/DOCX exporters
   ui/                 # Shared labels
+  web/                # FastAPI application
+    app.py            # Application entry point
+    deps.py           # Dependency injection (DB, Redis, templates)
+    routes/           # Route handlers (upload, jobs, viewer)
+    templates/        # Jinja2 HTML templates
+    static/           # CSS and static assets
 ```
 
 ## Troubleshooting

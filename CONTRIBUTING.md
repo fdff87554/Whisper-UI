@@ -67,6 +67,7 @@ src/whisper_ui/
 core <- pipeline <- worker <- web
 core <- storage  <- worker <- web
 core <- export              <- web
+ui                          <- web
 ```
 
 ## Pull Request Guidelines
