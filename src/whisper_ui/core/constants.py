@@ -10,11 +10,16 @@ TIMESTAMP_DISPLAY_LENGTH = 19
 
 # List limits
 DEFAULT_JOB_LIST_LIMIT = 50
+DEFAULT_JOBS_PER_PAGE = 20
 
 # Timeouts (seconds)
 FFMPEG_CONVERT_TIMEOUT = 300
 FFPROBE_TIMEOUT = 30
 SQLITE_BUSY_TIMEOUT_MS = 5000
+
+# Stale job recovery
+STALE_JOB_TIMEOUT = 5400  # 1.5 hours (RQ job_timeout=1h + 30min buffer)
+STALE_JOB_CHECK_INTERVAL = 60  # seconds
 
 # Batch upload limits
 MAX_BATCH_SIZE = 50
