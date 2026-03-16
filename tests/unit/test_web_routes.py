@@ -142,3 +142,15 @@ class TestViewerRoutes:
         job = _create_completed_job(db, filestore)
         resp = client.get(f"/viewer/{job.id}/export/invalid_format")
         assert resp.status_code == 400
+
+    def test_export_non_ascii_filename(self, client, db, filestore):
+        result = TranscriptResult(segments=[], language="zh", duration=60.0)
+        job = Job(filename="\u6e2c\u8a66\u97f3\u6a94.mp3", status=JobStatus.COMPLETED, language="zh")
+        result_path = filestore.save_result(job.id, result)
+        job.result_path = str(result_path)
+        db.insert_job(job)
+        resp = client.get(f"/viewer/{job.id}/export/srt")
+        assert resp.status_code == 200
+        cd = resp.headers["content-disposition"]
+        assert "filename*=UTF-8''" in cd
+        assert "%E6%B8%AC%E8%A9%A6%E9%9F%B3%E6%AA%94" in cd

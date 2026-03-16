@@ -18,7 +18,7 @@ from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.storage.database import JobDatabase
 from whisper_ui.ui.labels import JOBS_STALE_ERROR
 from whisper_ui.web.batch_zip import create_batch_zip
-from whisper_ui.web.deps import DbDep, FileStoreDep, RedisDep, templates
+from whisper_ui.web.deps import DbDep, FileStoreDep, RedisDep, make_content_disposition, templates
 from whisper_ui.worker.progress import RedisProgressReporter
 
 logger = logging.getLogger(__name__)
@@ -237,5 +237,5 @@ async def batch_download(batch_id: str, db: DbDep, filestore: FileStoreDep, form
     return Response(
         content=zip_data,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": make_content_disposition(filename)},
     )
