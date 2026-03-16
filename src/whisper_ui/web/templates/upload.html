@@ -8,7 +8,9 @@
 {% set error = request.query_params.get('error', '') %}
 {% if error %}
 <article class="alert-error" aria-label="Error">
-  {% if error == 'no_files' %}
+  {% if error == 'no_file' %}
+  {{ labels.UPLOAD_NO_FILE }}
+  {% elif error == 'no_files' %}
   {{ labels.UPLOAD_NO_SUPPORTED_FILES }}
   {% elif error == 'too_many' %}
   {{ labels.UPLOAD_BATCH_EXCEEDS_LIMIT.format(limit=50, count=request.query_params.get('count', '?')) }}
