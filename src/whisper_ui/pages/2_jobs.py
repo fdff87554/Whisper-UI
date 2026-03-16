@@ -13,6 +13,7 @@ from whisper_ui.core.constants import (
     ERROR_DISPLAY_LENGTH,
     ERROR_MAX_LENGTH,
     JOB_ID_DISPLAY_LENGTH,
+    JOBS_REFRESH_INTERVAL,
     STALE_JOB_CHECK_INTERVAL,
     STALE_JOB_TIMEOUT,
     TIMESTAMP_DISPLAY_LENGTH,
@@ -239,7 +240,12 @@ def _render_pagination(page: int, total_pages: int, total_count: int) -> None:
             st.rerun(scope="fragment")
 
 
-@st.fragment(run_every=2)
+_db_check = get_db()
+_has_active = _db_check.has_active_jobs()
+_run_every = JOBS_REFRESH_INTERVAL if _has_active else None
+
+
+@st.fragment(run_every=_run_every)
 def job_list() -> None:
     db = get_db()
     filestore = get_filestore()
@@ -290,6 +296,11 @@ def job_list() -> None:
 
     if total_pages > 1:
         _render_pagination(page, total_pages, total_count)
+
+    # Detect active state change to re-evaluate _run_every via full page rerun
+    current_has_active = any(j.status in (JobStatus.QUEUED, JobStatus.PROCESSING) for j in jobs)
+    if current_has_active != _has_active:
+        st.rerun()
 
 
 job_list()
