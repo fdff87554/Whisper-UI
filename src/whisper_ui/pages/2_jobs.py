@@ -13,12 +13,13 @@ from whisper_ui.core.constants import (
     TIMESTAMP_DISPLAY_LENGTH,
 )
 from whisper_ui.core.models import Job, JobStatus
-from whisper_ui.ui.components import render_job_status_badge, render_progress
+from whisper_ui.ui.components import render_batch_download, render_job_status_badge, render_progress
 from whisper_ui.ui.labels import (
     JOBS_BATCH_DELETE_ALL,
     JOBS_BATCH_DELETE_ALL_CONFIRM,
     JOBS_BATCH_DELETE_ALL_CONFIRM_BUTTON,
     JOBS_BATCH_DELETE_ALL_SUCCESS,
+    JOBS_BATCH_DOWNLOAD,
     JOBS_BATCH_LABEL,
     JOBS_BATCH_PROGRESS,
     JOBS_BATCH_RETRY_ALL,
@@ -147,7 +148,7 @@ def _render_batch_header(batch_id: str, db, filestore, redis) -> None:
     total = len(all_batch_jobs)
     all_done = all(j.status in (JobStatus.COMPLETED, JobStatus.FAILED) for j in all_batch_jobs)
 
-    col1, col2, col3 = st.columns([3, 1, 1])
+    col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
     with col1:
         st.markdown(f"**{JOBS_BATCH_LABEL.format(count=total)}**")
         st.caption(JOBS_BATCH_PROGRESS.format(completed=completed, total=total))
@@ -169,6 +170,10 @@ def _render_batch_header(batch_id: str, db, filestore, redis) -> None:
                         st.toast(JOBS_BATCH_RETRY_ALL_SUBMITTED.format(count=retried))
                     st.rerun()
     with col3:
+        if completed > 0 and all_done:
+            with st.popover(JOBS_BATCH_DOWNLOAD, key=f"batch_dl_pop_{batch_id}"):
+                render_batch_download(all_batch_jobs, filestore)
+    with col4:
         if all_done:
             with st.popover(JOBS_BATCH_DELETE_ALL, key=f"batch_del_{batch_id}"):
                 st.markdown(JOBS_BATCH_DELETE_ALL_CONFIRM)
