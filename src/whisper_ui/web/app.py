@@ -27,6 +27,10 @@ async def lifespan(app: FastAPI):
     app.state.db = JobDatabase(settings.database_path)
     app.state.filestore = FileStore(settings.upload_dir, settings.output_dir)
     app.state.redis = Redis.from_url(settings.redis_url)
+    try:
+        app.state.redis.ping()
+    except Exception:
+        logger.warning("Redis is not reachable at %s — job submission will fail", settings.redis_url)
     logger.info("Whisper UI started")
     yield
     app.state.db.close()
