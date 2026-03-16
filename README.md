@@ -85,7 +85,7 @@ Pre-built Docker images are published to GHCR on each release.
 **Pin a specific version** by setting `WHISPER_UI_VERSION` in your `.env` file:
 
 ```bash
-WHISPER_UI_VERSION=1.2.0
+WHISPER_UI_VERSION=1.3.0
 ```
 
 **Build locally** instead of pulling (optional):
