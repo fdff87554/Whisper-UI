@@ -1,7 +1,7 @@
 [project]
 name = "whisper-ui"
 version = "1.3.1"
-description = "Speech-to-text system using OpenAI Whisper with Streamlit UI, speaker diarization, and Docker GPU support"
+description = "Speech-to-text system using OpenAI Whisper with speaker diarization and Docker GPU support"
 license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-frontend = ["streamlit>=1.33,<2", "python-docx>=1.0,<2"]
+frontend = ["fastapi[standard]>=0.115,<1", "python-docx>=1.0,<2"]
 worker = [
   # whisperx is installed separately in Dockerfile (--no-deps) to avoid its
   # torch~=2.8.0 constraint conflicting with the base image's torch 2.10.0.
@@ -32,6 +32,9 @@ dev = ["whisper-ui[frontend]", "pytest>=8.0,<9", "pytest-cov>=5.0,<6"]
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-data]
+"whisper_ui" = ["web/templates/*.html", "web/static/**/*"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-Hant" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Whisper UI{% endblock %}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+</head>
+<body>
+  <header class="container">
+    <nav>
+      <ul>
+        <li><strong>Whisper UI</strong></li>
+      </ul>
+      <ul>
+        <li><a href="/upload" {% if active_page == 'upload' %}aria-current="page"{% endif %}>{{ labels.PAGE_UPLOAD }}</a></li>
+        <li><a href="/jobs" {% if active_page == 'jobs' %}aria-current="page"{% endif %}>{{ labels.PAGE_JOBS }}</a></li>
+        <li><a href="/viewer" {% if active_page == 'viewer' %}aria-current="page"{% endif %}>{{ labels.PAGE_VIEWER }}</a></li>
+      </ul>
+    </nav>
+  </header>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

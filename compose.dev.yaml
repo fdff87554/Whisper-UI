@@ -1,17 +1,18 @@
 # Development overrides - bind mount source code for live reload
 services:
   frontend:
+    environment:
+      - PYTHONPATH=/app/src
     volumes:
       - ./src:/app/src
       - ./data:/app/data
-      - ./.streamlit:/app/.streamlit
     command:
-      - streamlit
-      - run
-      - src/whisper_ui/app.py
-      - --server.address=0.0.0.0
-      - --server.port=8501
-      - --server.runOnSave=true
+      - uvicorn
+      - whisper_ui.web.app:app
+      - --host=0.0.0.0
+      - --port=8000
+      - --reload
+      - --reload-dir=src
   worker-gpu:
     volumes:
       - ./src:/app/src
