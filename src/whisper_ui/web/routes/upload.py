@@ -36,7 +36,7 @@ async def upload_submit(
     db: DbDep,
     filestore: FileStoreDep,
     redis: RedisDep,
-    files: Annotated[list[UploadFile], File(...)],
+    files: Annotated[list[UploadFile] | None, File()] = None,
     language: Annotated[str, Form()] = "zh",
     model_name: Annotated[str, Form()] = "large-v3",
     num_speakers: Annotated[int, Form()] = 0,
@@ -44,7 +44,9 @@ async def upload_submit(
     convert_to_traditional: Annotated[bool, Form()] = False,
 ):
     # Filter valid files with supported extensions
-    valid_files = [f for f in files if f.filename and PurePosixPath(f.filename).suffix.lower() in SUPPORTED_EXTENSIONS]
+    valid_files = [
+        f for f in (files or []) if f.filename and PurePosixPath(f.filename).suffix.lower() in SUPPORTED_EXTENSIONS
+    ]
 
     if not valid_files:
         return RedirectResponse("/upload?error=no_files", status_code=303)

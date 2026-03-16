@@ -51,7 +51,7 @@ class TestUploadRoutes:
         assert resp.status_code == 200
         assert "上傳音訊" in resp.text
 
-    def test_root_redirects_to_upload(self, client):
+    def test_root_serves_upload_page(self, client):
         resp = client.get("/")
         assert resp.status_code == 200
         assert "上傳音訊" in resp.text
@@ -97,6 +97,13 @@ class TestJobsRoutes:
         resp = client.delete("/jobs/nonexistent")
         assert resp.status_code == 404
 
+    def test_delete_active_job_returns_409(self, client, db):
+        job = Job(filename="active.mp3", status=JobStatus.PROCESSING, language="zh")
+        db.insert_job(job)
+        resp = client.delete(f"/jobs/{job.id}")
+        assert resp.status_code == 409
+        assert db.get_job(job.id) is not None
+
 
 class TestViewerRoutes:
     def test_viewer_page_empty(self, client):
@@ -130,3 +137,8 @@ class TestViewerRoutes:
     def test_export_nonexistent(self, client):
         resp = client.get("/viewer/nonexistent/export/srt")
         assert resp.status_code == 404
+
+    def test_export_invalid_format_returns_400(self, client, db, filestore):
+        job = _create_completed_job(db, filestore)
+        resp = client.get(f"/viewer/{job.id}/export/invalid_format")
+        assert resp.status_code == 400
