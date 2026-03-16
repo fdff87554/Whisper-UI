@@ -1,0 +1,153 @@
+/* Whisper UI — custom styles (supplements Pico CSS) */
+
+/* Status badges */
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.badge-pending   { background: var(--pico-secondary-background); color: var(--pico-secondary-inverse); }
+.badge-queued    { background: #3b82f6; color: #fff; }
+.badge-processing { background: #f59e0b; color: #fff; }
+.badge-completed { background: #22c55e; color: #fff; }
+.badge-failed    { background: #ef4444; color: #fff; }
+
+/* Job card layout */
+.job-group {
+  margin-bottom: 0;
+}
+.job-group + .job-group {
+  margin-top: 1rem;
+}
+
+.job-card {
+  padding: 0.5rem 0;
+}
+.job-card + .job-card {
+  border-top: 1px solid var(--pico-muted-border-color);
+}
+
+.job-card-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.job-card-info {
+  flex: 1;
+  min-width: 200px;
+}
+.job-card-status {
+  flex-shrink: 0;
+}
+.job-card-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+/* Batch header */
+.batch-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.batch-info {
+  flex: 1;
+}
+.batch-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+/* Small buttons */
+.small-btn {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.85rem;
+}
+a.small-btn {
+  text-decoration: none;
+}
+
+/* Progress bar */
+.job-card progress {
+  margin: 0.3rem 0 0.1rem 0;
+  height: 0.5rem;
+}
+
+/* Error text */
+.error-text {
+  color: var(--pico-del-color, #ef4444);
+  margin: 0.2rem 0 0 0;
+}
+
+/* Alert banners */
+.alert-error {
+  border-left: 4px solid #ef4444;
+  padding: 0.8rem 1rem;
+  margin-bottom: 1rem;
+  color: #ef4444;
+}
+.alert-success {
+  border-left: 4px solid #22c55e;
+  padding: 0.8rem 1rem;
+  margin-bottom: 1rem;
+  color: #22c55e;
+}
+
+/* Pagination */
+.pagination-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+/* Export buttons row */
+.export-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 1rem 0;
+}
+
+/* Transcript segments */
+.transcript {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.segment {
+  padding: 0.3rem 0;
+  line-height: 1.6;
+}
+.segment code {
+  font-size: 0.8rem;
+  margin-right: 0.5rem;
+}
+
+/* Viewer job selector row */
+.viewer-select-row {
+  max-width: 500px;
+}
+
+/* Dialog footer buttons alignment */
+dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+/* Smooth htmx transitions */
+.htmx-settling {
+  opacity: 1;
+}
+.htmx-swapping {
+  opacity: 0.5;
+  transition: opacity 0.15s ease-out;
+}

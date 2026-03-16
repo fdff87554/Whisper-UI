@@ -1,0 +1,94 @@
+{# htmx fragment: job list with polling — swapped via outerHTML #}
+<div id="job-list-wrapper"
+     hx-get="/jobs/list?status={{ status|default('', true) }}&page={{ page }}"
+     {% if has_active %}hx-trigger="every 3s, refreshJobList from:body"{% else %}hx-trigger="refreshJobList from:body"{% endif %}
+     hx-swap="outerHTML">
+
+{% if total_count == 0 %}
+  <p>{% if status %}{{ labels.JOBS_EMPTY_FILTERED }}{% else %}{{ labels.JOBS_EMPTY }}{% endif %}</p>
+{% else %}
+
+  {% for group_key, group_jobs in groups %}
+  {% set is_batch = not group_key.startswith('_single:') %}
+
+  {% if is_batch %}
+  {# ── Batch group ── #}
+  {% set bi = batch_info[group_key] %}
+  <article class="job-group">
+    <header>
+      <div class="batch-header">
+        <div class="batch-info">
+          <strong>{{ labels.JOBS_BATCH_LABEL.format(count=bi.total) }}</strong>
+          <br><small>{{ labels.JOBS_BATCH_PROGRESS.format(completed=bi.completed, total=bi.total) }}</small>
+        </div>
+        <div class="batch-actions">
+          {% if bi.failed > 0 %}
+          <button class="outline secondary small-btn"
+                  @click="$dispatch('open-confirm', {
+                    title: '{{ labels.JOBS_BATCH_RETRY_ALL }}',
+                    message: '{{ labels.JOBS_BATCH_RETRY_ALL_CONFIRM }}',
+                    confirmText: '{{ labels.JOBS_BATCH_RETRY_ALL_CONFIRM_BUTTON }}',
+                    url: '/jobs/batch/{{ group_key }}/retry',
+                    method: 'POST'
+                  })">{{ labels.JOBS_BATCH_RETRY_ALL }}</button>
+          {% endif %}
+          {% if bi.completed > 0 and bi.all_done %}
+          <button class="outline small-btn"
+                  @click="$dispatch('open-batch-download', {
+                    batchId: '{{ group_key }}'
+                  })">{{ labels.JOBS_BATCH_DOWNLOAD }}</button>
+          {% endif %}
+          {% if bi.all_done %}
+          <button class="outline secondary small-btn"
+                  @click="$dispatch('open-confirm', {
+                    title: '{{ labels.JOBS_BATCH_DELETE_ALL }}',
+                    message: '{{ labels.JOBS_BATCH_DELETE_ALL_CONFIRM }}',
+                    confirmText: '{{ labels.JOBS_BATCH_DELETE_ALL_CONFIRM_BUTTON }}',
+                    url: '/jobs/batch/{{ group_key }}',
+                    method: 'DELETE'
+                  })">{{ labels.JOBS_BATCH_DELETE_ALL }}</button>
+          {% endif %}
+        </div>
+      </div>
+    </header>
+
+    {% for job in group_jobs %}
+    <div class="job-card">
+      {% include "_job_card.html" %}
+    </div>
+    {% endfor %}
+  </article>
+
+  {% else %}
+  {# ── Single job ── #}
+  {% set job = group_jobs[0] %}
+  <article class="job-group">
+    <div class="job-card">
+      {% include "_job_card.html" %}
+    </div>
+  </article>
+  {% endif %}
+
+  {% endfor %}
+
+  {# ── Pagination ── #}
+  {% if total_pages > 1 %}
+  <nav class="pagination-nav">
+    <button class="outline small-btn"
+            {% if page <= 0 %}disabled{% endif %}
+            hx-get="/jobs/list?status={{ status|default('', true) }}&page={{ page - 1 }}"
+            hx-target="#job-list-wrapper" hx-swap="outerHTML">
+      {{ labels.JOBS_PAGE_PREV }}
+    </button>
+    <span>{{ labels.JOBS_PAGE_INFO.format(current=page + 1, total=total_pages, count=total_count) }}</span>
+    <button class="outline small-btn"
+            {% if page >= total_pages - 1 %}disabled{% endif %}
+            hx-get="/jobs/list?status={{ status|default('', true) }}&page={{ page + 1 }}"
+            hx-target="#job-list-wrapper" hx-swap="outerHTML">
+      {{ labels.JOBS_PAGE_NEXT }}
+    </button>
+  </nav>
+  {% endif %}
+
+{% endif %}
+</div>
