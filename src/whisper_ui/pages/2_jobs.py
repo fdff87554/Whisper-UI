@@ -273,6 +273,8 @@ def job_list() -> None:
 
     if total_count == 0:
         st.info(JOBS_EMPTY_FILTERED if status_filter else JOBS_EMPTY)
+        if db.has_active_jobs() != _has_active:
+            st.rerun()
         return
 
     offset = page * DEFAULT_JOBS_PER_PAGE
@@ -298,8 +300,7 @@ def job_list() -> None:
         _render_pagination(page, total_pages, total_count)
 
     # Detect active state change to re-evaluate _run_every via full page rerun
-    current_has_active = any(j.status in (JobStatus.QUEUED, JobStatus.PROCESSING) for j in jobs)
-    if current_has_active != _has_active:
+    if db.has_active_jobs() != _has_active:
         st.rerun()
 
 
