@@ -5,7 +5,7 @@ import math
 import time
 from collections import OrderedDict
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 
 from whisper_ui.core.constants import (
@@ -160,6 +160,8 @@ async def delete_job(job_id: str, db: DbDep, filestore: FileStoreDep, redis: Red
     job = db.get_job(job_id)
     if job is None:
         return Response(status_code=404)
+    if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
+        return Response(status_code=409)
 
     filestore.delete_job_files(job.id)
     db.delete_job(job.id)
@@ -173,13 +175,13 @@ async def retry_batch(batch_id: str, db: DbDep, redis: RedisDep):
     if not all_jobs:
         return Response(status_code=404)
 
-    try:
-        from rq import Queue
+    from rq import Queue
 
-        q = Queue(connection=redis)
-        for job in all_jobs:
-            if job.status != JobStatus.FAILED:
-                continue
+    q = Queue(connection=redis)
+    for job in all_jobs:
+        if job.status != JobStatus.FAILED:
+            continue
+        try:
             job.status = JobStatus.QUEUED
             job.error = None
             job.progress = 0.0
@@ -193,8 +195,11 @@ async def retry_batch(batch_id: str, db: DbDep, redis: RedisDep):
                 job.id,
                 job_timeout="1h",
             )
-    except Exception:
-        pass
+        except Exception:
+            logger.exception("Failed to retry job %s", job.id)
+            job.status = JobStatus.FAILED
+            job.error = "Failed to enqueue retry"
+            db.update_job(job)
 
     return Response(status_code=204, headers={"HX-Trigger": "refreshJobList"})
 
@@ -206,6 +211,8 @@ async def delete_batch(batch_id: str, db: DbDep, filestore: FileStoreDep, redis:
         return Response(status_code=404)
 
     for job in all_jobs:
+        if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
+            continue
         filestore.delete_job_files(job.id)
         db.delete_job(job.id)
         redis.delete(f"job:{job.id}")
@@ -219,7 +226,10 @@ async def batch_download(batch_id: str, db: DbDep, filestore: FileStoreDep, form
     if not all_jobs:
         return Response(status_code=404)
 
-    zip_data = create_batch_zip(all_jobs, filestore, format)
+    try:
+        zip_data = create_batch_zip(all_jobs, filestore, format)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
     if zip_data is None:
         return Response(status_code=404)
 

@@ -16,8 +16,7 @@ router = APIRouter()
 @router.get("/viewer", response_class=HTMLResponse)
 @router.get("/viewer/{job_id}", response_class=HTMLResponse)
 async def viewer_page(request: Request, db: DbDep, filestore: FileStoreDep, job_id: str | None = None):
-    jobs = db.list_jobs(limit=DEFAULT_JOB_LIST_LIMIT)
-    completed_jobs = [j for j in jobs if j.status == JobStatus.COMPLETED]
+    completed_jobs = db.list_jobs_filtered(status=JobStatus.COMPLETED.value, limit=DEFAULT_JOB_LIST_LIMIT)
 
     job = None
     result = None
@@ -58,7 +57,10 @@ async def export_download(job_id: str, format_name: str, db: DbDep, filestore: F
     if result is None:
         raise HTTPException(status_code=404)
 
-    exporter = get_exporter(format_name)
+    try:
+        exporter = get_exporter(format_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
     data = exporter.export(result)
     filename = f"{Path(job.filename).stem}{exporter.file_extension}"
 

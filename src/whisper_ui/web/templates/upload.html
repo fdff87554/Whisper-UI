@@ -14,8 +14,6 @@
   {{ labels.UPLOAD_BATCH_EXCEEDS_LIMIT.format(limit=50, count=request.query_params.get('count', '?')) }}
   {% elif error == 'queue' %}
   {{ labels.UPLOAD_QUEUE_ERROR.format(error='Redis') }}
-  {% elif error == 'no_file' %}
-  {{ labels.UPLOAD_NO_FILE }}
   {% endif %}
 </article>
 {% endif %}
