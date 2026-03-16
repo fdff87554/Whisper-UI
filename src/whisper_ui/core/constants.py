@@ -17,6 +17,9 @@ FFMPEG_CONVERT_TIMEOUT = 300
 FFPROBE_TIMEOUT = 30
 SQLITE_BUSY_TIMEOUT_MS = 5000
 
+# Jobs page auto-refresh
+JOBS_REFRESH_INTERVAL = 3  # seconds
+
 # Stale job recovery
 STALE_JOB_TIMEOUT = 5400  # 1.5 hours (RQ job_timeout=1h + 30min buffer)
 STALE_JOB_CHECK_INTERVAL = 60  # seconds
