@@ -34,8 +34,8 @@ models/
 *.pt
 *.bin
 
-# Streamlit
-.streamlit/secrets.toml
+# Streamlit (legacy)
+.streamlit/
 
 # Node
 node_modules/
