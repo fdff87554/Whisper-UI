@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import logging
+import math
+import time
 from collections import OrderedDict
 
 import streamlit as st
 from rq import Queue
 
 from whisper_ui.core.constants import (
-    DEFAULT_JOB_LIST_LIMIT,
+    DEFAULT_JOBS_PER_PAGE,
     ERROR_DISPLAY_LENGTH,
     ERROR_MAX_LENGTH,
     JOB_ID_DISPLAY_LENGTH,
+    STALE_JOB_CHECK_INTERVAL,
+    STALE_JOB_TIMEOUT,
     TIMESTAMP_DISPLAY_LENGTH,
 )
 from whisper_ui.core.models import Job, JobStatus
@@ -31,20 +36,48 @@ from whisper_ui.ui.labels import (
     JOBS_DELETE_CONFIRM_BUTTON,
     JOBS_DELETE_SUCCESS,
     JOBS_EMPTY,
+    JOBS_EMPTY_FILTERED,
     JOBS_ERROR,
+    JOBS_FILTER_ALL,
+    JOBS_FILTER_LABEL,
     JOBS_HEADER,
+    JOBS_PAGE_INFO,
+    JOBS_PAGE_NEXT,
+    JOBS_PAGE_PREV,
     JOBS_RETRY,
     JOBS_RETRY_CONFIRM,
     JOBS_RETRY_CONFIRM_BUTTON,
     JOBS_RETRY_ERROR,
     JOBS_RETRY_SUBMITTED,
+    JOBS_STALE_ERROR,
     JOBS_VIEW,
     JOBS_WAITING,
+    STATUS_LABELS,
 )
 from whisper_ui.ui.state import get_db, get_filestore, get_redis
 from whisper_ui.worker.progress import RedisProgressReporter
 
+logger = logging.getLogger(__name__)
+
 st.header(JOBS_HEADER)
+
+# -- Status filter (outside fragment to avoid dropdown interruption by auto-refresh) --
+
+_FILTER_OPTIONS = [JOBS_FILTER_ALL, *STATUS_LABELS.values()]
+_FILTER_VALUE_MAP: dict[str, str | None] = {JOBS_FILTER_ALL: None}
+_FILTER_VALUE_MAP.update({label: value for value, label in STATUS_LABELS.items()})
+
+
+def _on_filter_change() -> None:
+    st.session_state["jobs_page"] = 0
+
+
+st.selectbox(
+    JOBS_FILTER_LABEL,
+    options=_FILTER_OPTIONS,
+    key="jobs_filter_status",
+    on_change=_on_filter_change,
+)
 
 
 def _group_jobs_by_batch(jobs: list[Job]) -> OrderedDict[str, list[Job]]:
@@ -190,16 +223,54 @@ def _render_batch_header(batch_id: str, db, filestore, redis) -> None:
                     st.rerun()
 
 
+def _render_pagination(page: int, total_pages: int, total_count: int) -> None:
+    col_prev, col_info, col_next = st.columns([1, 3, 1])
+    with col_prev:
+        if st.button(JOBS_PAGE_PREV, disabled=(page <= 0), key="page_prev"):
+            st.session_state["jobs_page"] = page - 1
+            st.rerun(scope="fragment")
+    with col_info:
+        st.markdown(
+            JOBS_PAGE_INFO.format(current=page + 1, total=total_pages, count=total_count),
+        )
+    with col_next:
+        if st.button(JOBS_PAGE_NEXT, disabled=(page >= total_pages - 1), key="page_next"):
+            st.session_state["jobs_page"] = page + 1
+            st.rerun(scope="fragment")
+
+
 @st.fragment(run_every=2)
 def job_list() -> None:
     db = get_db()
     filestore = get_filestore()
-    jobs = db.list_jobs(limit=DEFAULT_JOB_LIST_LIMIT)
     redis = get_redis()
 
-    if not jobs:
-        st.info(JOBS_EMPTY)
+    # -- Stale job recovery (throttled) --
+    last_check = st.session_state.get("_stale_check_ts", 0.0)
+    now = time.monotonic()
+    if now - last_check >= STALE_JOB_CHECK_INTERVAL:
+        recovered = db.recover_stale_jobs(STALE_JOB_TIMEOUT, JOBS_STALE_ERROR)
+        if recovered > 0:
+            logger.warning("Recovered %d stale job(s)", recovered)
+        st.session_state["_stale_check_ts"] = now
+
+    # -- Resolve filter status --
+    filter_label = st.session_state.get("jobs_filter_status", JOBS_FILTER_ALL)
+    status_filter = _FILTER_VALUE_MAP.get(filter_label)
+
+    # -- Pagination --
+    total_count = db.count_jobs(status=status_filter)
+    total_pages = max(1, math.ceil(total_count / DEFAULT_JOBS_PER_PAGE))
+    page = st.session_state.get("jobs_page", 0)
+    page = min(page, max(0, total_pages - 1))
+    st.session_state["jobs_page"] = page
+
+    if total_count == 0:
+        st.info(JOBS_EMPTY_FILTERED if status_filter else JOBS_EMPTY)
         return
+
+    offset = page * DEFAULT_JOBS_PER_PAGE
+    jobs = db.list_jobs_filtered(status=status_filter, limit=DEFAULT_JOBS_PER_PAGE, offset=offset)
 
     groups = _group_jobs_by_batch(jobs)
 
@@ -216,6 +287,9 @@ def job_list() -> None:
             job = group_jobs[0]
             with st.container(border=True):
                 _render_job_row(job, db, filestore, redis)
+
+    if total_pages > 1:
+        _render_pagination(page, total_pages, total_count)
 
 
 job_list()
