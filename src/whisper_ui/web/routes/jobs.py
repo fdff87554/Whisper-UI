@@ -224,14 +224,14 @@ async def delete_batch(batch_id: str, db: DbDep, filestore: FileStoreDep, redis:
 async def batch_download(batch_id: str, db: DbDep, filestore: FileStoreDep, format: str = "srt"):
     all_jobs = db.list_jobs_by_batch(batch_id)
     if not all_jobs:
-        return Response(status_code=404)
+        raise HTTPException(status_code=404, detail="Batch not found")
 
     try:
         zip_data = create_batch_zip(all_jobs, filestore, format)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
     if zip_data is None:
-        return Response(status_code=404)
+        raise HTTPException(status_code=404, detail="No completed results in batch")
 
     filename = f"batch_{batch_id[:8]}.zip"
     return Response(
