@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from whisper_ui.core.models import Job, JobStatus, TranscriptResult
+from whisper_ui.core.models import Job, JobStatus, Segment, TranscriptResult
 from whisper_ui.web.app import create_app
+from whisper_ui.web.deps import _format_time, make_content_disposition
 
 
 @pytest.fixture
@@ -154,3 +155,131 @@ class TestViewerRoutes:
         cd = resp.headers["content-disposition"]
         assert "filename*=UTF-8''" in cd
         assert "%E6%B8%AC%E8%A9%A6%E9%9F%B3%E6%AA%94" in cd
+
+
+class TestUploadPost:
+    def _upload(self, client, files=None, **form_data):
+        data = {
+            "language": form_data.get("language", "zh"),
+            "model_name": form_data.get("model_name", "large-v3"),
+            "num_speakers": form_data.get("num_speakers", "0"),
+        }
+        file_list = files or [("files", ("test.mp3", b"fake audio data", "audio/mpeg"))]
+        return client.post("/upload", data=data, files=file_list, follow_redirects=False)
+
+    def test_upload_post_submits_job(self, client, app):
+        mock_queue = MagicMock()
+        with patch("rq.Queue", return_value=mock_queue):
+            # Need to patch at the import location
+            resp = self._upload(client)
+        assert resp.status_code == 303
+        assert "/jobs?submitted=" in resp.headers["location"]
+
+    def test_upload_no_file_redirects(self, client):
+        resp = client.post("/upload", data={"language": "zh"}, follow_redirects=False)
+        assert resp.status_code == 303
+        assert "error=no_file" in resp.headers["location"]
+
+    def test_upload_invalid_language_redirects(self, client):
+        resp = self._upload(client, language="xx_invalid")
+        assert resp.status_code == 303
+        assert "error=invalid_language" in resp.headers["location"]
+
+    def test_upload_invalid_model_redirects(self, client):
+        resp = self._upload(client, model_name="nonexistent-model")
+        assert resp.status_code == 303
+        assert "error=invalid_model" in resp.headers["location"]
+
+    def test_upload_file_too_large_redirects(self, client, app):
+        app.state.settings = app.state.settings.model_copy(update={"max_upload_size": 10})
+        files = [("files", ("big.mp3", b"x" * 20, "audio/mpeg"))]
+        with patch("rq.Queue", return_value=MagicMock()):
+            resp = self._upload(client, files=files)
+        assert resp.status_code == 303
+        assert "error=too_large" in resp.headers["location"]
+
+    def test_upload_unsupported_format_redirects(self, client):
+        files = [("files", ("document.pdf", b"fake pdf", "application/pdf"))]
+        resp = self._upload(client, files=files)
+        assert resp.status_code == 303
+        assert "error=no_files" in resp.headers["location"]
+
+
+class TestBatchRoutes:
+    def _create_batch(self, db, filestore, batch_id="testbatch123"):
+        jobs = []
+        for i, name in enumerate(["a.mp3", "b.mp3"]):
+            result = TranscriptResult(
+                segments=[Segment(start=0.0, end=1.0, text=f"Hello {i}")],
+                language="zh",
+                duration=1.0,
+            )
+            job = Job(filename=name, status=JobStatus.COMPLETED, language="zh", batch_id=batch_id)
+            filestore.save_result(job.id, result)
+            job.result_path = "dummy"
+            db.insert_job(job)
+            jobs.append(job)
+        return jobs
+
+    def test_batch_download_success(self, client, db, filestore):
+        self._create_batch(db, filestore)
+        resp = client.get("/jobs/batch/testbatch123/download?format=txt")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "application/zip"
+
+    def test_batch_download_not_found(self, client):
+        resp = client.get("/jobs/batch/nonexistent/download?format=srt")
+        assert resp.status_code == 404
+
+    def test_batch_download_invalid_format(self, client, db, filestore):
+        self._create_batch(db, filestore)
+        resp = client.get("/jobs/batch/testbatch123/download?format=invalid")
+        assert resp.status_code == 400
+
+    def test_retry_batch(self, client, db, app):
+        batch_id = "retrybatch"
+        job = Job(filename="fail.mp3", status=JobStatus.FAILED, error="err", batch_id=batch_id)
+        db.insert_job(job)
+        mock_queue = MagicMock()
+        with patch("rq.Queue", return_value=mock_queue):
+            resp = client.post(f"/jobs/batch/{batch_id}/retry")
+        assert resp.status_code == 204
+
+    def test_delete_batch(self, client, db, filestore):
+        jobs = self._create_batch(db, filestore, batch_id="delbatch")
+        resp = client.delete("/jobs/batch/delbatch")
+        assert resp.status_code == 204
+        for job in jobs:
+            assert db.get_job(job.id) is None
+
+
+class TestContentDispositionHelper:
+    def test_ascii_filename(self):
+        result = make_content_disposition("report.pdf")
+        assert result == "attachment; filename*=UTF-8''report.pdf"
+
+    def test_non_ascii_filename(self):
+        result = make_content_disposition("\u6e2c\u8a66.srt")
+        assert "filename*=UTF-8''" in result
+        assert "%E6%B8%AC%E8%A9%A6" in result
+
+    def test_inline_disposition(self):
+        result = make_content_disposition("file.txt", disposition="inline")
+        assert result.startswith("inline;")
+
+
+class TestFormatTime:
+    def test_under_one_hour(self):
+        assert _format_time(125) == "02:05"
+
+    def test_exactly_one_hour(self):
+        assert _format_time(3600) == "01:00:00"
+
+    def test_over_one_hour(self):
+        assert _format_time(3661) == "01:01:01"
+
+    def test_zero(self):
+        assert _format_time(0) == "00:00"
+
+    def test_large_duration(self):
+        assert _format_time(36000) == "10:00:00"
