@@ -11,10 +11,14 @@ and Docker deployment (GPU / CPU).
 ## Features
 
 - Upload audio/video files for transcription
+- Batch upload with automatic filtering of unsupported files
 - Speaker diarization with pyannote speaker-diarization-3.1 (optional)
 - Real-time progress tracking via Redis
 - Export to SRT, VTT, TXT, JSON, DOCX
+- Batch download of results as ZIP
 - Docker Compose deployment with GPU and CPU profiles
+
+**Supported formats:** `.mp3`, `.wav`, `.m4a`, `.flac`, `.ogg`, `.wma`, `.aac`, `.opus`, `.mp4`, `.webm`, `.mkv`
 
 ## Architecture
 
@@ -81,7 +85,7 @@ Pre-built Docker images are published to GHCR on each release.
 **Pin a specific version** by setting `WHISPER_UI_VERSION` in your `.env` file:
 
 ```bash
-WHISPER_UI_VERSION=0.1.0
+WHISPER_UI_VERSION=1.2.0
 ```
 
 **Build locally** instead of pulling (optional):
