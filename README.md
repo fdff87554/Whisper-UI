@@ -3,7 +3,7 @@
 Speech-to-text system using [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 (large-v3, INT8) with speaker diarization via
 [pyannote-audio](https://github.com/pyannote/pyannote-audio),
-a [Streamlit](https://streamlit.io/) web interface,
+a [FastAPI](https://fastapi.tiangolo.com/) + [htmx](https://htmx.org/) + [Alpine.js](https://alpinejs.dev/) web interface,
 and Docker deployment (GPU / CPU).
 
 > **Note:** The UI is in Traditional Chinese (繁體中文).
@@ -24,9 +24,9 @@ and Docker deployment (GPU / CPU).
 
 ```text
 +------------------+     +------------------+     +------------------+
-|    Streamlit     |     |      Redis       |     |     Worker       |
-|    Frontend      |<--->|   (queue+state)  |<--->|  (RQ + Pipeline) |
-|   (CPU only)     |     |                  |     |  (GPU or CPU)    |
+|     FastAPI      |     |      Redis       |     |     Worker       |
+|  Frontend (htmx  |<--->|   (queue+state)  |<--->|  (RQ + Pipeline) |
+|  + Alpine.js)    |     |                  |     |  (GPU or CPU)    |
 +------------------+     +------------------+     +------------------+
         |                                                  |
         +------ Shared Volume: app-data (uploads/outputs/db) ------+
@@ -69,18 +69,18 @@ cp .env.example .env
 docker compose --profile cpu up -d
 ```
 
-Open <http://localhost:8501> in your browser.
+Open <http://localhost:8000> in your browser.
 
 ### Pre-built Images
 
 Pre-built Docker images are published to GHCR on each release.
 `docker compose up` pulls them automatically; if unavailable, it falls back to a local build.
 
-| Image                                     | Description             |
-| ----------------------------------------- | ----------------------- |
-| `ghcr.io/fdff87554/whisper-ui-frontend`   | Streamlit web interface |
-| `ghcr.io/fdff87554/whisper-ui-worker`     | GPU worker (CUDA)       |
-| `ghcr.io/fdff87554/whisper-ui-worker-cpu` | CPU worker              |
+| Image                                     | Description           |
+| ----------------------------------------- | --------------------- |
+| `ghcr.io/fdff87554/whisper-ui-frontend`   | FastAPI web interface |
+| `ghcr.io/fdff87554/whisper-ui-worker`     | GPU worker (CUDA)     |
+| `ghcr.io/fdff87554/whisper-ui-worker-cpu` | CPU worker            |
 
 **Pin a specific version** by setting `WHISPER_UI_VERSION` in your `.env` file:
 
@@ -130,8 +130,8 @@ pytest
 # Run linting
 ruff format . && ruff check .
 
-# Start Streamlit (requires Redis running)
-streamlit run src/whisper_ui/app.py
+# Start FastAPI dev server (requires Redis running)
+uvicorn whisper_ui.web.app:app --reload --reload-dir=src
 ```
 
 ## Tech Stack
@@ -141,7 +141,7 @@ streamlit run src/whisper_ui/app.py
 | STT Engine          | faster-whisper large-v3 (INT8) via WhisperX  |
 | Speaker Diarization | pyannote-audio (optional, requires HF token) |
 | Task Queue          | RQ + Redis                                   |
-| Frontend            | Streamlit                                    |
+| Frontend            | FastAPI + htmx + Alpine.js                   |
 | Storage             | SQLite + local filesystem                    |
 | Containerization    | Docker Compose (GPU / CPU profiles)          |
 
@@ -149,14 +149,18 @@ streamlit run src/whisper_ui/app.py
 
 ```text
 src/whisper_ui/
-  app.py              # Streamlit entry point
-  pages/              # Streamlit multipage UI
+  web/                # FastAPI application
+    app.py            # Application entry point
+    deps.py           # Dependency injection (DB, Redis, templates)
+    routes/           # Route handlers (upload, jobs, viewer)
+    templates/        # Jinja2 HTML templates
+    static/           # CSS and static assets
   core/               # Config, models, exceptions
   pipeline/           # STT processing stages
   worker/             # RQ task definitions
   storage/            # SQLite + file I/O
   export/             # SRT/VTT/TXT/JSON/DOCX exporters
-  ui/                 # Shared UI components
+  ui/                 # Shared labels
 ```
 
 ## Troubleshooting
