@@ -16,8 +16,8 @@ from whisper_ui.core.constants import (
 )
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.storage.database import JobDatabase
-from whisper_ui.ui._batch_zip import create_batch_zip
 from whisper_ui.ui.labels import JOBS_STALE_ERROR
+from whisper_ui.web.batch_zip import create_batch_zip
 from whisper_ui.web.deps import DbDep, FileStoreDep, RedisDep, templates
 from whisper_ui.worker.progress import RedisProgressReporter
 

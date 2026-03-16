@@ -12,11 +12,11 @@ We will acknowledge receipt within 48 hours and aim to provide a fix or mitigati
 
 ## Scope
 
-This policy covers the Whisper-UI application code and its Docker deployment configuration. Third-party dependencies (WhisperX, pyannote-audio, Streamlit, etc.) have their own security policies.
+This policy covers the Whisper-UI application code and its Docker deployment configuration. Third-party dependencies (WhisperX, pyannote-audio, FastAPI, etc.) have their own security policies.
 
 ## Best Practices for Deployment
 
 - Never commit `.env` files or HuggingFace tokens to version control
 - Run Docker containers with minimal privileges
 - Keep dependencies updated to patch known vulnerabilities
-- Restrict network access to the Streamlit port (8501) in production
+- Restrict network access to the application port (8000) in production
