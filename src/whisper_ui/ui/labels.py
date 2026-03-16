@@ -63,6 +63,13 @@ JOBS_BATCH_DELETE_ALL_SUCCESS = "已刪除整個批次（{count} 個任務）"
 JOBS_BATCH_DOWNLOAD = "批次下載"
 JOBS_BATCH_DOWNLOAD_FORMAT = "選擇匯出格式"
 JOBS_BATCH_DOWNLOAD_BUTTON = "下載 ZIP"
+JOBS_FILTER_ALL = "全部"
+JOBS_FILTER_LABEL = "篩選狀態"
+JOBS_EMPTY_FILTERED = "沒有符合篩選條件的任務。"
+JOBS_PAGE_INFO = "第 {current} / {total} 頁（共 {count} 個任務）"
+JOBS_PAGE_PREV = "上一頁"
+JOBS_PAGE_NEXT = "下一頁"
+JOBS_STALE_ERROR = "任務逾時或 Worker 異常終止"
 
 # -- Viewer page --
 VIEWER_HEADER = "轉錄結果檢視器"

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import time
-
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.storage.database import JobDatabase
 
