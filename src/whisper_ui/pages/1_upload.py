@@ -8,6 +8,7 @@ from rq import Queue
 
 from whisper_ui.core.constants import ERROR_MAX_LENGTH, MAX_BATCH_SIZE
 from whisper_ui.core.models import LANGUAGE_LABELS, SUPPORTED_LANGUAGES, WHISPER_MODELS, Job, JobStatus
+from whisper_ui.pages._upload_filter import filter_supported_files
 from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
 from whisper_ui.ui.labels import (
     UPLOAD_BATCH_EXCEEDS_LIMIT,
@@ -21,11 +22,13 @@ from whisper_ui.ui.labels import (
     UPLOAD_DIARIZATION_UNAVAILABLE,
     UPLOAD_ENABLE_DIARIZATION,
     UPLOAD_FOLDER_DESCRIPTION,
+    UPLOAD_FOLDER_FILTERED,
     UPLOAD_GO_TO_JOBS,
     UPLOAD_HEADER,
     UPLOAD_LANGUAGE,
     UPLOAD_MODEL,
     UPLOAD_NO_FILE,
+    UPLOAD_NO_SUPPORTED_FILES,
     UPLOAD_NUM_SPEAKERS,
     UPLOAD_QUEUE_ERROR,
     UPLOAD_START,
@@ -110,7 +113,12 @@ with st.form("upload_form"):
     submitted = st.form_submit_button(UPLOAD_START)
 
 if submitted and uploaded_files:
-    if len(uploaded_files) > MAX_BATCH_SIZE:
+    uploaded_files, skipped = filter_supported_files(uploaded_files)
+    if skipped > 0:
+        st.info(UPLOAD_FOLDER_FILTERED.format(skipped=skipped, remaining=len(uploaded_files)))
+    if not uploaded_files:
+        st.warning(UPLOAD_NO_SUPPORTED_FILES)
+    elif len(uploaded_files) > MAX_BATCH_SIZE:
         st.warning(UPLOAD_BATCH_EXCEEDS_LIMIT.format(limit=MAX_BATCH_SIZE, count=len(uploaded_files)))
     else:
         batch_id = uuid.uuid4().hex if len(uploaded_files) > 1 else None

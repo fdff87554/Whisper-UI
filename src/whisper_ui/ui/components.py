@@ -2,9 +2,16 @@ from __future__ import annotations
 
 import streamlit as st
 
-from whisper_ui.core.models import JobStatus, Segment, TranscriptResult
+from whisper_ui.core.models import Job, JobStatus, Segment, TranscriptResult
 from whisper_ui.export.factory import available_formats, get_exporter
-from whisper_ui.ui.labels import STATUS_LABELS, VIEWER_NO_SEGMENTS
+from whisper_ui.storage.filestore import FileStore
+from whisper_ui.ui._batch_zip import create_batch_zip
+from whisper_ui.ui.labels import (
+    JOBS_BATCH_DOWNLOAD_BUTTON,
+    JOBS_BATCH_DOWNLOAD_FORMAT,
+    STATUS_LABELS,
+    VIEWER_NO_SEGMENTS,
+)
 
 
 def render_job_status_badge(status: JobStatus) -> None:
@@ -51,6 +58,27 @@ def render_download_buttons(result: TranscriptResult, filename_base: str) -> Non
             file_name=f"{filename_base}{exporter.file_extension}",
             mime=exporter.mime_type,
         )
+
+
+def render_batch_download(jobs: list[Job], filestore: FileStore) -> None:
+    """Render format selector and download button for batch ZIP."""
+    formats = available_formats()
+    fmt = st.selectbox(
+        JOBS_BATCH_DOWNLOAD_FORMAT,
+        formats,
+        format_func=str.upper,
+        key=f"batch_dl_fmt_{jobs[0].batch_id}",
+    )
+    if fmt:
+        zip_data = create_batch_zip(jobs, filestore, fmt)
+        if zip_data is not None:
+            st.download_button(
+                label=JOBS_BATCH_DOWNLOAD_BUTTON,
+                data=zip_data,
+                file_name=f"batch_{jobs[0].batch_id[:8]}.zip",
+                mime="application/zip",
+                key=f"batch_dl_{jobs[0].batch_id}",
+            )
 
 
 def _format_time(seconds: float) -> str:

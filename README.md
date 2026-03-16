@@ -72,11 +72,11 @@ Open <http://localhost:8501> in your browser.
 Pre-built Docker images are published to GHCR on each release.
 `docker compose up` pulls them automatically; if unavailable, it falls back to a local build.
 
-| Image | Description |
-| ----- | ----------- |
-| `ghcr.io/fdff87554/whisper-ui-frontend` | Streamlit web interface |
-| `ghcr.io/fdff87554/whisper-ui-worker` | GPU worker (CUDA) |
-| `ghcr.io/fdff87554/whisper-ui-worker-cpu` | CPU worker |
+| Image                                     | Description             |
+| ----------------------------------------- | ----------------------- |
+| `ghcr.io/fdff87554/whisper-ui-frontend`   | Streamlit web interface |
+| `ghcr.io/fdff87554/whisper-ui-worker`     | GPU worker (CUDA)       |
+| `ghcr.io/fdff87554/whisper-ui-worker-cpu` | CPU worker              |
 
 **Pin a specific version** by setting `WHISPER_UI_VERSION` in your `.env` file:
 
@@ -94,16 +94,16 @@ docker compose --profile gpu build
 
 All settings are configured via environment variables (`.env` file):
 
-| Variable        | Default                             | Description                                  |
-| --------------- | ----------------------------------- | -------------------------------------------- |
-| `WHISPER_MODEL` | `large-v3`                          | Whisper model variant (see model list below) |
-| `COMPUTE_TYPE`  | `int8_float16` (GPU) / `int8` (CPU) | CTranslate2 compute type                     |
-| `DEVICE`        | `cuda` (GPU) / `cpu` (CPU)          | Inference device                             |
-| `BATCH_SIZE`    | `4`                                 | Transcription batch size                     |
-| `LANGUAGE`      | `zh`                                | Default language code                        |
-| `HF_TOKEN`      | (empty)                             | HuggingFace token for speaker diarization    |
-| `PIP_INDEX_URL` | (empty)                             | Custom PyPI mirror for Docker builds         |
-| `WHISPER_UI_VERSION` | `latest`                       | Docker image version tag to pull             |
+| Variable             | Default                             | Description                                  |
+| -------------------- | ----------------------------------- | -------------------------------------------- |
+| `WHISPER_MODEL`      | `large-v3`                          | Whisper model variant (see model list below) |
+| `COMPUTE_TYPE`       | `int8_float16` (GPU) / `int8` (CPU) | CTranslate2 compute type                     |
+| `DEVICE`             | `cuda` (GPU) / `cpu` (CPU)          | Inference device                             |
+| `BATCH_SIZE`         | `4`                                 | Transcription batch size                     |
+| `LANGUAGE`           | `zh`                                | Default language code                        |
+| `HF_TOKEN`           | (empty)                             | HuggingFace token for speaker diarization    |
+| `PIP_INDEX_URL`      | (empty)                             | Custom PyPI mirror for Docker builds         |
+| `WHISPER_UI_VERSION` | `latest`                            | Docker image version tag to pull             |
 
 **Whisper models:** `tiny`, `tiny.en`, `base`, `base.en`, `small`, `small.en`, `medium`, `medium.en`, `large-v1`, `large-v2`, `large-v3`, `large-v3-turbo`
 
