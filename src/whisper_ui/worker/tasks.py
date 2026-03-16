@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from redis import Redis
 
@@ -20,6 +21,17 @@ from whisper_ui.storage.filestore import FileStore
 from whisper_ui.worker.progress import RedisProgressReporter
 
 logger = logging.getLogger(__name__)
+
+
+def _cleanup_preprocessed(context: dict) -> None:
+    """Remove the intermediate 16kHz WAV file created by PreprocessStage."""
+    audio_path = context.get("audio_path")
+    if audio_path is None:
+        return
+    try:
+        Path(audio_path).unlink(missing_ok=True)
+    except OSError:
+        logger.warning("Failed to clean up preprocessed file: %s", audio_path)
 
 
 def process_transcription(job_id: str) -> str:
@@ -70,6 +82,7 @@ def process_transcription(job_id: str) -> str:
         }
 
         result = orchestrator.run(context)
+        _cleanup_preprocessed(context)
         result_path = filestore.save_result(job_id, result)
 
         job.status = JobStatus.COMPLETED
@@ -84,6 +97,7 @@ def process_transcription(job_id: str) -> str:
         return f"Job {job_id} completed"
 
     except Exception as e:
+        _cleanup_preprocessed(context)
         error_msg = str(e)
         logger.exception("Job %s failed: %s", job_id, error_msg)
         job.status = JobStatus.FAILED
