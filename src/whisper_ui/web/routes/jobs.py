@@ -48,21 +48,7 @@ def _group_jobs_by_batch(jobs: list[Job]) -> list[tuple[str, list[Job]]]:
 
 
 def _get_batch_info(db: JobDatabase, batch_ids: set[str]) -> dict[str, dict]:
-    info = {}
-    for batch_id in batch_ids:
-        all_jobs = db.list_jobs_by_batch(batch_id)
-        completed = sum(1 for j in all_jobs if j.status == JobStatus.COMPLETED)
-        failed = sum(1 for j in all_jobs if j.status == JobStatus.FAILED)
-        total = len(all_jobs)
-        all_done = all(j.status in (JobStatus.COMPLETED, JobStatus.FAILED) for j in all_jobs)
-        info[batch_id] = {
-            "all_jobs": all_jobs,
-            "completed": completed,
-            "failed": failed,
-            "total": total,
-            "all_done": all_done,
-        }
-    return info
+    return db.get_batch_stats(batch_ids)
 
 
 def _get_progress_data(redis, jobs: list[Job]) -> dict[str, dict[str, str]]:

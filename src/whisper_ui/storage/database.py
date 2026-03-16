@@ -137,6 +137,36 @@ class JobDatabase:
         ).fetchall()
         return [_row_to_job(r) for r in rows]
 
+    def get_batch_stats(self, batch_ids: set[str]) -> dict[str, dict]:
+        """Return aggregate stats per batch using a single query."""
+        if not batch_ids:
+            return {}
+        placeholders = ", ".join("?" for _ in batch_ids)
+        rows = self._conn.execute(
+            f"""
+            SELECT batch_id,
+                   COUNT(*) AS total,
+                   SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) AS completed,
+                   SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) AS failed
+            FROM jobs
+            WHERE batch_id IN ({placeholders})
+            GROUP BY batch_id
+            """,
+            (JobStatus.COMPLETED.value, JobStatus.FAILED.value, *batch_ids),
+        ).fetchall()
+        result = {}
+        for row in rows:
+            total = row["total"]
+            completed = row["completed"]
+            failed = row["failed"]
+            result[row["batch_id"]] = {
+                "completed": completed,
+                "failed": failed,
+                "total": total,
+                "all_done": (completed + failed) == total,
+            }
+        return result
+
     def has_active_jobs(self) -> bool:
         row = self._conn.execute(
             "SELECT EXISTS(SELECT 1 FROM jobs WHERE status IN (?, ?))",
