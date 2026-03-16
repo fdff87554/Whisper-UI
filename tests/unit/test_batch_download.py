@@ -5,7 +5,7 @@ from io import BytesIO
 
 from whisper_ui.core.models import Job, JobStatus, Segment, TranscriptResult
 from whisper_ui.storage.filestore import FileStore
-from whisper_ui.ui._batch_zip import create_batch_zip
+from whisper_ui.web.batch_zip import create_batch_zip
 
 
 def _make_job(filename: str, status: JobStatus = JobStatus.COMPLETED, batch_id: str = "batch1") -> Job:
