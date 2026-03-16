@@ -57,16 +57,16 @@ src/whisper_ui/
   worker/     # RQ task queue definitions
   storage/    # SQLite database + file I/O
   export/     # SRT/VTT/TXT/JSON/DOCX exporters
-  ui/         # Streamlit UI components and labels
-  pages/      # Streamlit multipage views
+  ui/         # Shared labels
+  web/        # FastAPI application (routes, templates, static)
 ```
 
 **Layer dependencies** (each layer may only import from layers above it):
 
 ```text
-core <- pipeline <- worker <- ui/pages
-core <- storage  <- worker <- ui/pages
-core <- export              <- ui/pages
+core <- pipeline <- worker <- web
+core <- storage  <- worker <- web
+core <- export              <- web
 ```
 
 ## Pull Request Guidelines
