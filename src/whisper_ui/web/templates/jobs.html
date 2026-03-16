@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>{{ labels.JOBS_HEADER }}</h1>
+
+{% if submitted %}
+<article class="alert-success" aria-label="Success">
+  {{ labels.UPLOAD_BATCH_SUBMITTED.format(count=submitted) }}
+</article>
+{% endif %}
+
+{# Status filter — outside htmx swap area so it won't be disrupted #}
+<label for="status-filter">{{ labels.JOBS_FILTER_LABEL }}</label>
+<select id="status-filter" name="status"
+        hx-get="/jobs/list" hx-target="#job-list-wrapper" hx-swap="outerHTML"
+        hx-trigger="change" hx-include="this">
+  <option value="">{{ labels.JOBS_FILTER_ALL }}</option>
+  {% for value, label in labels.STATUS_LABELS.items() %}
+  <option value="{{ value }}" {% if value == status %}selected{% endif %}>{{ label }}</option>
+  {% endfor %}
+</select>
+
+{# Job list fragment — replaced by htmx polling and actions #}
+{% include "_job_list.html" %}
+
+{# Confirm dialog — at page level, outside htmx swap area #}
+<div x-data="confirmDialog()" @open-confirm.window="show($event.detail)">
+  <dialog x-ref="dialog">
+    <article>
+      <header>
+        <button aria-label="Close" rel="prev" @click="cancel()"></button>
+        <h3 x-text="title"></h3>
+      </header>
+      <p x-text="message"></p>
+      <footer>
+        <button class="secondary" @click="cancel()">{{ labels.JOBS_FILTER_ALL|default('') }}取消</button>
+        <button @click="doConfirm()" x-text="confirmText"></button>
+      </footer>
+    </article>
+  </dialog>
+</div>
+
+{# Batch download dialog — at page level #}
+<div x-data="batchDownloadDialog()" @open-batch-download.window="show($event.detail)">
+  <dialog x-ref="dlDialog">
+    <article>
+      <header>
+        <button aria-label="Close" rel="prev" @click="cancel()"></button>
+        <h3>{{ labels.JOBS_BATCH_DOWNLOAD }}</h3>
+      </header>
+      <label>
+        {{ labels.JOBS_BATCH_DOWNLOAD_FORMAT }}
+        <select x-model="format">
+          {% for fmt in export_formats %}
+          <option value="{{ fmt }}">{{ fmt|upper }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <footer>
+        <button class="secondary" @click="cancel()">取消</button>
+        <a :href="'/jobs/batch/' + batchId + '/download?format=' + format"
+           role="button" @click="cancel()">
+          {{ labels.JOBS_BATCH_DOWNLOAD_BUTTON }}
+        </a>
+      </footer>
+    </article>
+  </dialog>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function confirmDialog() {
+  return {
+    title: '',
+    message: '',
+    confirmText: '',
+    actionUrl: '',
+    actionMethod: 'POST',
+    show(detail) {
+      this.title = detail.title;
+      this.message = detail.message;
+      this.confirmText = detail.confirmText || '確認';
+      this.actionUrl = detail.url;
+      this.actionMethod = detail.method || 'POST';
+      this.$refs.dialog.showModal();
+    },
+    cancel() {
+      this.$refs.dialog.close();
+    },
+    doConfirm() {
+      this.$refs.dialog.close();
+      htmx.ajax(this.actionMethod, this.actionUrl, {target: 'body', swap: 'none'});
+    }
+  }
+}
+
+function batchDownloadDialog() {
+  return {
+    batchId: '',
+    format: 'srt',
+    show(detail) {
+      this.batchId = detail.batchId;
+      this.format = 'srt';
+      this.$refs.dlDialog.showModal();
+    },
+    cancel() {
+      this.$refs.dlDialog.close();
+    }
+  }
+}
+</script>
+{% endblock %}

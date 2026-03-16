@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>{{ labels.VIEWER_HEADER }}</h1>
+
+{% if error == 'not_found' %}
+<article class="alert-error">{{ labels.VIEWER_NOT_FOUND }}</article>
+{% elif error == 'not_completed' %}
+<article class="alert-error">{{ labels.VIEWER_NOT_COMPLETED.format(status=job.status.value) }}</article>
+{% elif error == 'no_result' %}
+<article class="alert-error">{{ labels.VIEWER_RESULT_NOT_FOUND }}</article>
+{% endif %}
+
+{# Job selector #}
+{% if completed_jobs %}
+<label for="job-select">{{ labels.VIEWER_SELECT_JOB }}</label>
+<div class="viewer-select-row">
+  <select id="job-select" onchange="if(this.value) window.location.href='/viewer/'+this.value">
+    <option value="">--</option>
+    {% for j in completed_jobs %}
+    <option value="{{ j.id }}" {% if j.id == selected_job_id %}selected{% endif %}>
+      {{ j.filename }} ({{ j.created_at[:TIMESTAMP_DISPLAY_LENGTH] }})
+    </option>
+    {% endfor %}
+  </select>
+</div>
+{% else %}
+<p>{{ labels.VIEWER_NO_COMPLETED }}</p>
+{% endif %}
+
+{# Transcript display #}
+{% if result %}
+<hr>
+<h2>{{ labels.VIEWER_TRANSCRIPT_TITLE.format(name=job.filename) }}</h2>
+
+{% if result.duration > 0 %}
+{% set minutes = (result.duration // 60)|int %}
+{% set seconds = (result.duration % 60)|int %}
+<p><small>{{ labels.VIEWER_METADATA.format(minutes=minutes, seconds=seconds, segments=result.segments|length, language=result.language) }}</small></p>
+{% endif %}
+
+{# Export buttons #}
+<div class="export-buttons">
+  {% for fmt in export_formats %}
+  <a href="/viewer/{{ job.id }}/export/{{ fmt }}" role="button" class="outline small-btn" download>
+    {{ fmt|upper }}
+  </a>
+  {% endfor %}
+</div>
+
+<hr>
+
+{# Segments #}
+{% if result.segments %}
+<div class="transcript">
+  {% for seg in result.segments %}
+  <div class="segment">
+    <code>{{ seg.start|format_time }} - {{ seg.end|format_time }}</code>
+    {% if seg.speaker %}<strong>[{{ seg.speaker }}]</strong>{% endif %}
+    {{ seg.text }}
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p>{{ labels.VIEWER_NO_SEGMENTS }}</p>
+{% endif %}
+
+{% endif %}
+{% endblock %}

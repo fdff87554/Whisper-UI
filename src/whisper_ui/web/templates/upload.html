@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>{{ labels.UPLOAD_HEADER }}</h1>
+<p>{{ labels.UPLOAD_DESCRIPTION }}</p>
+<small>{{ labels.UPLOAD_SUPPORTED_FORMATS.format(formats=supported_extensions|join(', ')) }}</small>
+
+{% set error = request.query_params.get('error', '') %}
+{% if error %}
+<article class="alert-error" aria-label="Error">
+  {% if error == 'no_file' %}
+  {{ labels.UPLOAD_NO_FILE }}
+  {% elif error == 'no_files' %}
+  {{ labels.UPLOAD_NO_SUPPORTED_FILES }}
+  {% elif error == 'too_many' %}
+  {{ labels.UPLOAD_BATCH_EXCEEDS_LIMIT.format(limit=50, count=request.query_params.get('count', '?')) }}
+  {% elif error == 'queue' %}
+  {{ labels.UPLOAD_QUEUE_ERROR.format(error='Redis') }}
+  {% endif %}
+</article>
+{% endif %}
+
+<form method="post" action="/upload" enctype="multipart/form-data">
+  <div x-data="{ tab: 'files' }">
+    <div role="group">
+      <button type="button" :class="tab === 'files' ? '' : 'secondary outline'" @click="tab = 'files'">
+        {{ labels.UPLOAD_TAB_FILES }}
+      </button>
+      <button type="button" :class="tab === 'folder' ? '' : 'secondary outline'" @click="tab = 'folder'">
+        {{ labels.UPLOAD_TAB_FOLDER }}
+      </button>
+    </div>
+
+    <div x-show="tab === 'files'">
+      <label for="upload-files">{{ labels.UPLOAD_CHOOSE_FILE }}</label>
+      <input type="file" id="upload-files" name="files" multiple
+             accept="{{ supported_extensions|join(',') }}"
+             :disabled="tab !== 'files'">
+    </div>
+
+    <div x-show="tab === 'folder'">
+      <p><small>{{ labels.UPLOAD_FOLDER_DESCRIPTION }}</small></p>
+      <label for="upload-folder">{{ labels.UPLOAD_CHOOSE_FOLDER }}</label>
+      <input type="file" id="upload-folder" name="files" webkitdirectory
+             :disabled="tab !== 'folder'">
+    </div>
+  </div>
+
+  <div class="grid">
+    <label>
+      {{ labels.UPLOAD_LANGUAGE }}
+      <select name="language">
+        {% for code in supported_languages %}
+        <option value="{{ code }}" {% if code == settings.language %}selected{% endif %}>
+          {{ LANGUAGE_LABELS.get(code, code) }}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label>
+      {{ labels.UPLOAD_MODEL }}
+      <select name="model_name">
+        {% for model in whisper_models %}
+        <option value="{{ model }}" {% if model == settings.whisper_model %}selected{% endif %}>
+          {{ model }}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label>
+      {{ labels.UPLOAD_NUM_SPEAKERS }}
+      <input type="number" name="num_speakers" value="0" min="0" max="20">
+    </label>
+  </div>
+
+  <fieldset>
+    <label>
+      <input type="checkbox" name="enable_diarization" value="true"
+             {% if settings.hf_token %}checked{% else %}disabled{% endif %}>
+      {{ labels.UPLOAD_ENABLE_DIARIZATION }}
+    </label>
+    {% if not settings.hf_token %}
+    <small>{{ labels.UPLOAD_DIARIZATION_UNAVAILABLE }}</small>
+    {% endif %}
+
+    <label>
+      <input type="checkbox" name="convert_to_traditional" value="true" checked>
+      {{ labels.UPLOAD_CONVERT_TRADITIONAL }}
+    </label>
+  </fieldset>
+
+  <button type="submit">{{ labels.UPLOAD_START }}</button>
+</form>
+{% endblock %}
