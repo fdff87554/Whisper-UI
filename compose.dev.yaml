@@ -1,6 +1,8 @@
 # Development overrides - bind mount source code for live reload
 services:
   frontend:
+    environment:
+      - PYTHONPATH=/app/src
     volumes:
       - ./src:/app/src
       - ./data:/app/data

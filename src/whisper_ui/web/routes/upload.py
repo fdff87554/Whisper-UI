@@ -43,11 +43,14 @@ async def upload_submit(
     enable_diarization: Annotated[bool, Form()] = False,
     convert_to_traditional: Annotated[bool, Form()] = False,
 ):
-    # Filter valid files with supported extensions
+    # Distinguish "no file selected" from "unsupported format"
+    has_any_files = files and any(f.filename for f in files)
     valid_files = [
         f for f in (files or []) if f.filename and PurePosixPath(f.filename).suffix.lower() in SUPPORTED_EXTENSIONS
     ]
 
+    if not has_any_files:
+        return RedirectResponse("/upload?error=no_file", status_code=303)
     if not valid_files:
         return RedirectResponse("/upload?error=no_files", status_code=303)
 
