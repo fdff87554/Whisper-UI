@@ -3,9 +3,8 @@ from __future__ import annotations
 import dataclasses
 import logging
 import sqlite3
-from pathlib import Path
-
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from whisper_ui.core.constants import DEFAULT_JOB_LIST_LIMIT, SQLITE_BUSY_TIMEOUT_MS
 from whisper_ui.core.models import Job, JobStatus
