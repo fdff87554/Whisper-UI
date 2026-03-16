@@ -137,6 +137,13 @@ class JobDatabase:
         ).fetchall()
         return [_row_to_job(r) for r in rows]
 
+    def has_active_jobs(self) -> bool:
+        row = self._conn.execute(
+            "SELECT EXISTS(SELECT 1 FROM jobs WHERE status IN (?, ?))",
+            (JobStatus.QUEUED.value, JobStatus.PROCESSING.value),
+        ).fetchone()
+        return bool(row[0])
+
     def delete_job(self, job_id: str) -> None:
         self._conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
         self._conn.commit()

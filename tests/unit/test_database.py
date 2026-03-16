@@ -153,6 +153,38 @@ def test_recover_stale_jobs(db: JobDatabase):
     assert fresh_fetched.status == JobStatus.PROCESSING
 
 
+def test_has_active_jobs_empty(db: JobDatabase):
+    assert db.has_active_jobs() is False
+
+
+def test_has_active_jobs_only_terminal(db: JobDatabase):
+    completed = Job(filename="done.mp3", filepath="/tmp/done.mp3")
+    completed.status = JobStatus.COMPLETED
+    db.insert_job(completed)
+
+    failed = Job(filename="err.mp3", filepath="/tmp/err.mp3")
+    failed.status = JobStatus.FAILED
+    db.insert_job(failed)
+
+    assert db.has_active_jobs() is False
+
+
+def test_has_active_jobs_with_queued(db: JobDatabase):
+    queued = Job(filename="q.mp3", filepath="/tmp/q.mp3")
+    queued.status = JobStatus.QUEUED
+    db.insert_job(queued)
+
+    assert db.has_active_jobs() is True
+
+
+def test_has_active_jobs_with_processing(db: JobDatabase):
+    processing = Job(filename="p.mp3", filepath="/tmp/p.mp3")
+    processing.status = JobStatus.PROCESSING
+    db.insert_job(processing)
+
+    assert db.has_active_jobs() is True
+
+
 def test_recover_stale_jobs_ignores_non_processing(db: JobDatabase):
     queued = Job(filename="queued.mp3", filepath="/tmp/queued.mp3")
     queued.status = JobStatus.QUEUED
