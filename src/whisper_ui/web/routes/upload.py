@@ -12,7 +12,30 @@ from whisper_ui.core.models import SUPPORTED_LANGUAGES, WHISPER_MODELS, Job, Job
 from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
 from whisper_ui.web.deps import DbDep, FileStoreDep, RedisDep, SettingsDep, templates
 
+_READ_CHUNK_SIZE = 1024 * 1024  # 1 MB
+
 router = APIRouter()
+
+
+def _format_size(size_bytes: int) -> str:
+    if size_bytes >= 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024**3):.1f} GB"
+    return f"{size_bytes / (1024**2):.0f} MB"
+
+
+async def _read_with_limit(upload: UploadFile, max_size: int) -> bytes | None:
+    """Read upload in chunks; return None if file exceeds max_size."""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await upload.read(_READ_CHUNK_SIZE)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_size:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -36,6 +59,7 @@ async def upload_submit(
     db: DbDep,
     filestore: FileStoreDep,
     redis: RedisDep,
+    settings: SettingsDep,
     files: Annotated[list[UploadFile] | None, File()] = None,
     language: Annotated[str, Form()] = "zh",
     model_name: Annotated[str, Form()] = "large-v3",
@@ -43,6 +67,12 @@ async def upload_submit(
     enable_diarization: Annotated[bool, Form()] = False,
     convert_to_traditional: Annotated[bool, Form()] = False,
 ):
+    # Server-side validation of select inputs
+    if language not in SUPPORTED_LANGUAGES:
+        return RedirectResponse("/upload?error=invalid_language", status_code=303)
+    if model_name not in WHISPER_MODELS:
+        return RedirectResponse("/upload?error=invalid_model", status_code=303)
+
     # Distinguish "no file selected" from "unsupported format"
     has_any_files = files and any(f.filename for f in files)
     valid_files = [
@@ -67,8 +97,15 @@ async def upload_submit(
     except Exception:
         return RedirectResponse("/upload?error=queue", status_code=303)
 
+    max_size = settings.max_upload_size
     for uploaded_file in valid_files:
         display_name = PurePosixPath(uploaded_file.filename or "unknown").name
+
+        file_data = await _read_with_limit(uploaded_file, max_size)
+        if file_data is None:
+            limit_str = _format_size(max_size)
+            return RedirectResponse(f"/upload?error=too_large&name={display_name}&limit={limit_str}", status_code=303)
+
         job = Job(
             filename=display_name,
             language=language,
@@ -79,7 +116,6 @@ async def upload_submit(
             batch_id=batch_id,
         )
 
-        file_data = await uploaded_file.read()
         dest = filestore.save_upload(job.id, display_name, file_data)
         job.filepath = str(dest)
         job.status = JobStatus.QUEUED
