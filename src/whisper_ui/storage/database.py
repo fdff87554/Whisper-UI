@@ -5,6 +5,8 @@ import logging
 import sqlite3
 from pathlib import Path
 
+from datetime import UTC, datetime, timedelta
+
 from whisper_ui.core.constants import DEFAULT_JOB_LIST_LIMIT, SQLITE_BUSY_TIMEOUT_MS
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.storage.migrations import init_db
@@ -79,6 +81,47 @@ class JobDatabase:
             (limit, offset),
         ).fetchall()
         return [_row_to_job(r) for r in rows]
+
+    def count_jobs(self, *, status: str | None = None) -> int:
+        if status is not None:
+            row = self._conn.execute("SELECT COUNT(*) FROM jobs WHERE status = ?", (status,)).fetchone()
+        else:
+            row = self._conn.execute("SELECT COUNT(*) FROM jobs").fetchone()
+        return row[0]
+
+    def list_jobs_filtered(
+        self,
+        *,
+        status: str | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[Job]:
+        if status is not None:
+            rows = self._conn.execute(
+                "SELECT * FROM jobs WHERE status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (status, limit, offset),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (limit, offset),
+            ).fetchall()
+        return [_row_to_job(r) for r in rows]
+
+    def recover_stale_jobs(self, timeout_seconds: int, error_message: str) -> int:
+        threshold = (datetime.now(UTC) - timedelta(seconds=timeout_seconds)).isoformat()
+        cursor = self._conn.execute(
+            "UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE status = ? AND updated_at < ?",
+            (
+                JobStatus.FAILED.value,
+                error_message,
+                datetime.now(UTC).isoformat(),
+                JobStatus.PROCESSING.value,
+                threshold,
+            ),
+        )
+        self._conn.commit()
+        return cursor.rowcount
 
     def update_job(self, job: Job) -> None:
         job.touch()
