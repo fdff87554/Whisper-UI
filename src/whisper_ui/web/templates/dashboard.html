@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon_layers, icon_clock, icon_check, icon_plus, icon_eye %}
+
+{% block content %}
+<h1 class="text-2xl font-medium mb-6">{{ labels.DASHBOARD_HEADER }}</h1>
+
+{# Quick Stats #}
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+  <div class="card bg-base-200 border border-base-300">
+    <div class="card-body p-4">
+      <div class="flex items-center gap-3">
+        {{ icon_layers("w-5 h-5 text-primary opacity-70") }}
+        <div>
+          <div class="text-2xl font-bold">{{ total_jobs }}</div>
+          <div class="text-sm opacity-60">{{ labels.DASHBOARD_TOTAL_JOBS }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="card bg-base-200 border border-base-300">
+    <div class="card-body p-4">
+      <div class="flex items-center gap-3">
+        {{ icon_clock("w-5 h-5 text-warning opacity-70") }}
+        <div>
+          <div class="text-2xl font-bold">{{ active_count }}</div>
+          <div class="text-sm opacity-60">{{ labels.DASHBOARD_ACTIVE_JOBS }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="card bg-base-200 border border-base-300">
+    <div class="card-body p-4">
+      <div class="flex items-center gap-3">
+        {{ icon_check("w-5 h-5 text-success opacity-70") }}
+        <div>
+          <div class="text-2xl font-bold">{{ completed_today }}</div>
+          <div class="text-sm opacity-60">{{ labels.DASHBOARD_COMPLETED_TODAY }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# Active Jobs — polling area #}
+{% if active_jobs %}
+<section class="mb-8">
+  <h2 class="text-lg font-medium mb-3">{{ labels.DASHBOARD_ACTIVE_SECTION }}</h2>
+  <div id="dashboard-active"
+       hx-get="/dashboard/active"
+       hx-trigger="every 3s"
+       hx-swap="innerHTML">
+    {% include "_dashboard_active.html" %}
+  </div>
+</section>
+{% endif %}
+
+{# Recent Completed #}
+{% if recent_completed %}
+<section class="mb-8">
+  <h2 class="text-lg font-medium mb-3">{{ labels.DASHBOARD_RECENT_SECTION }}</h2>
+  <div class="flex flex-col gap-2">
+    {% for job in recent_completed %}
+    <a href="/viewer/{{ job.id }}" class="card bg-base-200 border border-base-300 hover:border-primary/30 transition-colors">
+      <div class="card-body p-4">
+        <div class="flex items-center justify-between gap-4">
+          <div class="flex-1 min-w-0">
+            <div class="font-medium truncate">{{ job.filename }}</div>
+            <div class="text-sm opacity-60">
+              {% if job.duration %}{{ (job.duration // 60)|int }}分{{ (job.duration % 60)|int }}秒{% endif %}
+              <span class="mx-1">|</span>
+              {{ job.created_at|relative_time }}
+            </div>
+          </div>
+          <div class="flex-shrink-0">
+            {{ icon_eye("w-4 h-4 opacity-40") }}
+          </div>
+        </div>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{# Empty state #}
+{% if total_jobs == 0 %}
+<div class="text-center py-16 opacity-60">
+  <svg class="w-16 h-16 mx-auto mb-4 opacity-30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+    <line x1="12" x2="12" y1="19" y2="22"/>
+  </svg>
+  <p class="mb-4">{{ labels.DASHBOARD_EMPTY }}</p>
+</div>
+{% endif %}
+
+{# CTA #}
+<div class="flex justify-center">
+  <a href="/upload" class="btn btn-primary gap-2">
+    {{ icon_plus("w-5 h-5") }}
+    {{ labels.DASHBOARD_NEW_TRANSCRIPTION }}
+  </a>
+</div>
+{% endblock %}

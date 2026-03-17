@@ -35,7 +35,7 @@ def _is_htmx(request: Request) -> bool:
 
 def _htmx_error(message: str) -> Response:
     """Return an HTML fragment for htmx to swap into the feedback area."""
-    html = f'<article class="alert-error" aria-label="Error">{escape(message)}</article>'
+    html = f'<div class="alert alert-error" role="alert">{escape(message)}</div>'
     return HTMLResponse(content=html)
 
 
@@ -58,7 +58,6 @@ async def _stream_to_file(upload: UploadFile, dest: Path, max_size: int) -> bool
     return True
 
 
-@router.get("/", response_class=HTMLResponse)
 @router.get("/upload", response_class=HTMLResponse)
 async def upload_page(request: Request, settings: SettingsDep):
     return templates.TemplateResponse(

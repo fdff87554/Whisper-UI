@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
@@ -37,7 +38,36 @@ def make_content_disposition(filename: str, disposition: str = "attachment") -> 
     return f"{disposition}; filename*=UTF-8''{encoded}"
 
 
+def _format_relative_time(iso_str: str) -> str:
+    """Convert an ISO timestamp to a human-readable relative time string."""
+    try:
+        dt = datetime.fromisoformat(iso_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        now = datetime.now(UTC)
+        diff = now - dt
+        seconds = int(diff.total_seconds())
+
+        if seconds < 60:
+            return "剛剛"
+        if seconds < 3600:
+            minutes = seconds // 60
+            return f"{minutes} 分鐘前"
+        if seconds < 86400:
+            hours = seconds // 3600
+            return f"{hours} 小時前"
+        days = seconds // 86400
+        if days == 1:
+            return "昨天"
+        if days < 30:
+            return f"{days} 天前"
+        return iso_str[:10]
+    except (ValueError, TypeError):
+        return iso_str
+
+
 templates.env.filters["format_time"] = _format_time
+templates.env.filters["relative_time"] = _format_relative_time
 templates.env.globals["JOB_ID_DISPLAY_LENGTH"] = JOB_ID_DISPLAY_LENGTH
 templates.env.globals["TIMESTAMP_DISPLAY_LENGTH"] = TIMESTAMP_DISPLAY_LENGTH
 templates.env.globals["MAX_BATCH_SIZE"] = MAX_BATCH_SIZE
