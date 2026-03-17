@@ -3,6 +3,11 @@
 # ruff: noqa: RUF001
 from __future__ import annotations
 
+# -- Download progress messages --
+DOWNLOAD_EXTRACTING_INFO = "正在取得影片資訊..."
+DOWNLOAD_IN_PROGRESS = "正在下載音訊..."
+DOWNLOAD_DONE = "音訊下載完成。"
+
 # -- Pipeline progress messages --
 PREPROCESS_CONVERTING = "正在將音訊轉換為 16kHz 單聲道 WAV..."
 PREPROCESS_DONE = "音訊預處理完成。"
