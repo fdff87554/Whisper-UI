@@ -81,6 +81,10 @@ def create_app() -> FastAPI:
     application.include_router(jobs.router)
     application.include_router(viewer.router)
 
+    @application.get("/health")
+    async def health():
+        return {"status": "ok"}
+
     return application
 
 
