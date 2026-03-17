@@ -1,0 +1,54 @@
+{% from "_icons.html" import icon_home, icon_upload, icon_list, icon_sun, icon_moon %}
+{# Desktop sidebar (>= lg) and tablet icon rail (md-lg) #}
+<div class="flex flex-col h-full bg-base-200">
+  {# Logo #}
+  <div class="p-4 flex items-center gap-2 border-b border-base-300">
+    <span class="font-bold text-lg whitespace-nowrap overflow-hidden text-ellipsis">Whisper UI</span>
+  </div>
+
+  {# Navigation #}
+  <nav class="flex-1 py-4">
+    <ul class="menu gap-1 px-2">
+      <li>
+        <a href="/"
+           hx-boost="true" hx-target=".main-content" hx-swap="innerHTML transition:true" hx-push-url="true"
+           :class="{ 'active': $store.nav.activePage === 'dashboard' }"
+           title="{{ labels.NAV_DASHBOARD }}">
+          {{ icon_home("w-5 h-5 shrink-0") }}
+          <span class="sidebar-label">{{ labels.NAV_DASHBOARD }}</span>
+        </a>
+      </li>
+      <li>
+        <a href="/upload"
+           hx-boost="true" hx-target=".main-content" hx-swap="innerHTML transition:true" hx-push-url="true"
+           :class="{ 'active': $store.nav.activePage === 'upload' }"
+           title="{{ labels.NAV_UPLOAD }}">
+          {{ icon_upload("w-5 h-5 shrink-0") }}
+          <span class="sidebar-label">{{ labels.NAV_UPLOAD }}</span>
+        </a>
+      </li>
+      <li>
+        <a href="/jobs"
+           hx-boost="true" hx-target=".main-content" hx-swap="innerHTML transition:true" hx-push-url="true"
+           :class="{ 'active': $store.nav.activePage === 'jobs' }"
+           title="{{ labels.NAV_JOBS }}">
+          {{ icon_list("w-5 h-5 shrink-0") }}
+          <span class="sidebar-label">{{ labels.NAV_JOBS }}</span>
+        </a>
+      </li>
+    </ul>
+  </nav>
+
+  {# Theme toggle #}
+  <div class="p-4 border-t border-base-300">
+    <button class="btn btn-ghost btn-sm w-full justify-start gap-2"
+            @click="theme = theme === 'whisper-light' ? 'whisper-dark' : 'whisper-light'">
+      <template x-if="theme === 'whisper-light'">
+        <span class="flex items-center gap-2">{{ icon_moon("w-4 h-4") }} <span class="sidebar-label">{{ labels.THEME_TOGGLE_DARK }}</span></span>
+      </template>
+      <template x-if="theme !== 'whisper-light'">
+        <span class="flex items-center gap-2">{{ icon_sun("w-4 h-4") }} <span class="sidebar-label">{{ labels.THEME_TOGGLE_LIGHT }}</span></span>
+      </template>
+    </button>
+  </div>
+</div>

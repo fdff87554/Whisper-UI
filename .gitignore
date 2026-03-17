@@ -50,6 +50,9 @@ node_modules/
 !SECURITY.md
 !LICENSE.md
 
+# CSS build output
+src/whisper_ui/web/static/style.css
+
 # Project
 logs/
 tmp/

@@ -1,0 +1,27 @@
+{# htmx fragment: active jobs on dashboard — polled every 5s #}
+{% if active_jobs %}
+<section class="mb-8">
+  <h2 class="text-lg font-medium mb-3">{{ labels.DASHBOARD_ACTIVE_SECTION }}</h2>
+  {% for job in active_jobs %}
+  <div class="card bg-base-200 border border-base-300 mb-2">
+    <div class="card-body p-4">
+      <div class="flex items-center justify-between gap-4 mb-2">
+        <span class="font-medium truncate flex-1 min-w-0">{{ job.filename }}</span>
+        <span class="badge badge-sm
+          {% if job.status.value == 'processing' %}badge-warning{% else %}badge-info{% endif %}">
+          {{ labels.STATUS_LABELS[job.status.value] }}
+        </span>
+      </div>
+      {% set pd = progress_data.get(job.id, {}) %}
+      {% set progress_val = pd.get('progress', '0')|float %}
+      {% set progress_msg = pd.get('message', labels.JOBS_WAITING) %}
+      <progress class="progress progress-primary w-full" value="{{ (progress_val * 100)|int }}" max="100"></progress>
+      <div class="flex justify-between text-sm opacity-60 mt-1">
+        <span>{{ progress_msg }}</span>
+        <span>{{ (progress_val * 100)|int }}%</span>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
