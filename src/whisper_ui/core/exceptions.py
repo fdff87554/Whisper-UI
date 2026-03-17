@@ -22,6 +22,10 @@ class DiarizationError(PipelineError):
     pass
 
 
+class DownloadError(PipelineError):
+    pass
+
+
 class StorageError(WhisperUIError):
     pass
 
