@@ -132,16 +132,24 @@ textarea {
 .badge-completed  { background: var(--color-status-completed); color: #fff; }
 .badge-failed     { background: var(--color-status-failed); color: #fff; }
 
-/* Job card layout */
+/* --- Jobs Page --- */
+
+/* Job group — lightweight card (override Pico article heaviness) */
 .job-group {
+  --pico-card-background-color: transparent;
+  --pico-card-border-color: transparent;
+  --pico-card-box-shadow: none;
+  --pico-card-sectioning-background-color: transparent;
   margin-bottom: 0;
+  padding: var(--space-md) 0;
+  border-bottom: 1px solid var(--pico-muted-border-color);
 }
-.job-group + .job-group {
-  margin-top: 1rem;
+.job-group:last-child {
+  border-bottom: none;
 }
 
 .job-card {
-  padding: 0.5rem 0;
+  padding: var(--space-sm) 0;
 }
 .job-card + .job-card {
   border-top: 1px solid var(--pico-muted-border-color);
@@ -152,14 +160,14 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: var(--space-sm);
 }
 .job-card-row-2 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
-  margin-top: 0.25rem;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
 }
 .job-card-filename {
   overflow: hidden;
@@ -167,13 +175,16 @@ textarea {
   white-space: nowrap;
   flex: 1;
   min-width: 0;
+  font-weight: 500;
 }
 .job-card-meta {
   white-space: nowrap;
+  font-size: 0.8rem;
+  color: var(--pico-muted-color);
 }
 .job-card-actions {
   display: flex;
-  gap: 0.4rem;
+  gap: var(--space-xs);
   flex-shrink: 0;
 }
 
@@ -184,27 +195,27 @@ textarea {
 .batch-summary .batch-header {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: var(--space-md);
   flex-wrap: wrap;
 }
 .batch-summary .batch-info {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-sm);
   flex-wrap: wrap;
 }
 .batch-progress-text {
   color: var(--pico-muted-color);
-  font-size: 0.875rem;
+  font-size: 0.8rem;
 }
 .batch-progress-bar {
-  margin: 0.5rem 0 0;
-  height: 0.4rem;
+  margin: var(--space-sm) 0 0;
+  height: 0.5rem;
 }
 .batch-actions {
   display: flex;
-  gap: 0.4rem;
+  gap: var(--space-xs);
   flex-shrink: 0;
 }
 
@@ -212,8 +223,8 @@ textarea {
 .job-progress {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.3rem;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
 }
 .job-progress progress {
   flex: 1;
@@ -279,8 +290,9 @@ a.small-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 1rem;
-  margin-top: 1.5rem;
+  gap: var(--space-md);
+  margin-top: var(--space-xl);
+  font-size: 0.875rem;
 }
 
 /* Export buttons row */
