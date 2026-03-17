@@ -70,27 +70,23 @@ def process_transcription(job_id: str) -> str:
             PostprocessStage(convert_to_traditional=job.convert_to_traditional),
         ]
 
+        context = {
+            "language": job.language,
+            "batch_size": settings.batch_size,
+            "num_speakers": job.num_speakers,
+        }
+
         if job.source_url:
             download_dir = str(filestore.prepare_upload_path(job.id, "_").parent)
             stages = [DownloadStage(max_duration=settings.youtube_max_duration), *common_stages]
             stage_weights = STAGE_WEIGHTS_WITH_DOWNLOAD
-            context = {
-                "source_url": job.source_url,
-                "download_dir": download_dir,
-                "input_path": "",
-                "language": job.language,
-                "batch_size": settings.batch_size,
-                "num_speakers": job.num_speakers,
-            }
+            context["source_url"] = job.source_url
+            context["download_dir"] = download_dir
+            context["input_path"] = ""
         else:
             stages = common_stages
             stage_weights = None
-            context = {
-                "input_path": job.filepath,
-                "language": job.language,
-                "batch_size": settings.batch_size,
-                "num_speakers": job.num_speakers,
-            }
+            context["input_path"] = job.filepath
 
         def on_progress(progress: float, message: str) -> None:
             reporter.report(progress, message)

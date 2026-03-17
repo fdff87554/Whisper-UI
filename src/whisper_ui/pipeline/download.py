@@ -63,7 +63,7 @@ class DownloadStage:
                 if info is None:
                     raise DownloadError("Failed to extract video information.")
 
-                duration = info.get("duration", 0) or 0
+                duration = info.get("duration") or 0
                 if duration > self._max_duration:
                     hours = self._max_duration // 3600
                     raise DownloadError(f"Video duration ({duration}s) exceeds the maximum allowed ({hours}h).")

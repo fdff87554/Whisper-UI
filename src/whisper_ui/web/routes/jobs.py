@@ -113,7 +113,7 @@ async def retry_job(job_id: str, db: DbDep, redis: RedisDep):
         q.enqueue(
             "whisper_ui.worker.tasks.process_transcription",
             job.id,
-            job_timeout="1h",
+            job_timeout="2h" if job.source_url else "1h",
         )
     except Exception as e:
         job.status = JobStatus.FAILED
@@ -163,7 +163,7 @@ async def retry_batch(batch_id: str, db: DbDep, redis: RedisDep):
             q.enqueue(
                 "whisper_ui.worker.tasks.process_transcription",
                 job.id,
-                job_timeout="1h",
+                job_timeout="2h" if job.source_url else "1h",
             )
         except Exception:
             logger.exception("Failed to retry job %s", job.id)
