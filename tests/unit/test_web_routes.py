@@ -109,6 +109,10 @@ class TestJobsRoutes:
         resp = client.delete("/jobs/not-a-valid-hex-id")
         assert resp.status_code == 400
 
+    def test_negative_page_clamped_to_zero(self, client):
+        resp = client.get("/jobs/list?page=-5")
+        assert resp.status_code == 200
+
     def test_delete_active_job_returns_409(self, client, db):
         job = Job(filename="active.mp3", status=JobStatus.PROCESSING, language="zh")
         db.insert_job(job)
