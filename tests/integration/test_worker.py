@@ -27,6 +27,28 @@ class TestWorkerTaskSetup:
             result = process_transcription("nonexistent-id")
             assert "not found" in result
 
+    def test_process_transcription_db_get_job_raises(self, db: JobDatabase, settings):
+        mock_redis = MagicMock()
+        mock_redis.hset = MagicMock()
+        mock_redis.expire = MagicMock()
+
+        with (
+            patch("whisper_ui.worker.tasks.get_settings", return_value=settings),
+            patch("whisper_ui.worker.tasks.Redis") as mock_redis_cls,
+            patch("whisper_ui.worker.tasks.JobDatabase") as mock_db_cls,
+        ):
+            mock_redis_cls.from_url.return_value = mock_redis
+            mock_db_instance = MagicMock()
+            mock_db_instance.get_job.side_effect = RuntimeError("db read failed")
+            mock_db_cls.return_value = mock_db_instance
+
+            from whisper_ui.worker.tasks import process_transcription
+
+            result = process_transcription("some-job-id")
+            assert "failed" in result
+            assert "db read failed" in result
+            mock_db_instance.update_job.assert_not_called()
+
     def test_job_model_has_diarization_fields(self):
         job = Job(enable_diarization=False, convert_to_traditional=False)
         assert job.enable_diarization is False

@@ -8,7 +8,7 @@ from redis import Redis
 from whisper_ui.core.config import get_settings
 from whisper_ui.core.constants import ERROR_DISPLAY_LENGTH, ERROR_MAX_LENGTH
 from whisper_ui.core.messages import PIPELINE_COMPLETE
-from whisper_ui.core.models import JobStatus
+from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.pipeline.align import AlignStage
 from whisper_ui.pipeline.assign_speakers import AssignSpeakersStage
 from whisper_ui.pipeline.diarize import DiarizeStage
@@ -42,6 +42,7 @@ def process_transcription(job_id: str) -> str:
     filestore = FileStore(settings.upload_dir, settings.output_dir)
 
     context: dict = {}
+    job: Job | None = None
     try:
         job = db.get_job(job_id)
         if job is None:
@@ -101,10 +102,11 @@ def process_transcription(job_id: str) -> str:
         _cleanup_preprocessed(context)
         error_msg = str(e)
         logger.exception("Job %s failed: %s", job_id, error_msg)
-        job.status = JobStatus.FAILED
-        job.error = error_msg[:ERROR_MAX_LENGTH]
-        job.progress_message = f"Failed: {error_msg[:ERROR_DISPLAY_LENGTH]}"
-        db.update_job(job)
+        if job is not None:
+            job.status = JobStatus.FAILED
+            job.error = error_msg[:ERROR_MAX_LENGTH]
+            job.progress_message = f"Failed: {error_msg[:ERROR_DISPLAY_LENGTH]}"
+            db.update_job(job)
         reporter.fail(error_msg)
         return f"Job {job_id} failed: {error_msg}"
 
