@@ -45,7 +45,7 @@ def create_app() -> FastAPI:
     application.mount("/static", StaticFiles(directory=_WEB_DIR / "static"), name="static")
 
     # Template globals
-    from whisper_ui.core.models import LANGUAGE_LABELS
+    from whisper_ui.core.languages import LANGUAGE_LABELS
     from whisper_ui.export.factory import available_formats
     from whisper_ui.ui import labels
 
