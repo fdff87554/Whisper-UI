@@ -30,6 +30,7 @@ _JOB_COLUMNS = [
     "result_path",
     "duration",
     "batch_id",
+    "source_url",
 ]
 
 
