@@ -1,69 +1,81 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon_search %}
 
 {% block content %}
-<h1>{{ labels.JOBS_HEADER }}</h1>
+<h1 class="text-2xl font-medium mb-4">{{ labels.JOBS_HEADER }}</h1>
 
-{% if submitted %}
-<article class="alert-success" aria-label="Success">
-  {{ labels.UPLOAD_BATCH_SUBMITTED.format(count=submitted) }}
-</article>
-{% endif %}
-
-{# Status filter — outside htmx swap area so it won't be disrupted #}
-<label for="status-filter">{{ labels.JOBS_FILTER_LABEL }}</label>
-<select id="status-filter" name="status"
-        hx-get="/jobs/list" hx-target="#job-list-wrapper" hx-swap="outerHTML"
-        hx-trigger="change" hx-include="this">
-  <option value="">{{ labels.JOBS_FILTER_ALL }}</option>
+{# Status filter chips #}
+<div class="flex flex-wrap gap-2 mb-4" x-data="{ activeFilter: '{{ status }}' }">
+  {% set filter_options = [('', labels.JOBS_FILTER_ALL)] %}
   {% for value, label in labels.STATUS_LABELS.items() %}
-  <option value="{{ value }}" {% if value == status %}selected{% endif %}>{{ label }}</option>
+    {% set _ = filter_options.append((value, label)) %}
   {% endfor %}
-</select>
+  {% for value, label in [('', labels.JOBS_FILTER_ALL)] + labels.STATUS_LABELS.items()|list %}
+  <button class="btn btn-sm"
+          :class="activeFilter === '{{ value }}' ? 'btn-primary' : 'btn-ghost border border-base-300'"
+          hx-get="/jobs/list?status={{ value }}" hx-target="#job-list-wrapper" hx-swap="outerHTML"
+          @click="activeFilter = '{{ value }}'">
+    {{ label }}
+    {% if value == '' %}
+    <span class="badge badge-sm">{{ total_count }}</span>
+    {% endif %}
+  </button>
+  {% endfor %}
+</div>
+
+{# Search box #}
+<div class="relative mb-4" x-data="{ query: '' }">
+  <span class="absolute left-3 top-1/2 -translate-y-1/2 opacity-40">{{ icon_search("w-4 h-4") }}</span>
+  <input type="search" x-model="query"
+         @input="document.querySelectorAll('[data-job-name]').forEach(el => {
+           el.style.display = !query || el.dataset.jobName.toLowerCase().includes(query.toLowerCase()) ? '' : 'none';
+         })"
+         placeholder="{{ labels.JOBS_SEARCH_PLACEHOLDER }}"
+         class="input input-bordered input-sm w-full max-w-sm pl-9">
+</div>
 
 {# Job list fragment — replaced by htmx polling and actions #}
 {% include "_job_list.html" %}
 
-{# Confirm dialog — at page level, outside htmx swap area #}
+{# Confirm dialog #}
 <div x-data="confirmDialog()" @open-confirm.window="show($event.detail)">
-  <dialog x-ref="dialog">
-    <article>
-      <header>
-        <button aria-label="Close" rel="prev" @click="cancel()"></button>
-        <h3 x-text="title"></h3>
-      </header>
-      <p x-text="message"></p>
-      <footer>
-        <button class="secondary" @click="cancel()">{{ labels.DIALOG_CANCEL }}</button>
-        <button @click="doConfirm()" x-text="confirmText"></button>
-      </footer>
-    </article>
+  <dialog x-ref="dialog" class="modal">
+    <div class="modal-box">
+      <h3 class="text-lg font-bold" x-text="title"></h3>
+      <p class="py-4" x-text="message"></p>
+      <div class="modal-action">
+        <button class="btn btn-ghost" @click="cancel()">{{ labels.DIALOG_CANCEL }}</button>
+        <button class="btn btn-primary" @click="doConfirm()" x-text="confirmText"></button>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
   </dialog>
 </div>
 
-{# Batch download dialog — at page level #}
+{# Batch download dialog #}
 <div x-data="batchDownloadDialog()" @open-batch-download.window="show($event.detail)">
-  <dialog x-ref="dlDialog">
-    <article>
-      <header>
-        <button aria-label="Close" rel="prev" @click="cancel()"></button>
-        <h3>{{ labels.JOBS_BATCH_DOWNLOAD }}</h3>
-      </header>
-      <label>
-        {{ labels.JOBS_BATCH_DOWNLOAD_FORMAT }}
-        <select x-model="format">
-          {% for fmt in export_formats %}
-          <option value="{{ fmt }}">{{ fmt|upper }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <footer>
-        <button class="secondary" @click="cancel()">{{ labels.DIALOG_CANCEL }}</button>
+  <dialog x-ref="dlDialog" class="modal">
+    <div class="modal-box">
+      <h3 class="text-lg font-bold">{{ labels.JOBS_BATCH_DOWNLOAD }}</h3>
+      <div class="py-4">
+        <label class="form-control w-full">
+          <div class="label"><span class="label-text">{{ labels.JOBS_BATCH_DOWNLOAD_FORMAT }}</span></div>
+          <select x-model="format" class="select select-bordered w-full">
+            {% for fmt in export_formats %}
+            <option value="{{ fmt }}">{{ fmt|upper }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <div class="modal-action">
+        <button class="btn btn-ghost" @click="cancel()">{{ labels.DIALOG_CANCEL }}</button>
         <a :href="'/jobs/batch/' + batchId + '/download?format_name=' + format"
-           role="button" @click="cancel()">
+           class="btn btn-primary" @click="cancel()">
           {{ labels.JOBS_BATCH_DOWNLOAD_BUTTON }}
         </a>
-      </footer>
-    </article>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
   </dialog>
 </div>
 {% endblock %}

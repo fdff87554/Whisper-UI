@@ -81,6 +81,7 @@ async def jobs_page(
     ctx = _build_list_context(db, redis, status, page)
     ctx["active_page"] = "jobs"
     ctx["submitted"] = submitted
+    ctx["status_counts"] = db.get_status_counts()
     return templates.TemplateResponse(request=request, name="jobs.html", context=ctx)
 
 
