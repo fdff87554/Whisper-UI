@@ -18,7 +18,7 @@ from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.storage.database import JobDatabase
 from whisper_ui.ui.labels import JOBS_STALE_ERROR
 from whisper_ui.web.batch_zip import create_batch_zip
-from whisper_ui.web.deps import DbDep, FileStoreDep, RedisDep, templates
+from whisper_ui.web.deps import DbDep, FileStoreDep, RedisDep, make_content_disposition, templates
 from whisper_ui.worker.progress import RedisProgressReporter
 
 logger = logging.getLogger(__name__)
@@ -48,21 +48,7 @@ def _group_jobs_by_batch(jobs: list[Job]) -> list[tuple[str, list[Job]]]:
 
 
 def _get_batch_info(db: JobDatabase, batch_ids: set[str]) -> dict[str, dict]:
-    info = {}
-    for batch_id in batch_ids:
-        all_jobs = db.list_jobs_by_batch(batch_id)
-        completed = sum(1 for j in all_jobs if j.status == JobStatus.COMPLETED)
-        failed = sum(1 for j in all_jobs if j.status == JobStatus.FAILED)
-        total = len(all_jobs)
-        all_done = all(j.status in (JobStatus.COMPLETED, JobStatus.FAILED) for j in all_jobs)
-        info[batch_id] = {
-            "all_jobs": all_jobs,
-            "completed": completed,
-            "failed": failed,
-            "total": total,
-            "all_done": all_done,
-        }
-    return info
+    return db.get_batch_stats(batch_ids)
 
 
 def _get_progress_data(redis, jobs: list[Job]) -> dict[str, dict[str, str]]:
@@ -224,18 +210,18 @@ async def delete_batch(batch_id: str, db: DbDep, filestore: FileStoreDep, redis:
 async def batch_download(batch_id: str, db: DbDep, filestore: FileStoreDep, format: str = "srt"):
     all_jobs = db.list_jobs_by_batch(batch_id)
     if not all_jobs:
-        return Response(status_code=404)
+        raise HTTPException(status_code=404, detail="Batch not found")
 
     try:
         zip_data = create_batch_zip(all_jobs, filestore, format)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
     if zip_data is None:
-        return Response(status_code=404)
+        raise HTTPException(status_code=404, detail="No completed results in batch")
 
     filename = f"batch_{batch_id[:8]}.zip"
     return Response(
         content=zip_data,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": make_content_disposition(filename)},
     )

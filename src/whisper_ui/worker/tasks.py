@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from redis import Redis
 
 from whisper_ui.core.config import get_settings
 from whisper_ui.core.constants import ERROR_DISPLAY_LENGTH, ERROR_MAX_LENGTH
 from whisper_ui.core.messages import PIPELINE_COMPLETE
-from whisper_ui.core.models import JobStatus
+from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.pipeline.align import AlignStage
 from whisper_ui.pipeline.assign_speakers import AssignSpeakersStage
 from whisper_ui.pipeline.diarize import DiarizeStage
@@ -22,6 +23,17 @@ from whisper_ui.worker.progress import RedisProgressReporter
 logger = logging.getLogger(__name__)
 
 
+def _cleanup_preprocessed(context: dict) -> None:
+    """Remove the intermediate 16kHz WAV file created by PreprocessStage."""
+    audio_path = context.get("audio_path")
+    if audio_path is None:
+        return
+    try:
+        Path(audio_path).unlink(missing_ok=True)
+    except OSError:
+        logger.warning("Failed to clean up preprocessed file: %s", audio_path)
+
+
 def process_transcription(job_id: str) -> str:
     settings = get_settings()
     redis = Redis.from_url(settings.redis_url)
@@ -29,15 +41,16 @@ def process_transcription(job_id: str) -> str:
     db = JobDatabase(settings.database_path)
     filestore = FileStore(settings.upload_dir, settings.output_dir)
 
-    job = db.get_job(job_id)
-    if job is None:
-        reporter.fail(f"Job {job_id} not found in database.")
-        return f"Job {job_id} not found"
-
-    job.status = JobStatus.PROCESSING
-    db.update_job(job)
-
+    context: dict = {}
+    job: Job | None = None
     try:
+        job = db.get_job(job_id)
+        if job is None:
+            reporter.fail(f"Job {job_id} not found in database.")
+            return f"Job {job_id} not found"
+
+        job.status = JobStatus.PROCESSING
+        db.update_job(job)
         stages = [
             PreprocessStage(),
             TranscribeStage(
@@ -71,6 +84,7 @@ def process_transcription(job_id: str) -> str:
         }
 
         result = orchestrator.run(context)
+        _cleanup_preprocessed(context)
         result_path = filestore.save_result(job_id, result)
 
         job.status = JobStatus.COMPLETED
@@ -85,12 +99,14 @@ def process_transcription(job_id: str) -> str:
         return f"Job {job_id} completed"
 
     except Exception as e:
+        _cleanup_preprocessed(context)
         error_msg = str(e)
         logger.exception("Job %s failed: %s", job_id, error_msg)
-        job.status = JobStatus.FAILED
-        job.error = error_msg[:ERROR_MAX_LENGTH]
-        job.progress_message = f"Failed: {error_msg[:ERROR_DISPLAY_LENGTH]}"
-        db.update_job(job)
+        if job is not None:
+            job.status = JobStatus.FAILED
+            job.error = error_msg[:ERROR_MAX_LENGTH]
+            job.progress_message = f"Failed: {error_msg[:ERROR_DISPLAY_LENGTH]}"
+            db.update_job(job)
         reporter.fail(error_msg)
         return f"Job {job_id} failed: {error_msg}"
 

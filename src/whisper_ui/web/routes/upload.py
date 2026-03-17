@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import uuid
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -12,7 +13,34 @@ from whisper_ui.core.models import SUPPORTED_LANGUAGES, WHISPER_MODELS, Job, Job
 from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
 from whisper_ui.web.deps import DbDep, FileStoreDep, RedisDep, SettingsDep, templates
 
+_READ_CHUNK_SIZE = 1024 * 1024  # 1 MB
+
 router = APIRouter()
+
+
+def _format_size(size_bytes: int) -> str:
+    if size_bytes >= 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024**3):.1f} GB"
+    return f"{size_bytes / (1024**2):.0f} MB"
+
+
+async def _stream_to_file(upload: UploadFile, dest: Path, max_size: int) -> bool:
+    """Stream upload chunks directly to disk. Return False if file exceeds max_size."""
+    total = 0
+    try:
+        with dest.open("wb") as f:
+            while True:
+                chunk = await upload.read(_READ_CHUNK_SIZE)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_size:
+                    return False
+                f.write(chunk)
+    except BaseException:
+        dest.unlink(missing_ok=True)
+        raise
+    return True
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -36,6 +64,7 @@ async def upload_submit(
     db: DbDep,
     filestore: FileStoreDep,
     redis: RedisDep,
+    settings: SettingsDep,
     files: Annotated[list[UploadFile] | None, File()] = None,
     language: Annotated[str, Form()] = "zh",
     model_name: Annotated[str, Form()] = "large-v3",
@@ -43,6 +72,12 @@ async def upload_submit(
     enable_diarization: Annotated[bool, Form()] = False,
     convert_to_traditional: Annotated[bool, Form()] = False,
 ):
+    # Server-side validation of select inputs
+    if language not in SUPPORTED_LANGUAGES:
+        return RedirectResponse(f"/upload?error=invalid_language&value={quote(language)}", status_code=303)
+    if model_name not in WHISPER_MODELS:
+        return RedirectResponse(f"/upload?error=invalid_model&value={quote(model_name)}", status_code=303)
+
     # Distinguish "no file selected" from "unsupported format"
     has_any_files = files and any(f.filename for f in files)
     valid_files = [
@@ -67,8 +102,10 @@ async def upload_submit(
     except Exception:
         return RedirectResponse("/upload?error=queue", status_code=303)
 
+    max_size = settings.max_upload_size
     for uploaded_file in valid_files:
         display_name = PurePosixPath(uploaded_file.filename or "unknown").name
+
         job = Job(
             filename=display_name,
             language=language,
@@ -79,8 +116,16 @@ async def upload_submit(
             batch_id=batch_id,
         )
 
-        file_data = await uploaded_file.read()
-        dest = filestore.save_upload(job.id, display_name, file_data)
+        dest = filestore.prepare_upload_path(job.id, display_name)
+        within_limit = await _stream_to_file(uploaded_file, dest, max_size)
+        if not within_limit:
+            dest.unlink(missing_ok=True)
+            limit_str = _format_size(max_size)
+            return RedirectResponse(
+                f"/upload?error=too_large&name={quote(display_name)}&limit={quote(limit_str)}",
+                status_code=303,
+            )
+
         job.filepath = str(dest)
         job.status = JobStatus.QUEUED
         db.insert_job(job)
