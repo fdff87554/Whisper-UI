@@ -7,11 +7,11 @@
   <small class="job-card-meta">{{ job.language }} | {{ job.model_name }} | {{ job.created_at[:TIMESTAMP_DISPLAY_LENGTH] }}</small>
   <div class="job-card-actions">
     {% if job.status.value == 'completed' %}
-    <a href="/viewer/{{ job.id }}" role="button" class="outline small-btn">{{ labels.JOBS_VIEW }}</a>
+    <a href="/viewer/{{ job.id }}" role="button" class="small-btn">{{ labels.JOBS_VIEW }}</a>
     {% endif %}
 
     {% if job.status.value == 'failed' %}
-    <button class="outline secondary small-btn"
+    <button class="ghost-btn"
             @click="$dispatch('open-confirm', {
               title: '{{ labels.JOBS_RETRY }}',
               message: '{{ labels.JOBS_RETRY_CONFIRM }}',
@@ -22,7 +22,7 @@
     {% endif %}
 
     {% if job.status.value in ('completed', 'failed') %}
-    <button class="outline secondary small-btn"
+    <button class="ghost-btn"
             @click="$dispatch('open-confirm', {
               title: '{{ labels.JOBS_DELETE }}',
               message: '{{ labels.JOBS_DELETE_CONFIRM }}',

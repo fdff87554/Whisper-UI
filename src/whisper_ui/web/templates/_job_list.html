@@ -5,7 +5,12 @@
      hx-swap="outerHTML">
 
 {% if total_count == 0 %}
-  <p>{% if status %}{{ labels.JOBS_EMPTY_FILTERED }}{% else %}{{ labels.JOBS_EMPTY }}{% endif %}</p>
+  <div class="empty-state">
+    <p>{% if status %}{{ labels.JOBS_EMPTY_FILTERED }}{% else %}{{ labels.JOBS_EMPTY }}{% endif %}</p>
+    {% if not status %}
+    <a href="/upload" role="button" class="outline small-btn">{{ labels.PAGE_UPLOAD }}</a>
+    {% endif %}
+  </div>
 {% else %}
 
   {% for group_key, group_jobs in groups %}
