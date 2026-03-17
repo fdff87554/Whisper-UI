@@ -41,18 +41,13 @@
   </div>
 </div>
 
-{# Active Jobs — polling area #}
-{% if active_jobs %}
-<section class="mb-8">
-  <h2 class="text-lg font-medium mb-3">{{ labels.DASHBOARD_ACTIVE_SECTION }}</h2>
-  <div id="dashboard-active"
-       hx-get="/dashboard/active"
-       hx-trigger="every 3s"
-       hx-swap="innerHTML">
-    {% include "_dashboard_active.html" %}
-  </div>
-</section>
-{% endif %}
+{# Active Jobs — polling area (always rendered so new jobs appear without reload) #}
+<div id="dashboard-active"
+     hx-get="/dashboard/active"
+     hx-trigger="every 5s"
+     hx-swap="innerHTML">
+  {% include "_dashboard_active.html" %}
+</div>
 
 {# Recent Completed #}
 {% if recent_completed %}
