@@ -13,6 +13,17 @@ services:
       - --port=8000
       - --reload
       - --reload-dir=src
+  css-watcher:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ./package.json:/app/package.json
+      - ./package-lock.json:/app/package-lock.json
+      - ./node_modules:/app/node_modules
+      - ./src:/app/src
+    command: >
+      npx @tailwindcss/cli -i src/whisper_ui/web/static/css/input.css -o src/whisper_ui/web/static/style.css --watch
+
   worker-gpu:
     volumes:
       - ./src:/app/src
