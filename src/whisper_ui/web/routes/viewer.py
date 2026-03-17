@@ -65,7 +65,7 @@ async def viewer_page(request: Request, db: DbDep, filestore: FileStoreDep, job_
         request=request,
         name="viewer.html",
         context={
-            "active_page": "viewer",
+            "active_page": "jobs",
             "job": job,
             "result": result,
             "error": error,
