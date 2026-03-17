@@ -46,6 +46,13 @@ def _create_failed_job(db) -> Job:
     return job
 
 
+class TestHealthEndpoint:
+    def test_health_returns_ok(self, client):
+        resp = client.get("/health")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok"}
+
+
 class TestUploadRoutes:
     def test_upload_page(self, client):
         resp = client.get("/upload")
