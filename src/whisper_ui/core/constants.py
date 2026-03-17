@@ -21,7 +21,7 @@ SQLITE_BUSY_TIMEOUT_MS = 5000
 JOBS_REFRESH_INTERVAL = 3  # seconds
 
 # Stale job recovery
-STALE_JOB_TIMEOUT = 5400  # 1.5 hours (RQ job_timeout=1h + 30min buffer)
+STALE_JOB_TIMEOUT = 9000  # 2.5 hours (URL job_timeout=2h + 30min buffer)
 STALE_JOB_CHECK_INTERVAL = 60  # seconds
 
 # Batch upload limits

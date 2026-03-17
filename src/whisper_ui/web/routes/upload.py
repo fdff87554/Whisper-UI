@@ -239,6 +239,8 @@ async def upload_url_submit(
         job.status = JobStatus.FAILED
         job.error = str(e)[:ERROR_MAX_LENGTH]
         db.update_job(job)
+        msg = ui_labels.UPLOAD_QUEUE_ERROR.format(error=str(e))
+        return _error_redirect_or_fragment(request, "/upload?error=queue", msg)
 
     redirect_url = "/jobs?submitted=1"
     if htmx:
