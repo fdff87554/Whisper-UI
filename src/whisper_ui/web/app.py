@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -51,10 +52,8 @@ async def lifespan(app: FastAPI):
     logger.info("Whisper UI started")
     yield
     task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await task
-    except asyncio.CancelledError:
-        pass
     app.state.db.close()
     app.state.redis.close()
     logger.info("Whisper UI stopped")

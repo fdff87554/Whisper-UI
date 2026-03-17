@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
+
 class JobStatus(StrEnum):
     PENDING = "pending"
     QUEUED = "queued"
