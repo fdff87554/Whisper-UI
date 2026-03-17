@@ -1,0 +1,22 @@
+{% from "_icons.html" import icon_home, icon_upload, icon_list %}
+{# Mobile bottom tab bar — visible only below md breakpoint #}
+<div class="btm-nav btm-nav-sm md:hidden z-50 border-t border-base-300 bg-base-100">
+  <a href="/"
+     hx-boost="true" hx-target=".main-content" hx-swap="innerHTML transition:true" hx-push-url="true"
+     class="{% if active_page == 'dashboard' %}active text-primary{% endif %}">
+    {{ icon_home("w-5 h-5") }}
+    <span class="btm-nav-label text-xs">{{ labels.NAV_DASHBOARD }}</span>
+  </a>
+  <a href="/upload"
+     hx-boost="true" hx-target=".main-content" hx-swap="innerHTML transition:true" hx-push-url="true"
+     class="{% if active_page == 'upload' %}active text-primary{% endif %}">
+    {{ icon_upload("w-5 h-5") }}
+    <span class="btm-nav-label text-xs">{{ labels.NAV_UPLOAD }}</span>
+  </a>
+  <a href="/jobs"
+     hx-boost="true" hx-target=".main-content" hx-swap="innerHTML transition:true" hx-push-url="true"
+     class="{% if active_page == 'jobs' %}active text-primary{% endif %}">
+    {{ icon_list("w-5 h-5") }}
+    <span class="btm-nav-label text-xs">{{ labels.NAV_JOBS }}</span>
+  </a>
+</div>

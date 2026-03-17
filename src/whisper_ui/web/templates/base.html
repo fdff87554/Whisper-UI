@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-Hant"
       x-data="{ theme: $persist(
-        window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+        window.matchMedia('(prefers-color-scheme: dark)').matches ? 'whisper-dark' : 'whisper-light'
       ).as('whisper-ui-theme') }"
       :data-theme="theme">
 <head>
@@ -11,8 +11,6 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"
-        integrity="sha384-L1dWfspMTHU/ApYnFiMz2QID/PlP1xCW9visvBdbEkOLkSSWsP6ZJWhPw6apiXxU" crossorigin="anonymous">
   <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
   <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"
           integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+"
@@ -23,29 +21,98 @@
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"
           integrity="sha384-X9kJyAubVxnP0hcA+AMMs21U445qsnqhnUF8EBlEpP3a42Kh/JwWjlv2ZcvGfphb"
           crossorigin="anonymous"></script>
+  <script>
+  document.addEventListener('alpine:init', () => {
+    Alpine.store('toasts', {
+      items: [],
+      _id: 0,
+      add(toast) {
+        const id = ++this._id;
+        this.items.push({ id, message: toast.message, type: toast.type || 'info' });
+        setTimeout(() => this.remove(id), 5000);
+      },
+      remove(id) {
+        this.items = this.items.filter(t => t.id !== id);
+      }
+    });
+  });
+  </script>
 </head>
-<body>
-  <header class="container">
-    <nav>
-      <ul>
-        <li><strong>Whisper UI</strong></li>
-      </ul>
-      <ul>
-        <li><a href="/upload" {% if active_page == 'upload' %}aria-current="page"{% endif %}>{{ labels.PAGE_UPLOAD }}</a></li>
-        <li><a href="/jobs" {% if active_page == 'jobs' %}aria-current="page"{% endif %}>{{ labels.PAGE_JOBS }}</a></li>
-        <li><a href="/viewer" {% if active_page == 'viewer' %}aria-current="page"{% endif %}>{{ labels.PAGE_VIEWER }}</a></li>
-        <li>
-          <button class="outline contrast small-btn theme-toggle"
-                  @click="theme = theme === 'light' ? 'dark' : 'light'"
-                  x-text="theme === 'light' ? '{{ labels.THEME_TOGGLE_DARK }}' : '{{ labels.THEME_TOGGLE_LIGHT }}'">
-          </button>
-        </li>
-      </ul>
-    </nav>
-  </header>
-  <main class="container">
-    {% block content %}{% endblock %}
-  </main>
+<body class="min-h-screen bg-base-100 text-base-content leading-relaxed">
+  {# Page loading bar #}
+  <div id="page-loader"></div>
+
+  {# App shell: sidebar + main content #}
+  <div class="flex min-h-screen">
+    {# Sidebar — hidden on mobile, icon rail on tablet, full on desktop #}
+    <aside class="hidden md:flex md:w-14 lg:w-60 flex-col fixed inset-y-0 left-0 z-40 transition-all duration-200 border-r border-base-300 bg-base-200">
+      {% include "_sidebar.html" %}
+    </aside>
+
+    {# Main content area #}
+    <main class="main-content flex-1 md:ml-14 lg:ml-60 pb-16 md:pb-0">
+      <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
+
+  {# Bottom navigation — mobile only #}
+  {% include "_bottom_nav.html" %}
+
+  {# Toast notifications #}
+  {% include "_toast.html" %}
+
+  {# Toast from URL params (for post-redirect scenarios) #}
+  <div x-data x-init="
+    const params = new URLSearchParams(window.location.search);
+    const toast = params.get('toast');
+    const message = params.get('message');
+    if (toast && message) {
+      $store.toasts.add({ message: decodeURIComponent(message), type: toast });
+      const url = new URL(window.location);
+      url.searchParams.delete('toast');
+      url.searchParams.delete('message');
+      history.replaceState({}, '', url);
+    }
+  "></div>
+
+  {# htmx event listeners for page loader and toasts #}
+  <script>
+  (function() {
+    const loader = document.getElementById('page-loader');
+    let loaderTimeout;
+
+    document.body.addEventListener('htmx:beforeRequest', function() {
+      clearTimeout(loaderTimeout);
+      loader.style.width = '0';
+      loader.style.opacity = '1';
+      requestAnimationFrame(() => { loader.style.width = '80%'; });
+    });
+    document.body.addEventListener('htmx:afterRequest', function() {
+      loader.style.width = '100%';
+      loaderTimeout = setTimeout(() => {
+        loader.style.opacity = '0';
+        setTimeout(() => { loader.style.width = '0'; }, 300);
+      }, 200);
+    });
+
+    // Listen for HX-Trigger showToast events
+    document.body.addEventListener('showToast', function(evt) {
+      if (evt.detail && Alpine.store('toasts')) {
+        Alpine.store('toasts').add(evt.detail);
+      }
+    });
+
+    // htmx error handling — show toast on network errors
+    document.body.addEventListener('htmx:sendError', function() {
+      if (Alpine.store('toasts')) {
+        Alpine.store('toasts').add({ message: '{{ labels.TOAST_NETWORK_ERROR }}', type: 'error' });
+      }
+    });
+  })();
+  </script>
+
   {% block scripts %}{% endblock %}
 </body>
 </html>
