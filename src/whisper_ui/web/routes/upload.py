@@ -97,14 +97,10 @@ async def upload_submit(
     # Server-side validation of select inputs
     if language not in SUPPORTED_LANGUAGES:
         msg = ui_labels.UPLOAD_INVALID_LANGUAGE.format(value=language)
-        return _error_redirect_or_fragment(
-            request, f"/upload?error=invalid_language&value={quote(language)}", msg
-        )
+        return _error_redirect_or_fragment(request, f"/upload?error=invalid_language&value={quote(language)}", msg)
     if model_name not in WHISPER_MODELS:
         msg = ui_labels.UPLOAD_INVALID_MODEL.format(value=model_name)
-        return _error_redirect_or_fragment(
-            request, f"/upload?error=invalid_model&value={quote(model_name)}", msg
-        )
+        return _error_redirect_or_fragment(request, f"/upload?error=invalid_model&value={quote(model_name)}", msg)
 
     # Distinguish "no file selected" from "unsupported format"
     has_any_files = files and any(f.filename for f in files)
@@ -119,9 +115,7 @@ async def upload_submit(
 
     if len(valid_files) > MAX_BATCH_SIZE:
         msg = ui_labels.UPLOAD_BATCH_EXCEEDS_LIMIT.format(limit=MAX_BATCH_SIZE, count=len(valid_files))
-        return _error_redirect_or_fragment(
-            request, f"/upload?error=too_many&count={len(valid_files)}", msg
-        )
+        return _error_redirect_or_fragment(request, f"/upload?error=too_many&count={len(valid_files)}", msg)
 
     batch_id = uuid.uuid4().hex if len(valid_files) > 1 else None
     submitted_count = 0
