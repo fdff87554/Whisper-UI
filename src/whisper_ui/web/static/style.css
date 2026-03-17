@@ -116,20 +116,21 @@ textarea {
   transition: color 0.2s, background-color 0.2s, border-color 0.2s, opacity 0.2s, box-shadow 0.2s;
 }
 
-/* --- Status badges --- */
+/* --- Status badges (pill shape, theme-aware colors) --- */
 .badge {
   display: inline-block;
-  padding: 0.15rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.85rem;
-  font-weight: 600;
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 500;
   white-space: nowrap;
+  letter-spacing: 0.01em;
 }
-.badge-pending   { background: var(--pico-secondary-background); color: var(--pico-secondary-inverse); }
-.badge-queued    { background: #3b82f6; color: #fff; }
-.badge-processing { background: #f59e0b; color: #fff; }
-.badge-completed { background: #22c55e; color: #fff; }
-.badge-failed    { background: #ef4444; color: #fff; }
+.badge-pending    { background: var(--pico-secondary-background); color: var(--pico-secondary-inverse); }
+.badge-queued     { background: var(--color-status-queued); color: #fff; }
+.badge-processing { background: var(--color-status-processing); color: #fff; }
+.badge-completed  { background: var(--color-status-completed); color: #fff; }
+.badge-failed     { background: var(--color-status-failed); color: #fff; }
 
 /* Job card layout */
 .job-group {
@@ -220,13 +221,28 @@ textarea {
   height: 0.5rem;
 }
 
-/* Small buttons */
+/* --- Button hierarchy --- */
 .small-btn {
-  padding: 0.3rem 0.7rem;
-  font-size: 0.85rem;
+  padding: 0.35rem 0.85rem;
+  font-size: 0.8rem;
 }
 a.small-btn {
   text-decoration: none;
+}
+
+/* Ghost button — minimal visual weight for secondary actions */
+.ghost-btn {
+  background: transparent;
+  border-color: transparent;
+  color: var(--pico-muted-color);
+  padding: 0.35rem 0.85rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.ghost-btn:hover {
+  color: var(--pico-color);
+  background: transparent;
+  border-color: transparent;
 }
 
 /* Error text */
@@ -235,17 +251,21 @@ a.small-btn {
   margin: 0.2rem 0 0 0;
 }
 
-/* Alert banners */
+/* --- Alert banners (softer with tinted background) --- */
 .alert-error {
-  border-left: 4px solid var(--pico-del-color);
-  padding: 0.8rem 1rem;
-  margin-bottom: 1rem;
+  background: hsla(0, 60%, 55%, 0.07);
+  border-left: 3px solid var(--pico-del-color);
+  border-radius: var(--pico-border-radius);
+  padding: var(--space-md) var(--space-lg);
+  margin-bottom: var(--space-lg);
   color: var(--pico-del-color);
 }
 .alert-success {
-  border-left: 4px solid var(--pico-ins-color);
-  padding: 0.8rem 1rem;
-  margin-bottom: 1rem;
+  background: hsla(154, 45%, 40%, 0.07);
+  border-left: 3px solid var(--pico-ins-color);
+  border-radius: var(--pico-border-radius);
+  padding: var(--space-md) var(--space-lg);
+  margin-bottom: var(--space-lg);
   color: var(--pico-ins-color);
 }
 
@@ -290,11 +310,22 @@ a.small-btn {
   max-width: 500px;
 }
 
-/* Dialog footer buttons alignment */
+/* --- Dialog (animation + backdrop blur) --- */
+dialog {
+  animation: dialog-fade-in 0.2s ease-out;
+}
+dialog::backdrop {
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
 dialog footer {
   display: flex;
   justify-content: flex-end;
-  gap: 0.5rem;
+  gap: var(--space-sm);
+}
+@keyframes dialog-fade-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 /* Drop zone */
@@ -317,6 +348,39 @@ dialog footer {
 .upload-progress progress {
   width: 100%;
   margin-bottom: 0.25rem;
+}
+
+/* --- Progress bar (accent color, rounded) --- */
+progress {
+  --pico-progress-color: var(--pico-primary-background);
+}
+progress,
+progress::-webkit-progress-bar {
+  border-radius: 999px;
+  overflow: hidden;
+}
+progress::-webkit-progress-value {
+  border-radius: 999px;
+}
+progress::-moz-progress-bar {
+  border-radius: 999px;
+}
+
+/* --- Form element refinement --- */
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  box-shadow: 0 0 0 3px var(--pico-primary-focus);
+}
+
+/* --- Empty state component --- */
+.empty-state {
+  text-align: center;
+  padding: var(--space-2xl) var(--space-xl);
+  color: var(--pico-muted-color);
+}
+.empty-state p {
+  margin-bottom: var(--space-lg);
 }
 
 /* Smooth htmx transitions */
