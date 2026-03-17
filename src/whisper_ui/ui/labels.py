@@ -85,6 +85,10 @@ VIEWER_TRANSCRIPT_TITLE = "轉錄結果：{name}"
 VIEWER_METADATA = "時長：{minutes}分{seconds}秒 | 段落：{segments} | 語言：{language}"
 VIEWER_NO_SEGMENTS = "轉錄結果中無段落資料。"
 
+# -- Theme --
+THEME_TOGGLE_LIGHT = "淺色模式"
+THEME_TOGGLE_DARK = "深色模式"
+
 # -- Dialog --
 DIALOG_CANCEL = "取消"
 DIALOG_CONFIRM = "確認"
