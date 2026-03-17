@@ -14,8 +14,6 @@ jobs:
       - name: Install dependencies
         run: pip install ".[dev]"
       - name: Lint
-        run: |
-          ruff format --check .
-          ruff check .
+        uses: pre-commit/action@v3.0.1
       - name: Test
         run: python -m pytest --tb=short -q

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -20,8 +22,10 @@ async def lifespan(app: FastAPI):
     from redis.exceptions import RedisError
 
     from whisper_ui.core.config import get_settings
+    from whisper_ui.core.constants import STALE_JOB_CHECK_INTERVAL, STALE_JOB_TIMEOUT
     from whisper_ui.storage.database import JobDatabase
     from whisper_ui.storage.filestore import FileStore
+    from whisper_ui.ui.labels import JOBS_STALE_ERROR
 
     settings = get_settings()
     app.state.settings = settings
@@ -32,8 +36,24 @@ async def lifespan(app: FastAPI):
         app.state.redis.ping()
     except RedisError:
         logger.warning("Redis is not reachable at %s — job submission will fail", settings.redis_url)
+
+    async def _stale_job_checker():
+        while True:
+            await asyncio.sleep(STALE_JOB_CHECK_INTERVAL)
+            try:
+                recovered = app.state.db.recover_stale_jobs(STALE_JOB_TIMEOUT, JOBS_STALE_ERROR)
+                if recovered > 0:
+                    logger.warning("Recovered %d stale job(s)", recovered)
+            except Exception:
+                logger.exception("Stale job check failed")
+
+    task = asyncio.create_task(_stale_job_checker())
+
     logger.info("Whisper UI started")
     yield
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
     app.state.db.close()
     app.state.redis.close()
     logger.info("Whisper UI stopped")
@@ -45,7 +65,7 @@ def create_app() -> FastAPI:
     application.mount("/static", StaticFiles(directory=_WEB_DIR / "static"), name="static")
 
     # Template globals
-    from whisper_ui.core.models import LANGUAGE_LABELS
+    from whisper_ui.core.languages import LANGUAGE_LABELS
     from whisper_ui.export.factory import available_formats
     from whisper_ui.ui import labels
 
@@ -59,6 +79,10 @@ def create_app() -> FastAPI:
     application.include_router(upload.router)
     application.include_router(jobs.router)
     application.include_router(viewer.router)
+
+    @application.get("/health")
+    async def health():
+        return {"status": "ok"}
 
     return application
 

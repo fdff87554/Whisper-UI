@@ -9,6 +9,7 @@ from whisper_ui.core.constants import DEFAULT_JOB_LIST_LIMIT
 from whisper_ui.core.models import JobStatus
 from whisper_ui.export.factory import get_exporter
 from whisper_ui.web.deps import DbDep, FileStoreDep, make_content_disposition, templates
+from whisper_ui.web.validation import validate_hex_id
 
 router = APIRouter()
 
@@ -23,6 +24,7 @@ async def viewer_page(request: Request, db: DbDep, filestore: FileStoreDep, job_
     error = None
 
     if job_id:
+        validate_hex_id(job_id, "job_id")
         job = db.get_job(job_id)
         if job is None:
             error = "not_found"
@@ -49,6 +51,7 @@ async def viewer_page(request: Request, db: DbDep, filestore: FileStoreDep, job_
 
 @router.get("/viewer/{job_id}/export/{format_name}")
 async def export_download(job_id: str, format_name: str, db: DbDep, filestore: FileStoreDep):
+    validate_hex_id(job_id, "job_id")
     job = db.get_job(job_id)
     if job is None or job.status != JobStatus.COMPLETED:
         raise HTTPException(status_code=404)

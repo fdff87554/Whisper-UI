@@ -9,7 +9,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
       - DATABASE_PATH=/app/data/db/whisper_ui.db
       - UPLOAD_DIR=/app/data/uploads
       - OUTPUT_DIR=/app/data/outputs
@@ -24,11 +24,11 @@ services:
     restart: unless-stopped
   redis:
     image: redis:7-alpine
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes ${REDIS_PASSWORD:+--requirepass "${REDIS_PASSWORD}"}
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "${REDIS_PASSWORD:+REDISCLI_AUTH=\"${REDIS_PASSWORD}\"} redis-cli ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -42,7 +42,7 @@ services:
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     environment:
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
       - DATABASE_PATH=/app/data/db/whisper_ui.db
       - UPLOAD_DIR=/app/data/uploads
       - OUTPUT_DIR=/app/data/outputs
@@ -75,7 +75,7 @@ services:
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     environment:
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
       - DATABASE_PATH=/app/data/db/whisper_ui.db
       - UPLOAD_DIR=/app/data/uploads
       - OUTPUT_DIR=/app/data/outputs

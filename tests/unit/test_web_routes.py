@@ -46,6 +46,13 @@ def _create_failed_job(db) -> Job:
     return job
 
 
+class TestHealthEndpoint:
+    def test_health_returns_ok(self, client):
+        resp = client.get("/health")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok"}
+
+
 class TestUploadRoutes:
     def test_upload_page(self, client):
         resp = client.get("/upload")
@@ -95,8 +102,16 @@ class TestJobsRoutes:
         assert db.get_job(job.id) is None
 
     def test_delete_nonexistent_job(self, client):
-        resp = client.delete("/jobs/nonexistent")
+        resp = client.delete("/jobs/00000000000000000000000000000000")
         assert resp.status_code == 404
+
+    def test_delete_invalid_id_returns_400(self, client):
+        resp = client.delete("/jobs/not-a-valid-hex-id")
+        assert resp.status_code == 400
+
+    def test_negative_page_clamped_to_zero(self, client):
+        resp = client.get("/jobs/list?page=-5")
+        assert resp.status_code == 200
 
     def test_delete_active_job_returns_409(self, client, db):
         job = Job(filename="active.mp3", status=JobStatus.PROCESSING, language="zh")
@@ -119,9 +134,13 @@ class TestViewerRoutes:
         assert "test.mp3" in resp.text
 
     def test_viewer_not_found(self, client):
-        resp = client.get("/viewer/nonexistent")
+        resp = client.get("/viewer/00000000000000000000000000000000")
         assert resp.status_code == 200
         assert "找不到" in resp.text
+
+    def test_viewer_invalid_id_returns_400(self, client):
+        resp = client.get("/viewer/nonexistent")
+        assert resp.status_code == 400
 
     def test_export_srt(self, client, db, filestore):
         job = _create_completed_job(db, filestore)
@@ -136,8 +155,12 @@ class TestViewerRoutes:
         assert "application/json" in resp.headers["content-type"]
 
     def test_export_nonexistent(self, client):
-        resp = client.get("/viewer/nonexistent/export/srt")
+        resp = client.get("/viewer/00000000000000000000000000000000/export/srt")
         assert resp.status_code == 404
+
+    def test_export_invalid_id_returns_400(self, client):
+        resp = client.get("/viewer/nonexistent/export/srt")
+        assert resp.status_code == 400
 
     def test_export_invalid_format_returns_400(self, client, db, filestore):
         job = _create_completed_job(db, filestore)
@@ -228,9 +251,25 @@ class TestUploadPost:
         assert resp.status_code == 303
         assert "error=no_files" in resp.headers["location"]
 
+    def test_upload_htmx_error_escapes_html(self, client, app):
+        """Verify htmx error responses escape user input to prevent XSS."""
+        files = [("files", ("test.mp3", b"fake", "audio/mpeg"))]
+        resp = client.post(
+            "/upload",
+            data={"language": "<script>alert(1)</script>", "model_name": "large-v3"},
+            files=files,
+            headers={"HX-Request": "true"},
+            follow_redirects=False,
+        )
+        assert "<script>" not in resp.text
+        assert "&lt;script&gt;" in resp.text
+
 
 class TestBatchRoutes:
-    def _create_batch(self, db, filestore, batch_id="testbatch123"):
+    _BATCH_ID = "a" * 32
+
+    def _create_batch(self, db, filestore, batch_id=None):
+        batch_id = batch_id or self._BATCH_ID
         jobs = []
         for i, name in enumerate(["a.mp3", "b.mp3"]):
             result = TranscriptResult(
@@ -247,21 +286,25 @@ class TestBatchRoutes:
 
     def test_batch_download_success(self, client, db, filestore):
         self._create_batch(db, filestore)
-        resp = client.get("/jobs/batch/testbatch123/download?format=txt")
+        resp = client.get(f"/jobs/batch/{self._BATCH_ID}/download?format_name=txt")
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "application/zip"
 
     def test_batch_download_not_found(self, client):
-        resp = client.get("/jobs/batch/nonexistent/download?format=srt")
+        resp = client.get(f"/jobs/batch/{'0' * 32}/download?format_name=srt")
         assert resp.status_code == 404
 
     def test_batch_download_invalid_format(self, client, db, filestore):
         self._create_batch(db, filestore)
-        resp = client.get("/jobs/batch/testbatch123/download?format=invalid")
+        resp = client.get(f"/jobs/batch/{self._BATCH_ID}/download?format_name=invalid")
+        assert resp.status_code == 400
+
+    def test_batch_download_invalid_id_returns_400(self, client):
+        resp = client.get("/jobs/batch/not-hex/download?format_name=srt")
         assert resp.status_code == 400
 
     def test_retry_batch(self, client, db, app):
-        batch_id = "retrybatch"
+        batch_id = "b" * 32
         job = Job(filename="fail.mp3", status=JobStatus.FAILED, error="err", batch_id=batch_id)
         db.insert_job(job)
         mock_queue = MagicMock()
@@ -270,8 +313,9 @@ class TestBatchRoutes:
         assert resp.status_code == 204
 
     def test_delete_batch(self, client, db, filestore):
-        jobs = self._create_batch(db, filestore, batch_id="delbatch")
-        resp = client.delete("/jobs/batch/delbatch")
+        batch_id = "c" * 32
+        jobs = self._create_batch(db, filestore, batch_id=batch_id)
+        resp = client.delete(f"/jobs/batch/{batch_id}")
         assert resp.status_code == 204
         for job in jobs:
             assert db.get_job(job.id) is None

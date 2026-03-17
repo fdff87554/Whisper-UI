@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from pathlib import Path, PurePosixPath
 from typing import Annotated
 from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from markupsafe import escape
 
 from whisper_ui.core.constants import ERROR_MAX_LENGTH, MAX_BATCH_SIZE
-from whisper_ui.core.models import SUPPORTED_LANGUAGES, WHISPER_MODELS, Job, JobStatus
+from whisper_ui.core.languages import SUPPORTED_LANGUAGES, WHISPER_MODELS
+from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
+from whisper_ui.ui import labels as ui_labels
 from whisper_ui.web.deps import DbDep, FileStoreDep, RedisDep, SettingsDep, templates
 
 _READ_CHUNK_SIZE = 1024 * 1024  # 1 MB
@@ -22,6 +26,16 @@ def _format_size(size_bytes: int) -> str:
     if size_bytes >= 1024 * 1024 * 1024:
         return f"{size_bytes / (1024**3):.1f} GB"
     return f"{size_bytes / (1024**2):.0f} MB"
+
+
+def _is_htmx(request: Request) -> bool:
+    return request.headers.get("HX-Request") == "true"
+
+
+def _htmx_error(message: str) -> Response:
+    """Return an HTML fragment for htmx to swap into the feedback area."""
+    html = f'<article class="alert-error" aria-label="Error">{escape(message)}</article>'
+    return HTMLResponse(content=html)
 
 
 async def _stream_to_file(upload: UploadFile, dest: Path, max_size: int) -> bool:
@@ -37,7 +51,7 @@ async def _stream_to_file(upload: UploadFile, dest: Path, max_size: int) -> bool
                 if total > max_size:
                     return False
                 f.write(chunk)
-    except BaseException:
+    except (Exception, asyncio.CancelledError):
         dest.unlink(missing_ok=True)
         raise
     return True
@@ -59,8 +73,16 @@ async def upload_page(request: Request, settings: SettingsDep):
     )
 
 
+def _error_redirect_or_fragment(request: Request, redirect_url: str, message: str) -> Response:
+    """Return redirect for normal requests, HTML fragment for htmx requests."""
+    if _is_htmx(request):
+        return _htmx_error(message)
+    return RedirectResponse(redirect_url, status_code=303)
+
+
 @router.post("/upload")
 async def upload_submit(
+    request: Request,
     db: DbDep,
     filestore: FileStoreDep,
     redis: RedisDep,
@@ -72,11 +94,15 @@ async def upload_submit(
     enable_diarization: Annotated[bool, Form()] = False,
     convert_to_traditional: Annotated[bool, Form()] = False,
 ):
+    htmx = _is_htmx(request)
+
     # Server-side validation of select inputs
     if language not in SUPPORTED_LANGUAGES:
-        return RedirectResponse(f"/upload?error=invalid_language&value={quote(language)}", status_code=303)
+        msg = ui_labels.UPLOAD_INVALID_LANGUAGE.format(value=language)
+        return _error_redirect_or_fragment(request, f"/upload?error=invalid_language&value={quote(language)}", msg)
     if model_name not in WHISPER_MODELS:
-        return RedirectResponse(f"/upload?error=invalid_model&value={quote(model_name)}", status_code=303)
+        msg = ui_labels.UPLOAD_INVALID_MODEL.format(value=model_name)
+        return _error_redirect_or_fragment(request, f"/upload?error=invalid_model&value={quote(model_name)}", msg)
 
     # Distinguish "no file selected" from "unsupported format"
     has_any_files = files and any(f.filename for f in files)
@@ -85,12 +111,13 @@ async def upload_submit(
     ]
 
     if not has_any_files:
-        return RedirectResponse("/upload?error=no_file", status_code=303)
+        return _error_redirect_or_fragment(request, "/upload?error=no_file", ui_labels.UPLOAD_NO_FILE)
     if not valid_files:
-        return RedirectResponse("/upload?error=no_files", status_code=303)
+        return _error_redirect_or_fragment(request, "/upload?error=no_files", ui_labels.UPLOAD_NO_SUPPORTED_FILES)
 
     if len(valid_files) > MAX_BATCH_SIZE:
-        return RedirectResponse(f"/upload?error=too_many&count={len(valid_files)}", status_code=303)
+        msg = ui_labels.UPLOAD_BATCH_EXCEEDS_LIMIT.format(limit=MAX_BATCH_SIZE, count=len(valid_files))
+        return _error_redirect_or_fragment(request, f"/upload?error=too_many&count={len(valid_files)}", msg)
 
     batch_id = uuid.uuid4().hex if len(valid_files) > 1 else None
     submitted_count = 0
@@ -100,7 +127,8 @@ async def upload_submit(
 
         q = Queue(connection=redis)
     except Exception:
-        return RedirectResponse("/upload?error=queue", status_code=303)
+        msg = ui_labels.UPLOAD_QUEUE_ERROR.format(error="Redis")
+        return _error_redirect_or_fragment(request, "/upload?error=queue", msg)
 
     max_size = settings.max_upload_size
     for uploaded_file in valid_files:
@@ -121,9 +149,11 @@ async def upload_submit(
         if not within_limit:
             dest.unlink(missing_ok=True)
             limit_str = _format_size(max_size)
-            return RedirectResponse(
+            msg = ui_labels.UPLOAD_FILE_TOO_LARGE.format(name=display_name, limit=limit_str)
+            return _error_redirect_or_fragment(
+                request,
                 f"/upload?error=too_large&name={quote(display_name)}&limit={quote(limit_str)}",
-                status_code=303,
+                msg,
             )
 
         job.filepath = str(dest)
@@ -142,4 +172,7 @@ async def upload_submit(
             job.error = str(e)[:ERROR_MAX_LENGTH]
             db.update_job(job)
 
-    return RedirectResponse(f"/jobs?submitted={submitted_count}", status_code=303)
+    redirect_url = f"/jobs?submitted={submitted_count}"
+    if htmx:
+        return Response(status_code=204, headers={"HX-Redirect": redirect_url})
+    return RedirectResponse(redirect_url, status_code=303)

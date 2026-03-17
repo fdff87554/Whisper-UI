@@ -22,6 +22,11 @@ RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pyt
     pip install --no-cache-dir --no-deps "whisperx>=3.8,<3.9" && \
     pip install --no-cache-dir ".[worker]"
 
+RUN useradd --uid 1000 --create-home appuser && \
+    mkdir -p /app/data/db /app/data/uploads /app/data/outputs /cache/huggingface && \
+    chown -R appuser:appuser /app/data /cache/huggingface
+USER appuser
+
 ENV HF_HOME=/cache/huggingface
 ENV PYTHONUNBUFFERED=1
 
