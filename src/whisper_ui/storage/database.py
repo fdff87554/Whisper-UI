@@ -168,6 +168,23 @@ class JobDatabase:
             }
         return result
 
+    def get_status_counts(self) -> dict[str, int]:
+        """Return a dict mapping each status value to its count."""
+        rows = self._conn.execute(
+            "SELECT status, COUNT(*) AS cnt FROM jobs GROUP BY status",
+        ).fetchall()
+        counts: dict[str, int] = {}
+        for row in rows:
+            counts[row["status"]] = row["cnt"]
+        return counts
+
+    def count_completed_since(self, since_iso: str) -> int:
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE status = ? AND updated_at >= ?",
+            (JobStatus.COMPLETED.value, since_iso),
+        ).fetchone()
+        return row[0]
+
     def has_active_jobs(self) -> bool:
         row = self._conn.execute(
             "SELECT EXISTS(SELECT 1 FROM jobs WHERE status IN (?, ?))",
