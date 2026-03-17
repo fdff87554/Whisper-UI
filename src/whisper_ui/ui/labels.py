@@ -34,6 +34,8 @@ UPLOAD_CHOOSE_FOLDER = "選擇資料夾"
 UPLOAD_FOLDER_DESCRIPTION = "選擇包含音訊或影片檔案的資料夾，將自動篩選支援的格式並批次轉錄。"
 UPLOAD_FOLDER_FILTERED = "已自動篩選：略過 {skipped} 個不支援的檔案，保留 {remaining} 個支援的檔案。"
 UPLOAD_NO_SUPPORTED_FILES = "所選檔案中沒有支援的格式。"
+UPLOAD_DRAG_DROP = "將檔案拖曳至此處，或點擊下方選擇檔案"
+UPLOAD_UPLOADING = "上傳中..."
 UPLOAD_FILE_TOO_LARGE = "檔案「{name}」超過大小限制（{limit}）。"
 UPLOAD_INVALID_LANGUAGE = "不支援的語言：{value}"
 UPLOAD_INVALID_MODEL = "不支援的模型：{value}"
@@ -84,6 +86,24 @@ VIEWER_RESULT_NOT_FOUND = "找不到結果檔案。"
 VIEWER_TRANSCRIPT_TITLE = "轉錄結果：{name}"
 VIEWER_METADATA = "時長：{minutes}分{seconds}秒 | 段落：{segments} | 語言：{language}"
 VIEWER_NO_SEGMENTS = "轉錄結果中無段落資料。"
+VIEWER_SEARCH_PLACEHOLDER = "輸入關鍵字篩選..."
+VIEWER_COPY = "複製全文"
+VIEWER_COPIED = "已複製"
+VIEWER_EXPORT_TOOLTIPS: dict[str, str] = {
+    "srt": "SubRip 字幕格式",
+    "vtt": "WebVTT 字幕格式",
+    "txt": "純文字格式",
+    "json": "JSON 結構化資料",
+    "docx": "Word 文件格式",
+}
+
+# -- Theme --
+THEME_TOGGLE_LIGHT = "淺色模式"
+THEME_TOGGLE_DARK = "深色模式"
+
+# -- Dialog --
+DIALOG_CANCEL = "取消"
+DIALOG_CONFIRM = "確認"
 
 # -- Status display --
 STATUS_LABELS: dict[str, str] = {

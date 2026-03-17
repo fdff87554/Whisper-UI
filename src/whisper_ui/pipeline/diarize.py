@@ -90,5 +90,5 @@ class DiarizeStage:
         if self._pipeline is not None:
             del self._pipeline
             self._pipeline = None
-        gc.collect()
-        release_gpu_memory()
+            gc.collect()
+            release_gpu_memory()

@@ -13,7 +13,7 @@
   {% elif error == 'no_files' %}
   {{ labels.UPLOAD_NO_SUPPORTED_FILES }}
   {% elif error == 'too_many' %}
-  {{ labels.UPLOAD_BATCH_EXCEEDS_LIMIT.format(limit=50, count=request.query_params.get('count', '?')) }}
+  {{ labels.UPLOAD_BATCH_EXCEEDS_LIMIT.format(limit=MAX_BATCH_SIZE, count=request.query_params.get('count', '?')) }}
   {% elif error == 'too_large' %}
   {{ labels.UPLOAD_FILE_TOO_LARGE.format(name=request.query_params.get('name', '?'), limit=request.query_params.get('limit', '?')) }}
   {% elif error == 'invalid_language' %}
@@ -26,7 +26,22 @@
 </article>
 {% endif %}
 
-<form method="post" action="/upload" enctype="multipart/form-data">
+<form method="post" action="/upload" enctype="multipart/form-data"
+      hx-post="/upload" hx-encoding="multipart/form-data"
+      hx-target="#upload-feedback" hx-swap="innerHTML"
+      x-data="uploadForm()"
+      @htmx:xhr:progress.window="onProgress($event)"
+      @htmx:before-request="uploading = true"
+      @htmx:after-request="uploading = false; progress = 0">
+
+  <div id="upload-feedback"></div>
+  <template x-if="uploading">
+    <div class="upload-progress">
+      <progress :value="progress" max="100"></progress>
+      <small x-text="Math.round(progress) + '% — {{ labels.UPLOAD_UPLOADING }}'"></small>
+    </div>
+  </template>
+
   <div x-data="{ tab: 'files' }">
     <div role="group">
       <button type="button" :class="tab === 'files' ? '' : 'secondary outline'" @click="tab = 'files'">
@@ -38,10 +53,19 @@
     </div>
 
     <div x-show="tab === 'files'">
-      <label for="upload-files">{{ labels.UPLOAD_CHOOSE_FILE }}</label>
-      <input type="file" id="upload-files" name="files" multiple
-             accept="{{ supported_extensions|join(',') }}"
-             :disabled="tab !== 'files'">
+      <div class="drop-zone"
+           :class="{ 'drop-active': dragging }"
+           x-data="{ dragging: false }"
+           @dragover.prevent="dragging = true"
+           @dragleave.prevent="dragging = false"
+           @drop.prevent="dragging = false; $refs.fileInput.files = $event.dataTransfer.files">
+        <p>{{ labels.UPLOAD_DRAG_DROP }}</p>
+        <label for="upload-files">{{ labels.UPLOAD_CHOOSE_FILE }}</label>
+        <input type="file" id="upload-files" name="files" multiple
+               accept="{{ supported_extensions|join(',') }}"
+               :disabled="tab !== 'files'"
+               x-ref="fileInput">
+      </div>
     </div>
 
     <div x-show="tab === 'folder'">
@@ -97,6 +121,22 @@
     </label>
   </fieldset>
 
-  <button type="submit">{{ labels.UPLOAD_START }}</button>
+  <button type="submit" :disabled="uploading">{{ labels.UPLOAD_START }}</button>
 </form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function uploadForm() {
+  return {
+    uploading: false,
+    progress: 0,
+    onProgress(event) {
+      if (event.detail && event.detail.loaded !== undefined && event.detail.total) {
+        this.progress = (event.detail.loaded / event.detail.total) * 100;
+      }
+    }
+  }
+}
+</script>
 {% endblock %}
