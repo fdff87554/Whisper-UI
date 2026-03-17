@@ -25,7 +25,16 @@
   </select>
 </div>
 {% else %}
-<p>{{ labels.VIEWER_NO_COMPLETED }}</p>
+<div class="empty-state">
+  <p>{{ labels.VIEWER_NO_COMPLETED }}</p>
+  <a href="/upload" role="button" class="outline small-btn">{{ labels.PAGE_UPLOAD }}</a>
+</div>
+{% endif %}
+
+{% if completed_jobs and not result and not error %}
+<div class="empty-state">
+  <p>{{ labels.VIEWER_EMPTY_STATE }}</p>
+</div>
 {% endif %}
 
 {# Transcript display #}
@@ -63,8 +72,8 @@
 
 {# Search + Segments #}
 {% if result.segments %}
-<div x-data="{ search: '' }">
-  <input type="search" x-model="search" placeholder="{{ labels.VIEWER_SEARCH_PLACEHOLDER }}">
+<div x-data="{ search: '', get hasResults() { return !this.search || document.querySelectorAll('.segment:not([style*=&quot;display: none&quot;])').length > 0 } }">
+  <input type="search" class="viewer-search" x-model="search" placeholder="{{ labels.VIEWER_SEARCH_PLACEHOLDER }}">
   <div class="transcript">
     {% for seg in result.segments %}
     <div class="segment"
@@ -77,6 +86,11 @@
     </div>
     {% endfor %}
   </div>
+  <p class="search-no-results"
+     x-show="search && !hasResults"
+     x-transition.opacity>
+    {{ labels.VIEWER_SEARCH_NO_RESULTS }}
+  </p>
 </div>
 {% else %}
 <p>{{ labels.VIEWER_NO_SEGMENTS }}</p>
