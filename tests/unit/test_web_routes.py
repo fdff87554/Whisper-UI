@@ -93,6 +93,11 @@ class TestJobsRoutes:
         assert resp.status_code == 200
         assert "test.mp3" in resp.text
 
+    def test_jobs_page_invalid_status_ignored(self, client):
+        resp = client.get("/jobs?status=' %2B alert(1) %2B '")
+        assert resp.status_code == 200
+        assert "alert(1)" not in resp.text
+
     def test_jobs_list_filter(self, client, db, filestore):
         _create_completed_job(db, filestore)
         _create_failed_job(db)

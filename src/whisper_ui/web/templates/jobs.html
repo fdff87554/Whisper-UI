@@ -5,7 +5,7 @@
 <h1 class="text-2xl font-medium mb-4">{{ labels.JOBS_HEADER }}</h1>
 
 {# Status filter chips #}
-<div class="flex flex-wrap gap-2 mb-4" x-data="{ activeFilter: '{{ status }}' }">
+<div class="flex flex-wrap gap-2 mb-4" x-data="{ activeFilter: {{ status|tojson }} }">
   {% set filter_options = [('', labels.JOBS_FILTER_ALL)] %}
   {% for value, label in labels.STATUS_LABELS.items() %}
     {% set _ = filter_options.append((value, label)) %}

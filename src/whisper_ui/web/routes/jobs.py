@@ -18,6 +18,8 @@ from whisper_ui.worker.progress import RedisProgressReporter
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+_VALID_STATUS_FILTERS = frozenset({"", *JobStatus})
+
 
 def _group_jobs_by_batch(jobs: list[Job]) -> list[tuple[str, list[Job]]]:
     groups: OrderedDict[str, list[Job]] = OrderedDict()
@@ -78,6 +80,8 @@ async def jobs_page(
     status: str = "",
     page: int = 0,
 ):
+    if status not in _VALID_STATUS_FILTERS:
+        status = ""
     ctx = _build_list_context(db, redis, status, page)
     ctx["active_page"] = "jobs"
     ctx["submitted"] = submitted
