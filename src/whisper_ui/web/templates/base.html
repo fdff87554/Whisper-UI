@@ -23,6 +23,8 @@
           crossorigin="anonymous"></script>
   <script>
   document.addEventListener('alpine:init', () => {
+    Alpine.store('nav', { activePage: '{{ active_page }}' });
+
     Alpine.store('toasts', {
       items: [],
       _id: 0,
@@ -95,6 +97,18 @@
         loader.style.opacity = '0';
         setTimeout(() => { loader.style.width = '0'; }, 300);
       }, 200);
+    });
+
+    // Update nav active state after hx-boost navigation
+    document.body.addEventListener('htmx:pushedIntoHistory', function(evt) {
+      const path = evt.detail.path;
+      const nav = Alpine.store('nav');
+      if (nav) {
+        if (path === '/') nav.activePage = 'dashboard';
+        else if (path.startsWith('/upload')) nav.activePage = 'upload';
+        else if (path.startsWith('/jobs') || path.startsWith('/viewer')) nav.activePage = 'jobs';
+        else nav.activePage = '';
+      }
     });
 
     // Listen for HX-Trigger showToast events
