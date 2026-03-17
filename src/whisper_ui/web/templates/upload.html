@@ -22,14 +22,21 @@
   {{ labels.UPLOAD_INVALID_MODEL.format(value=request.query_params.get('value', '?')) }}
   {% elif error == 'queue' %}
   {{ labels.UPLOAD_QUEUE_ERROR.format(error='Redis') }}
+  {% elif error == 'invalid_url' %}
+  {{ labels.UPLOAD_INVALID_URL }}
+  {% elif error == 'playlist' %}
+  {{ labels.UPLOAD_URL_PLAYLIST_NOT_SUPPORTED }}
   {% endif %}
 </article>
 {% endif %}
 
-<form method="post" action="/upload" enctype="multipart/form-data"
-      hx-post="/upload" hx-encoding="multipart/form-data"
-      hx-target="#upload-feedback" hx-swap="innerHTML"
+<form method="post"
       x-data="uploadForm()"
+      :action="tab === 'url' ? '/upload/url' : '/upload'"
+      :enctype="tab === 'url' ? 'application/x-www-form-urlencoded' : 'multipart/form-data'"
+      :hx-post="tab === 'url' ? '/upload/url' : '/upload'"
+      :hx-encoding="tab === 'url' ? '' : 'multipart/form-data'"
+      hx-target="#upload-feedback" hx-swap="innerHTML"
       @htmx:xhr:progress.window="onProgress($event)"
       @htmx:before-request="uploading = true"
       @htmx:after-request="uploading = false; progress = 0">
@@ -42,44 +49,57 @@
     </div>
   </template>
 
-  <div x-data="{ tab: 'files' }">
-    <div class="upload-tabs" role="group" aria-label="{{ labels.UPLOAD_MODE_GROUP }}">
-      <button type="button" class="tab-btn"
-              :class="{ active: tab === 'files' }"
-              :aria-pressed="tab === 'files' ? 'true' : 'false'"
-              @click="tab = 'files'">
-        {{ labels.UPLOAD_TAB_FILES }}
-      </button>
-      <button type="button" class="tab-btn"
-              :class="{ active: tab === 'folder' }"
-              :aria-pressed="tab === 'folder' ? 'true' : 'false'"
-              @click="tab = 'folder'">
-        {{ labels.UPLOAD_TAB_FOLDER }}
-      </button>
-    </div>
+  <div class="upload-tabs" role="group" aria-label="{{ labels.UPLOAD_MODE_GROUP }}">
+    <button type="button" class="tab-btn"
+            :class="{ active: tab === 'files' }"
+            :aria-pressed="tab === 'files' ? 'true' : 'false'"
+            @click="tab = 'files'">
+      {{ labels.UPLOAD_TAB_FILES }}
+    </button>
+    <button type="button" class="tab-btn"
+            :class="{ active: tab === 'folder' }"
+            :aria-pressed="tab === 'folder' ? 'true' : 'false'"
+            @click="tab = 'folder'">
+      {{ labels.UPLOAD_TAB_FOLDER }}
+    </button>
+    <button type="button" class="tab-btn"
+            :class="{ active: tab === 'url' }"
+            :aria-pressed="tab === 'url' ? 'true' : 'false'"
+            @click="tab = 'url'">
+      {{ labels.UPLOAD_TAB_URL }}
+    </button>
+  </div>
 
-    <div x-show="tab === 'files'">
-      <div class="drop-zone"
-           :class="{ 'drop-active': dragging }"
-           x-data="{ dragging: false }"
-           @dragover.prevent="dragging = true"
-           @dragleave.prevent="dragging = false"
-           @drop.prevent="dragging = false; $refs.fileInput.files = $event.dataTransfer.files">
-        <p>{{ labels.UPLOAD_DRAG_DROP }}</p>
-        <label for="upload-files">{{ labels.UPLOAD_CHOOSE_FILE }}</label>
-        <input type="file" id="upload-files" name="files" multiple
-               accept="{{ supported_extensions|join(',') }}"
-               :disabled="tab !== 'files'"
-               x-ref="fileInput">
-      </div>
+  <div x-show="tab === 'files'">
+    <div class="drop-zone"
+         :class="{ 'drop-active': dragging }"
+         x-data="{ dragging: false }"
+         @dragover.prevent="dragging = true"
+         @dragleave.prevent="dragging = false"
+         @drop.prevent="dragging = false; $refs.fileInput.files = $event.dataTransfer.files">
+      <p>{{ labels.UPLOAD_DRAG_DROP }}</p>
+      <label for="upload-files">{{ labels.UPLOAD_CHOOSE_FILE }}</label>
+      <input type="file" id="upload-files" name="files" multiple
+             accept="{{ supported_extensions|join(',') }}"
+             :disabled="tab !== 'files'"
+             x-ref="fileInput">
     </div>
+  </div>
 
-    <div x-show="tab === 'folder'">
-      <p><small>{{ labels.UPLOAD_FOLDER_DESCRIPTION }}</small></p>
-      <label for="upload-folder">{{ labels.UPLOAD_CHOOSE_FOLDER }}</label>
-      <input type="file" id="upload-folder" name="files" webkitdirectory
-             :disabled="tab !== 'folder'">
-    </div>
+  <div x-show="tab === 'folder'">
+    <p><small>{{ labels.UPLOAD_FOLDER_DESCRIPTION }}</small></p>
+    <label for="upload-folder">{{ labels.UPLOAD_CHOOSE_FOLDER }}</label>
+    <input type="file" id="upload-folder" name="files" webkitdirectory
+           :disabled="tab !== 'folder'">
+  </div>
+
+  <div x-show="tab === 'url'">
+    <p><small>{{ labels.UPLOAD_URL_DESCRIPTION }}</small></p>
+    <label for="upload-url">{{ labels.UPLOAD_TAB_URL }}</label>
+    <input type="url" id="upload-url" name="url"
+           placeholder="{{ labels.UPLOAD_URL_PLACEHOLDER }}"
+           :disabled="tab !== 'url'">
+    <small>{{ labels.UPLOAD_URL_DISCLAIMER }}</small>
   </div>
 
   <section class="upload-settings">
@@ -137,6 +157,7 @@
 <script>
 function uploadForm() {
   return {
+    tab: 'files',
     uploading: false,
     progress: 0,
     onProgress(event) {
