@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -20,8 +21,10 @@ async def lifespan(app: FastAPI):
     from redis.exceptions import RedisError
 
     from whisper_ui.core.config import get_settings
+    from whisper_ui.core.constants import STALE_JOB_CHECK_INTERVAL, STALE_JOB_TIMEOUT
     from whisper_ui.storage.database import JobDatabase
     from whisper_ui.storage.filestore import FileStore
+    from whisper_ui.ui.labels import JOBS_STALE_ERROR
 
     settings = get_settings()
     app.state.settings = settings
@@ -32,8 +35,26 @@ async def lifespan(app: FastAPI):
         app.state.redis.ping()
     except RedisError:
         logger.warning("Redis is not reachable at %s — job submission will fail", settings.redis_url)
+
+    async def _stale_job_checker():
+        while True:
+            await asyncio.sleep(STALE_JOB_CHECK_INTERVAL)
+            try:
+                recovered = app.state.db.recover_stale_jobs(STALE_JOB_TIMEOUT, JOBS_STALE_ERROR)
+                if recovered > 0:
+                    logger.warning("Recovered %d stale job(s)", recovered)
+            except Exception:
+                logger.exception("Stale job check failed")
+
+    task = asyncio.create_task(_stale_job_checker())
+
     logger.info("Whisper UI started")
     yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
     app.state.db.close()
     app.state.redis.close()
     logger.info("Whisper UI stopped")
