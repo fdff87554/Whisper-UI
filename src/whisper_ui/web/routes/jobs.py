@@ -2,39 +2,21 @@ from __future__ import annotations
 
 import logging
 import math
-import time
 from collections import OrderedDict
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 
-from whisper_ui.core.constants import (
-    DEFAULT_JOBS_PER_PAGE,
-    ERROR_MAX_LENGTH,
-    STALE_JOB_CHECK_INTERVAL,
-    STALE_JOB_TIMEOUT,
-)
+from whisper_ui.core.constants import DEFAULT_JOBS_PER_PAGE, ERROR_MAX_LENGTH
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.storage.database import JobDatabase
-from whisper_ui.ui.labels import JOBS_STALE_ERROR
 from whisper_ui.web.batch_zip import create_batch_zip
 from whisper_ui.web.deps import DbDep, FileStoreDep, RedisDep, make_content_disposition, templates
+from whisper_ui.web.validation import validate_hex_id
 from whisper_ui.worker.progress import RedisProgressReporter
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-_last_stale_check = 0.0
-
-
-def _check_stale_jobs(db: JobDatabase) -> None:
-    global _last_stale_check
-    now = time.monotonic()
-    if now - _last_stale_check >= STALE_JOB_CHECK_INTERVAL:
-        recovered = db.recover_stale_jobs(STALE_JOB_TIMEOUT, JOBS_STALE_ERROR)
-        if recovered > 0:
-            logger.warning("Recovered %d stale job(s)", recovered)
-        _last_stale_check = now
 
 
 def _group_jobs_by_batch(jobs: list[Job]) -> list[tuple[str, list[Job]]]:
@@ -60,8 +42,6 @@ def _get_progress_data(redis, jobs: list[Job]) -> dict[str, dict[str, str]]:
 
 
 def _build_list_context(db: JobDatabase, redis, status: str, page: int) -> dict:
-    _check_stale_jobs(db)
-
     status_filter = status or None
     total_count = db.count_jobs(status=status_filter)
     total_pages = max(1, math.ceil(total_count / DEFAULT_JOBS_PER_PAGE))
@@ -112,6 +92,7 @@ async def jobs_list_fragment(request: Request, db: DbDep, redis: RedisDep, statu
 
 @router.post("/jobs/{job_id}/retry")
 async def retry_job(job_id: str, db: DbDep, redis: RedisDep):
+    validate_hex_id(job_id, "job_id")
     job = db.get_job(job_id)
     if job is None or job.status != JobStatus.FAILED:
         return Response(status_code=404)
@@ -144,6 +125,7 @@ async def retry_job(job_id: str, db: DbDep, redis: RedisDep):
 
 @router.delete("/jobs/{job_id}")
 async def delete_job(job_id: str, db: DbDep, filestore: FileStoreDep, redis: RedisDep):
+    validate_hex_id(job_id, "job_id")
     job = db.get_job(job_id)
     if job is None:
         return Response(status_code=404)
@@ -158,6 +140,7 @@ async def delete_job(job_id: str, db: DbDep, filestore: FileStoreDep, redis: Red
 
 @router.post("/jobs/batch/{batch_id}/retry")
 async def retry_batch(batch_id: str, db: DbDep, redis: RedisDep):
+    validate_hex_id(batch_id, "batch_id")
     all_jobs = db.list_jobs_by_batch(batch_id)
     if not all_jobs:
         return Response(status_code=404)
@@ -193,6 +176,7 @@ async def retry_batch(batch_id: str, db: DbDep, redis: RedisDep):
 
 @router.delete("/jobs/batch/{batch_id}")
 async def delete_batch(batch_id: str, db: DbDep, filestore: FileStoreDep, redis: RedisDep):
+    validate_hex_id(batch_id, "batch_id")
     all_jobs = db.list_jobs_by_batch(batch_id)
     if not all_jobs:
         return Response(status_code=404)
@@ -208,13 +192,14 @@ async def delete_batch(batch_id: str, db: DbDep, filestore: FileStoreDep, redis:
 
 
 @router.get("/jobs/batch/{batch_id}/download")
-async def batch_download(batch_id: str, db: DbDep, filestore: FileStoreDep, format: str = "srt"):
+async def batch_download(batch_id: str, db: DbDep, filestore: FileStoreDep, format_name: str = "srt"):
+    validate_hex_id(batch_id, "batch_id")
     all_jobs = db.list_jobs_by_batch(batch_id)
     if not all_jobs:
         raise HTTPException(status_code=404, detail="Batch not found")
 
     try:
-        zip_data = create_batch_zip(all_jobs, filestore, format)
+        zip_data = create_batch_zip(all_jobs, filestore, format_name)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
     if zip_data is None:

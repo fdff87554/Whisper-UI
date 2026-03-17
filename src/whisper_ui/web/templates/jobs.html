@@ -58,7 +58,7 @@
       </label>
       <footer>
         <button class="secondary" @click="cancel()">{{ labels.DIALOG_CANCEL }}</button>
-        <a :href="'/jobs/batch/' + batchId + '/download?format=' + format"
+        <a :href="'/jobs/batch/' + batchId + '/download?format_name=' + format"
            role="button" @click="cancel()">
           {{ labels.JOBS_BATCH_DOWNLOAD_BUTTON }}
         </a>
