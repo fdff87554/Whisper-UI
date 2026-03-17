@@ -1,99 +1,131 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon_chevron_left, icon_copy, icon_check, icon_search, icon_download %}
 
 {% block content %}
-<h1>{{ labels.VIEWER_HEADER }}</h1>
+{# Breadcrumb #}
+<div class="breadcrumbs text-sm mb-4">
+  <ul>
+    <li><a href="/jobs">{{ labels.NAV_JOBS }}</a></li>
+    {% if job %}<li>{{ job.filename }}</li>{% endif %}
+  </ul>
+</div>
 
 {% if error == 'not_found' %}
-<article class="alert-error">{{ labels.VIEWER_NOT_FOUND }}</article>
+<div class="alert alert-error">{{ labels.VIEWER_NOT_FOUND }}</div>
 {% elif error == 'not_completed' %}
-<article class="alert-error">{{ labels.VIEWER_NOT_COMPLETED.format(status=job.status.value) }}</article>
+<div class="alert alert-error">{{ labels.VIEWER_NOT_COMPLETED.format(status=job.status.value) }}</div>
 {% elif error == 'no_result' %}
-<article class="alert-error">{{ labels.VIEWER_RESULT_NOT_FOUND }}</article>
+<div class="alert alert-error">{{ labels.VIEWER_RESULT_NOT_FOUND }}</div>
 {% endif %}
 
-{# Job selector #}
-{% if completed_jobs %}
-<label for="job-select">{{ labels.VIEWER_SELECT_JOB }}</label>
-<div class="viewer-select-row">
-  <select id="job-select" onchange="if(this.value) window.location.href='/viewer/'+this.value">
-    <option value="">--</option>
-    {% for j in completed_jobs %}
-    <option value="{{ j.id }}" {% if j.id == selected_job_id %}selected{% endif %}>
-      {{ j.filename }} ({{ j.created_at[:TIMESTAMP_DISPLAY_LENGTH] }})
-    </option>
-    {% endfor %}
-  </select>
-</div>
-{% else %}
-<div class="empty-state">
-  <p>{{ labels.VIEWER_NO_COMPLETED }}</p>
-  <a href="/upload" role="button" class="outline small-btn">{{ labels.PAGE_UPLOAD }}</a>
-</div>
-{% endif %}
-
-{% if completed_jobs and not result and not error %}
-<div class="empty-state">
+{% if not result and not error %}
+{# No job selected — redirect should handle this, but fallback #}
+<div class="text-center py-16 opacity-60">
+  <svg class="w-12 h-12 mx-auto mb-3 opacity-30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
   <p>{{ labels.VIEWER_EMPTY_STATE }}</p>
+  <a href="/jobs" class="btn btn-outline btn-sm mt-4">{{ labels.VIEWER_BACK_TO_JOBS }}</a>
 </div>
 {% endif %}
 
 {# Transcript display #}
 {% if result %}
-<hr>
-<h2>{{ labels.VIEWER_TRANSCRIPT_TITLE.format(name=job.filename) }}</h2>
+<h1 class="text-xl font-medium mb-2">{{ labels.VIEWER_TRANSCRIPT_TITLE.format(name=job.filename) }}</h1>
 
 {% if result.duration > 0 %}
 {% set minutes = (result.duration // 60)|int %}
 {% set seconds = (result.duration % 60)|int %}
-<p><small>{{ labels.VIEWER_METADATA.format(minutes=minutes, seconds=seconds, segments=result.segments|length, language=result.language) }}</small></p>
+<p class="text-sm opacity-50 mb-4">{{ labels.VIEWER_METADATA.format(minutes=minutes, seconds=seconds, segments=result.segments|length, language=result.language) }}</p>
 {% endif %}
 
-{# Export buttons + copy #}
-<div class="export-buttons">
-  {% for fmt in export_formats %}
-  <a href="/viewer/{{ job.id }}/export/{{ fmt }}" role="button" class="outline small-btn" download
-     data-tooltip="{{ labels.VIEWER_EXPORT_TOOLTIPS.get(fmt, '') }}">
-    {{ fmt|upper }}
-  </a>
-  {% endfor %}
-  <button class="outline small-btn"
-          x-data="{ copied: false }"
-          @click="
-            const text = Array.from(document.querySelectorAll('.segment'))
-              .filter(s => s.style.display !== 'none')
-              .map(s => s.textContent.trim()).join('\n');
-            navigator.clipboard.writeText(text).then(() => { copied = true; setTimeout(() => copied = false, 2000) });
-          "
-          x-text="copied ? '{{ labels.VIEWER_COPIED }}' : '{{ labels.VIEWER_COPY }}'">
-  </button>
+{# Sticky toolbar #}
+<div class="sticky top-0 z-10 bg-base-100 border-b border-base-300 pb-3 mb-4 pt-2">
+  {# Export buttons #}
+  <div class="flex flex-wrap items-center gap-2 mb-3">
+    <div class="join">
+      {% for fmt in export_formats %}
+      <a href="/viewer/{{ job.id }}/export/{{ fmt }}" class="btn btn-sm btn-outline join-item" download
+         title="{{ labels.VIEWER_EXPORT_TOOLTIPS.get(fmt, '') }}">
+        {{ fmt|upper }}
+      </a>
+      {% endfor %}
+    </div>
+    <button class="btn btn-sm btn-ghost gap-1"
+            x-data="{ copied: false }"
+            @click="
+              const text = Array.from(document.querySelectorAll('.segment'))
+                .filter(s => s.style.display !== 'none')
+                .map(s => s.textContent.trim()).join('\n');
+              navigator.clipboard.writeText(text).then(() => { copied = true; setTimeout(() => copied = false, 2000) });
+            ">
+      <template x-if="!copied">
+        <span class="flex items-center gap-1">{{ icon_copy("w-4 h-4") }} {{ labels.VIEWER_COPY }}</span>
+      </template>
+      <template x-if="copied">
+        <span class="flex items-center gap-1 text-success">{{ icon_check("w-4 h-4") }} {{ labels.VIEWER_COPIED }}</span>
+      </template>
+    </button>
+  </div>
+
+  {# Search #}
+  {% if result.segments %}
+  <div class="relative max-w-sm"
+       x-data="{
+         search: '',
+         get matchCount() {
+           if (!this.search) return {{ result.segments|length }};
+           const q = this.search.toLowerCase();
+           return Array.from(document.querySelectorAll('.segment[data-text]')).filter(el => el.dataset.text.includes(q)).length;
+         }
+       }">
+    <span class="absolute left-3 top-1/2 -translate-y-1/2 opacity-40">{{ icon_search("w-4 h-4") }}</span>
+    <input type="search" class="input input-bordered input-sm w-full pl-9 pr-20" x-model="search"
+           placeholder="{{ labels.VIEWER_SEARCH_PLACEHOLDER }}">
+    <span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs opacity-40"
+          x-show="search"
+          x-text="matchCount + ' / {{ result.segments|length }}'"></span>
+  </div>
+  {% endif %}
 </div>
 
-<hr>
-
-{# Search + Segments #}
+{# Segments #}
 {% if result.segments %}
-<div x-data="{ search: '', get hasResults() { if (!this.search) return true; const q = this.search.toLowerCase(); return Array.from(this.$root.querySelectorAll('.segment[data-text]')).some(el => el.dataset.text.includes(q)); } }">
-  <input type="search" class="viewer-search" x-model="search" placeholder="{{ labels.VIEWER_SEARCH_PLACEHOLDER }}">
-  <div class="transcript">
+<div x-data="{ search: '' }"
+     x-effect="search = document.querySelector('[x-model=&quot;search&quot;]')?.value || ''"
+     @input.window="search = $event.target.matches('[x-model]') ? $event.target.value : search">
+  <div class="transcript-container">
     {% for seg in result.segments %}
-    <div class="segment"
+    <div class="segment group flex gap-3 py-2 px-3 rounded-box hover:bg-base-200 transition-colors"
          data-text="{{ seg.text|lower|e }}"
          x-show="!search || $el.dataset.text.includes(search.toLowerCase())"
          x-transition.opacity>
-      <code>{{ seg.start|format_time }} - {{ seg.end|format_time }}</code>
-      {% if seg.speaker %}<strong>[{{ seg.speaker }}]</strong>{% endif %}
-      {{ seg.text }}
+      <code class="text-xs font-mono opacity-40 whitespace-nowrap pt-0.5">{{ seg.start|format_time }}</code>
+      <div class="flex-1 min-w-0">
+        {% if seg.speaker %}
+        <strong class="text-xs font-medium {{ speaker_colors.get(seg.speaker, '') }}">[{{ seg.speaker }}]</strong>
+        {% endif %}
+        <span>{{ seg.text }}</span>
+      </div>
+      <button class="btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+              title="{{ labels.VIEWER_COPY_SEGMENT }}"
+              @click="navigator.clipboard.writeText('{{ seg.text|e }}')">
+        {{ icon_copy("w-3 h-3") }}
+      </button>
     </div>
     {% endfor %}
   </div>
-  <p class="search-no-results"
-     x-show="search && !hasResults"
+  <p class="text-center py-8 opacity-50"
+     x-data="{ search: '' }"
+     x-effect="search = document.querySelector('[x-model=&quot;search&quot;]')?.value || ''"
+     @input.window="search = $event.target.matches('[x-model]') ? $event.target.value : search"
+     x-show="search && document.querySelectorAll('.segment[data-text]:not([style*=display])').length === 0"
      x-transition.opacity>
     {{ labels.VIEWER_SEARCH_NO_RESULTS }}
   </p>
 </div>
 {% else %}
-<p>{{ labels.VIEWER_NO_SEGMENTS }}</p>
+<p class="text-sm opacity-50">{{ labels.VIEWER_NO_SEGMENTS }}</p>
 {% endif %}
 
 {% endif %}
