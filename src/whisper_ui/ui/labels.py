@@ -8,6 +8,21 @@ PAGE_UPLOAD = "上傳"
 PAGE_JOBS = "任務列表"
 PAGE_VIEWER = "檢視器"
 
+# -- Navigation --
+NAV_DASHBOARD = "首頁"
+NAV_UPLOAD = "上傳"
+NAV_JOBS = "任務"
+
+# -- Dashboard --
+DASHBOARD_HEADER = "總覽"
+DASHBOARD_TOTAL_JOBS = "總任務數"
+DASHBOARD_ACTIVE_JOBS = "進行中"
+DASHBOARD_COMPLETED_TODAY = "今日完成"
+DASHBOARD_ACTIVE_SECTION = "進行中的任務"
+DASHBOARD_RECENT_SECTION = "最近完成的轉錄"
+DASHBOARD_EMPTY = "尚無任務，開始你的第一次轉錄吧。"
+DASHBOARD_NEW_TRANSCRIPTION = "新增轉錄"
+
 # -- Upload page --
 UPLOAD_HEADER = "上傳音訊"
 UPLOAD_DESCRIPTION = "上傳音訊或影片檔案進行語音轉錄。"
@@ -82,6 +97,8 @@ JOBS_PAGE_INFO = "第 {current} / {total} 頁（共 {count} 個任務）"
 JOBS_PAGE_PREV = "上一頁"
 JOBS_PAGE_NEXT = "下一頁"
 JOBS_STALE_ERROR = "任務逾時或 Worker 異常終止"
+JOBS_SEARCH_PLACEHOLDER = "搜尋檔案名稱..."
+JOBS_INLINE_EXPORT = "匯出"
 
 # -- Viewer page --
 VIEWER_HEADER = "轉錄結果檢視器"
@@ -105,6 +122,16 @@ VIEWER_EXPORT_TOOLTIPS: dict[str, str] = {
     "json": "JSON 結構化資料",
     "docx": "Word 文件格式",
 }
+VIEWER_BACK_TO_JOBS = "返回任務列表"
+VIEWER_COPY_SEGMENT = "複製此段"
+VIEWER_SEARCH_COUNT = "{matched} / {total} 段落"
+VIEWER_COPY_FILTERED = "複製篩選結果"
+
+# -- Toast --
+TOAST_UPLOAD_SUCCESS = "已提交 {count} 個任務"
+TOAST_RETRY_SUCCESS = "已重新提交任務"
+TOAST_DELETE_SUCCESS = "已刪除任務"
+TOAST_NETWORK_ERROR = "網路連線錯誤，請稍後再試"
 
 # -- Theme --
 THEME_TOGGLE_LIGHT = "淺色模式"
