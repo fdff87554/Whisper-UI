@@ -295,31 +295,68 @@ a.small-btn {
   font-size: 0.875rem;
 }
 
-/* Export buttons row */
+/* --- Viewer Page --- */
+
+/* Export toolbar */
 .export-buttons {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--space-sm);
   flex-wrap: wrap;
-  margin: 1rem 0;
+  align-items: center;
+  padding: var(--space-sm) 0;
+  margin: var(--space-md) 0;
 }
 
-/* Transcript segments */
+/* Transcript — optimized reading experience */
 .transcript {
+  max-width: 680px;
   max-height: 70vh;
   overflow-y: auto;
 }
 .segment {
-  padding: 0.3rem 0;
-  line-height: 1.6;
+  padding: var(--space-sm) 0 var(--space-sm) var(--space-md);
+  line-height: 1.8;
+  border-left: 2px solid transparent;
+}
+.segment:hover {
+  border-left-color: var(--pico-muted-border-color);
 }
 .segment code {
-  font-size: 0.8rem;
-  margin-right: 0.5rem;
+  font-size: 0.75rem;
+  margin-right: var(--space-sm);
+  color: var(--pico-muted-color);
+}
+.segment strong {
+  color: var(--pico-primary);
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+
+/* Search — minimal underline style */
+.viewer-search {
+  border: none;
+  border-bottom: 1px solid var(--pico-muted-border-color);
+  border-radius: 0;
+  padding: var(--space-sm) 0;
+  background: transparent;
+  max-width: 400px;
+}
+.viewer-search:focus {
+  border-bottom-color: var(--pico-primary);
+  box-shadow: none;
+  outline: none;
+}
+
+/* Search zero results */
+.search-no-results {
+  text-align: center;
+  padding: var(--space-xl) 0;
+  color: var(--pico-muted-color);
 }
 
 /* Viewer job selector row */
 .viewer-select-row {
-  max-width: 500px;
+  max-width: 400px;
 }
 
 /* --- Dialog (animation + backdrop blur) --- */
