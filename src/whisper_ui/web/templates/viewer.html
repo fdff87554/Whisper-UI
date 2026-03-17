@@ -72,7 +72,7 @@
 
 {# Search + Segments #}
 {% if result.segments %}
-<div x-data="{ search: '', get hasResults() { return !this.search || document.querySelectorAll('.segment:not([style*=&quot;display: none&quot;])').length > 0 } }">
+<div x-data="{ search: '', get hasResults() { if (!this.search) return true; const q = this.search.toLowerCase(); return Array.from(this.$root.querySelectorAll('.segment[data-text]')).some(el => el.dataset.text.includes(q)); } }">
   <input type="search" class="viewer-search" x-model="search" placeholder="{{ labels.VIEWER_SEARCH_PLACEHOLDER }}">
   <div class="transcript">
     {% for seg in result.segments %}
