@@ -12,7 +12,8 @@ from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.pipeline.align import AlignStage
 from whisper_ui.pipeline.assign_speakers import AssignSpeakersStage
 from whisper_ui.pipeline.diarize import DiarizeStage
-from whisper_ui.pipeline.orchestrator import PipelineOrchestrator
+from whisper_ui.pipeline.download import DownloadStage
+from whisper_ui.pipeline.orchestrator import STAGE_WEIGHTS_WITH_DOWNLOAD, PipelineOrchestrator
 from whisper_ui.pipeline.postprocess import PostprocessStage
 from whisper_ui.pipeline.preprocess import PreprocessStage
 from whisper_ui.pipeline.transcribe import TranscribeStage
@@ -51,7 +52,8 @@ def process_transcription(job_id: str) -> str:
 
         job.status = JobStatus.PROCESSING
         db.update_job(job)
-        stages = [
+
+        common_stages = [
             PreprocessStage(),
             TranscribeStage(
                 model_name=job.model_name,
@@ -68,23 +70,41 @@ def process_transcription(job_id: str) -> str:
             PostprocessStage(convert_to_traditional=job.convert_to_traditional),
         ]
 
+        if job.source_url:
+            download_dir = str(filestore.prepare_upload_path(job.id, "_").parent)
+            stages = [DownloadStage(max_duration=settings.youtube_max_duration), *common_stages]
+            stage_weights = STAGE_WEIGHTS_WITH_DOWNLOAD
+            context = {
+                "source_url": job.source_url,
+                "download_dir": download_dir,
+                "input_path": "",
+                "language": job.language,
+                "batch_size": settings.batch_size,
+                "num_speakers": job.num_speakers,
+            }
+        else:
+            stages = common_stages
+            stage_weights = None
+            context = {
+                "input_path": job.filepath,
+                "language": job.language,
+                "batch_size": settings.batch_size,
+                "num_speakers": job.num_speakers,
+            }
+
         def on_progress(progress: float, message: str) -> None:
             reporter.report(progress, message)
             job.progress = progress
             job.progress_message = message
             db.update_job(job)
 
-        orchestrator = PipelineOrchestrator(stages, on_progress=on_progress)
-
-        context = {
-            "input_path": job.filepath,
-            "language": job.language,
-            "batch_size": settings.batch_size,
-            "num_speakers": job.num_speakers,
-        }
+        orchestrator = PipelineOrchestrator(stages, on_progress=on_progress, stage_weights=stage_weights)
 
         result = orchestrator.run(context)
         _cleanup_preprocessed(context)
+
+        if job.source_url and context.get("video_title"):
+            job.filename = context["video_title"]
         result_path = filestore.save_result(job_id, result)
 
         job.status = JobStatus.COMPLETED
