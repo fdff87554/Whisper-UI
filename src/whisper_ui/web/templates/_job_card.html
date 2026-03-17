@@ -1,22 +1,41 @@
 {# Reusable job card fragment — expects `job` and `progress_data` in context #}
-<div class="job-card-row-1">
-  <strong class="job-card-filename">{{ job.filename }}</strong>
-  <span class="badge badge-{{ job.status.value }}">{{ labels.STATUS_LABELS[job.status.value] }}</span>
+{% from "_icons.html" import icon_eye, icon_refresh, icon_trash, icon_download %}
+<div class="flex items-center justify-between gap-2">
+  <strong class="truncate flex-1 min-w-0 text-sm">{{ job.filename }}</strong>
+  <span class="badge badge-sm
+    {% if job.status.value == 'queued' %}badge-info
+    {% elif job.status.value == 'processing' %}badge-warning
+    {% elif job.status.value == 'completed' %}badge-success
+    {% elif job.status.value == 'failed' %}badge-error
+    {% else %}badge-ghost{% endif %}">
+    {{ labels.STATUS_LABELS[job.status.value] }}
+  </span>
 </div>
+
 {% if job.source_url %}
-<div class="job-card-row-source">
-  <small class="job-card-source-url" title="{{ job.source_url }}">{{ job.source_url[:60] }}{% if job.source_url|length > 60 %}...{% endif %}</small>
+<div class="mt-1">
+  <span class="text-xs opacity-40 truncate block" title="{{ job.source_url }}">{{ job.source_url[:60] }}{% if job.source_url|length > 60 %}...{% endif %}</span>
 </div>
 {% endif %}
-<div class="job-card-row-2">
-  <small class="job-card-meta">{{ job.language }} | {{ job.model_name }} | {{ job.created_at[:TIMESTAMP_DISPLAY_LENGTH] }}</small>
-  <div class="job-card-actions">
+
+<div class="flex items-center justify-between gap-2 mt-1">
+  <span class="text-xs opacity-50">{{ job.language }} | {{ job.model_name }} | {{ job.created_at|relative_time }}</span>
+  <div class="flex gap-1 flex-shrink-0">
     {% if job.status.value == 'completed' %}
-    <a href="/viewer/{{ job.id }}" role="button" class="small-btn">{{ labels.JOBS_VIEW }}</a>
+    <a href="/viewer/{{ job.id }}" class="btn btn-primary btn-xs">{{ labels.JOBS_VIEW }}</a>
+    {# Inline export dropdown #}
+    <div class="dropdown dropdown-end" x-data="{ open: false }" @click.away="open = false">
+      <button class="btn btn-ghost btn-xs" @click="open = !open">{{ labels.JOBS_INLINE_EXPORT }}</button>
+      <ul class="dropdown-content menu bg-base-100 rounded-box shadow-lg z-10 w-36 p-1 border border-base-300" x-show="open" x-transition>
+        {% for fmt in export_formats %}
+        <li><a href="/viewer/{{ job.id }}/export/{{ fmt }}" download class="text-xs">{{ fmt|upper }}</a></li>
+        {% endfor %}
+      </ul>
+    </div>
     {% endif %}
 
     {% if job.status.value == 'failed' %}
-    <button class="ghost-btn"
+    <button class="btn btn-ghost btn-xs"
             @click="$dispatch('open-confirm', {
               title: '{{ labels.JOBS_RETRY }}',
               message: '{{ labels.JOBS_RETRY_CONFIRM }}',
@@ -27,7 +46,7 @@
     {% endif %}
 
     {% if job.status.value in ('completed', 'failed') %}
-    <button class="ghost-btn"
+    <button class="btn btn-ghost btn-xs text-error"
             @click="$dispatch('open-confirm', {
               title: '{{ labels.JOBS_DELETE }}',
               message: '{{ labels.JOBS_DELETE_CONFIRM }}',
@@ -43,13 +62,15 @@
 {% set pd = progress_data.get(job.id, {}) %}
 {% set progress_val = pd.get('progress', '0')|float %}
 {% set progress_msg = pd.get('message', labels.JOBS_WAITING) %}
-<div class="job-progress">
-  <progress value="{{ progress_val }}" max="1"></progress>
-  <small>{{ (progress_val * 100)|int }}%</small>
+<div class="mt-2">
+  <progress class="progress progress-primary w-full h-2" value="{{ (progress_val * 100)|int }}" max="100"></progress>
+  <div class="flex justify-between text-xs opacity-50 mt-0.5">
+    <span>{{ progress_msg }}</span>
+    <span>{{ (progress_val * 100)|int }}%</span>
+  </div>
 </div>
-<small>{{ progress_msg }}</small>
 {% endif %}
 
 {% if job.status.value == 'failed' and job.error %}
-<p class="error-text"><small>{{ labels.JOBS_ERROR.format(error=job.error[:200]) }}</small></p>
+<p class="text-xs text-error mt-1">{{ labels.JOBS_ERROR.format(error=job.error[:200]) }}</p>
 {% endif %}

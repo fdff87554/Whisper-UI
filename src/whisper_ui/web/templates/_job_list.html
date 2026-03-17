@@ -5,102 +5,105 @@
      hx-swap="outerHTML">
 
 {% if total_count == 0 %}
-  <div class="empty-state">
-    <p>{% if status %}{{ labels.JOBS_EMPTY_FILTERED }}{% else %}{{ labels.JOBS_EMPTY }}{% endif %}</p>
+  <div class="text-center py-12 opacity-60">
+    <svg class="w-12 h-12 mx-auto mb-3 opacity-30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+    </svg>
+    <p class="mb-3">{% if status %}{{ labels.JOBS_EMPTY_FILTERED }}{% else %}{{ labels.JOBS_EMPTY }}{% endif %}</p>
     {% if not status %}
-    <a href="/upload" role="button" class="outline small-btn">{{ labels.PAGE_UPLOAD }}</a>
+    <a href="/upload" class="btn btn-outline btn-sm">{{ labels.PAGE_UPLOAD }}</a>
     {% endif %}
   </div>
 {% else %}
 
+  <div class="flex flex-col gap-3">
   {% for group_key, group_jobs in groups %}
   {% set is_batch = not group_key.startswith('_single:') %}
 
   {% if is_batch %}
-  {# ── Batch group ── #}
+  {# Batch group #}
   {% set bi = batch_info[group_key] %}
-  <article class="job-group">
-    <details {% if not bi.all_done %}open{% endif %}>
-      <summary class="batch-summary">
-        <div class="batch-header">
-          <div class="batch-info">
-            <strong>{{ labels.JOBS_BATCH_LABEL.format(count=bi.total) }}</strong>
-            <span class="batch-progress-text">
-              {{ labels.JOBS_BATCH_PROGRESS.format(completed=bi.completed, total=bi.total) }}
-            </span>
-            {% if bi.failed > 0 %}
-            <span class="badge badge-failed">{{ bi.failed }} {{ labels.STATUS_LABELS['failed'] }}</span>
-            {% endif %}
-          </div>
-          <div class="batch-actions">
-            {% if bi.completed > 0 and bi.all_done %}
-            <button class="small-btn"
-                    @click.stop="$dispatch('open-batch-download', {
-                      batchId: '{{ group_key }}'
-                    })">{{ labels.JOBS_BATCH_DOWNLOAD }}</button>
-            {% endif %}
-            {% if bi.failed > 0 %}
-            <button class="outline secondary small-btn"
-                    @click.stop="$dispatch('open-confirm', {
-                      title: '{{ labels.JOBS_BATCH_RETRY_ALL }}',
-                      message: '{{ labels.JOBS_BATCH_RETRY_ALL_CONFIRM }}',
-                      confirmText: '{{ labels.JOBS_BATCH_RETRY_ALL_CONFIRM_BUTTON }}',
-                      url: '/jobs/batch/{{ group_key }}/retry',
-                      method: 'POST'
-                    })">{{ labels.JOBS_BATCH_RETRY_ALL }}</button>
-            {% endif %}
-            {% if bi.all_done %}
-            <button class="outline secondary small-btn"
-                    @click.stop="$dispatch('open-confirm', {
-                      title: '{{ labels.JOBS_BATCH_DELETE_ALL }}',
-                      message: '{{ labels.JOBS_BATCH_DELETE_ALL_CONFIRM }}',
-                      confirmText: '{{ labels.JOBS_BATCH_DELETE_ALL_CONFIRM_BUTTON }}',
-                      url: '/jobs/batch/{{ group_key }}',
-                      method: 'DELETE'
-                    })">{{ labels.JOBS_BATCH_DELETE_ALL }}</button>
-            {% endif %}
-          </div>
-        </div>
-        <progress class="batch-progress-bar" value="{{ bi.completed + bi.failed }}" max="{{ bi.total }}"></progress>
-      </summary>
-
+  <div class="collapse collapse-arrow bg-base-200 border border-base-300" data-job-name="{{ group_jobs[0].filename if group_jobs else '' }}"
+       {% if not bi.all_done %}open{% endif %}>
+    <input type="checkbox" {% if not bi.all_done %}checked{% endif %}>
+    <div class="collapse-title">
+      <div class="flex flex-wrap items-center gap-2 mb-1">
+        <span class="font-medium">{{ labels.JOBS_BATCH_LABEL.format(count=bi.total) }}</span>
+        <span class="text-sm opacity-50">{{ labels.JOBS_BATCH_PROGRESS.format(completed=bi.completed, total=bi.total) }}</span>
+        {% if bi.failed > 0 %}
+        <span class="badge badge-error badge-sm">{{ bi.failed }} {{ labels.STATUS_LABELS['failed'] }}</span>
+        {% endif %}
+      </div>
+      <progress class="progress progress-primary w-full h-1.5" value="{{ bi.completed + bi.failed }}" max="{{ bi.total }}"></progress>
+    </div>
+    <div class="collapse-content">
+      <div class="flex flex-wrap gap-2 mb-3 pt-2">
+        {% if bi.completed > 0 and bi.all_done %}
+        <button class="btn btn-sm btn-outline"
+                @click.stop="$dispatch('open-batch-download', { batchId: '{{ group_key }}' })">
+          {{ labels.JOBS_BATCH_DOWNLOAD }}
+        </button>
+        {% endif %}
+        {% if bi.failed > 0 %}
+        <button class="btn btn-sm btn-ghost"
+                @click.stop="$dispatch('open-confirm', {
+                  title: '{{ labels.JOBS_BATCH_RETRY_ALL }}',
+                  message: '{{ labels.JOBS_BATCH_RETRY_ALL_CONFIRM }}',
+                  confirmText: '{{ labels.JOBS_BATCH_RETRY_ALL_CONFIRM_BUTTON }}',
+                  url: '/jobs/batch/{{ group_key }}/retry',
+                  method: 'POST'
+                })">{{ labels.JOBS_BATCH_RETRY_ALL }}</button>
+        {% endif %}
+        {% if bi.all_done %}
+        <button class="btn btn-sm btn-ghost text-error"
+                @click.stop="$dispatch('open-confirm', {
+                  title: '{{ labels.JOBS_BATCH_DELETE_ALL }}',
+                  message: '{{ labels.JOBS_BATCH_DELETE_ALL_CONFIRM }}',
+                  confirmText: '{{ labels.JOBS_BATCH_DELETE_ALL_CONFIRM_BUTTON }}',
+                  url: '/jobs/batch/{{ group_key }}',
+                  method: 'DELETE'
+                })">{{ labels.JOBS_BATCH_DELETE_ALL }}</button>
+        {% endif %}
+      </div>
       {% for job in group_jobs %}
-      <div class="job-card">
+      <div class="border-l-3 pl-3 py-2 mb-2 border-status-{{ job.status.value }}" data-job-name="{{ job.filename }}">
         {% include "_job_card.html" %}
       </div>
       {% endfor %}
-    </details>
-  </article>
+    </div>
+  </div>
 
   {% else %}
-  {# ── Single job ── #}
+  {# Single job #}
   {% set job = group_jobs[0] %}
-  <article class="job-group">
-    <div class="job-card">
+  <div class="card bg-base-200 border border-base-300 border-l-3 border-status-{{ job.status.value }}"
+       data-job-name="{{ job.filename }}">
+    <div class="card-body p-4">
       {% include "_job_card.html" %}
     </div>
-  </article>
+  </div>
   {% endif %}
 
   {% endfor %}
+  </div>
 
-  {# ── Pagination ── #}
+  {# Pagination #}
   {% if total_pages > 1 %}
-  <nav class="pagination-nav">
-    <button class="outline small-btn"
+  <div class="flex items-center justify-center gap-4 mt-6 text-sm">
+    <button class="btn btn-ghost btn-sm"
             {% if page <= 0 %}disabled{% endif %}
             hx-get="/jobs/list?status={{ status|default('', true) }}&page={{ page - 1 }}"
             hx-target="#job-list-wrapper" hx-swap="outerHTML">
       {{ labels.JOBS_PAGE_PREV }}
     </button>
-    <span>{{ labels.JOBS_PAGE_INFO.format(current=page + 1, total=total_pages, count=total_count) }}</span>
-    <button class="outline small-btn"
+    <span class="opacity-60">{{ labels.JOBS_PAGE_INFO.format(current=page + 1, total=total_pages, count=total_count) }}</span>
+    <button class="btn btn-ghost btn-sm"
             {% if page >= total_pages - 1 %}disabled{% endif %}
             hx-get="/jobs/list?status={{ status|default('', true) }}&page={{ page + 1 }}"
             hx-target="#job-list-wrapper" hx-swap="outerHTML">
       {{ labels.JOBS_PAGE_NEXT }}
     </button>
-  </nav>
+  </div>
   {% endif %}
 
 {% endif %}
