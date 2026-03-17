@@ -251,6 +251,19 @@ class TestUploadPost:
         assert resp.status_code == 303
         assert "error=no_files" in resp.headers["location"]
 
+    def test_upload_htmx_error_escapes_html(self, client, app):
+        """Verify htmx error responses escape user input to prevent XSS."""
+        files = [("files", ("test.mp3", b"fake", "audio/mpeg"))]
+        resp = client.post(
+            "/upload",
+            data={"language": "<script>alert(1)</script>", "model_name": "large-v3"},
+            files=files,
+            headers={"HX-Request": "true"},
+            follow_redirects=False,
+        )
+        assert "<script>" not in resp.text
+        assert "&lt;script&gt;" in resp.text
+
 
 class TestBatchRoutes:
     _BATCH_ID = "a" * 32

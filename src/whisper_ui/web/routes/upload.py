@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from pathlib import Path, PurePosixPath
 from typing import Annotated
@@ -7,6 +8,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from markupsafe import escape
 
 from whisper_ui.core.constants import ERROR_MAX_LENGTH, MAX_BATCH_SIZE
 from whisper_ui.core.languages import SUPPORTED_LANGUAGES, WHISPER_MODELS
@@ -32,7 +34,7 @@ def _is_htmx(request: Request) -> bool:
 
 def _htmx_error(message: str) -> Response:
     """Return an HTML fragment for htmx to swap into the feedback area."""
-    html = f'<article class="alert-error" aria-label="Error">{message}</article>'
+    html = f'<article class="alert-error" aria-label="Error">{escape(message)}</article>'
     return HTMLResponse(content=html)
 
 
@@ -49,7 +51,7 @@ async def _stream_to_file(upload: UploadFile, dest: Path, max_size: int) -> bool
                 if total > max_size:
                     return False
                 f.write(chunk)
-    except Exception:
+    except (Exception, asyncio.CancelledError):
         dest.unlink(missing_ok=True)
         raise
     return True
