@@ -86,6 +86,16 @@ VIEWER_RESULT_NOT_FOUND = "找不到結果檔案。"
 VIEWER_TRANSCRIPT_TITLE = "轉錄結果：{name}"
 VIEWER_METADATA = "時長：{minutes}分{seconds}秒 | 段落：{segments} | 語言：{language}"
 VIEWER_NO_SEGMENTS = "轉錄結果中無段落資料。"
+VIEWER_SEARCH_PLACEHOLDER = "輸入關鍵字篩選..."
+VIEWER_COPY = "複製全文"
+VIEWER_COPIED = "已複製"
+VIEWER_EXPORT_TOOLTIPS: dict[str, str] = {
+    "srt": "SubRip 字幕格式",
+    "vtt": "WebVTT 字幕格式",
+    "txt": "純文字格式",
+    "json": "JSON 結構化資料",
+    "docx": "Word 文件格式",
+}
 
 # -- Theme --
 THEME_TOGGLE_LIGHT = "淺色模式"
