@@ -17,6 +17,7 @@ _WEB_DIR = Path(__file__).parent
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from redis import Redis
+    from redis.exceptions import RedisError
 
     from whisper_ui.core.config import get_settings
     from whisper_ui.storage.database import JobDatabase
@@ -29,7 +30,7 @@ async def lifespan(app: FastAPI):
     app.state.redis = Redis.from_url(settings.redis_url)
     try:
         app.state.redis.ping()
-    except Exception:
+    except RedisError:
         logger.warning("Redis is not reachable at %s — job submission will fail", settings.redis_url)
     logger.info("Whisper UI started")
     yield
