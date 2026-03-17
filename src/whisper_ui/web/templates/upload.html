@@ -34,9 +34,10 @@
       x-data="uploadForm()"
       :action="tab === 'url' ? '/upload/url' : '/upload'"
       :enctype="tab === 'url' ? 'application/x-www-form-urlencoded' : 'multipart/form-data'"
-      :hx-post="tab === 'url' ? '/upload/url' : '/upload'"
-      :hx-encoding="tab === 'url' ? '' : 'multipart/form-data'"
+      hx-post="/upload"
+      hx-encoding="multipart/form-data"
       hx-target="#upload-feedback" hx-swap="innerHTML"
+      @htmx:config-request="if (tab === 'url') { $event.detail.path = '/upload/url' }"
       @htmx:xhr:progress.window="onProgress($event)"
       @htmx:before-request="uploading = true"
       @htmx:after-request="uploading = false; progress = 0">
