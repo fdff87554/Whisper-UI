@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import Depends, Request
 from fastapi.templating import Jinja2Templates
@@ -18,9 +19,22 @@ templates = Jinja2Templates(directory=_WEB_DIR / "templates")
 
 
 def _format_time(seconds: float) -> str:
-    m = int(seconds // 60)
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
     s = int(seconds % 60)
+    if h > 0:
+        return f"{h:02d}:{m:02d}:{s:02d}"
     return f"{m:02d}:{s:02d}"
+
+
+def make_content_disposition(filename: str, disposition: str = "attachment") -> str:
+    """Build a Content-Disposition header value safe for non-ASCII filenames.
+
+    Uses RFC 6266 ``filename*=UTF-8''...`` so the header value stays ASCII-safe
+    while preserving the original Unicode filename for modern browsers.
+    """
+    encoded = quote(filename, safe="")
+    return f"{disposition}; filename*=UTF-8''{encoded}"
 
 
 templates.env.filters["format_time"] = _format_time

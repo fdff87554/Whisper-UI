@@ -14,6 +14,12 @@
   {{ labels.UPLOAD_NO_SUPPORTED_FILES }}
   {% elif error == 'too_many' %}
   {{ labels.UPLOAD_BATCH_EXCEEDS_LIMIT.format(limit=50, count=request.query_params.get('count', '?')) }}
+  {% elif error == 'too_large' %}
+  {{ labels.UPLOAD_FILE_TOO_LARGE.format(name=request.query_params.get('name', '?'), limit=request.query_params.get('limit', '?')) }}
+  {% elif error == 'invalid_language' %}
+  {{ labels.UPLOAD_INVALID_LANGUAGE.format(value=request.query_params.get('value', '?')) }}
+  {% elif error == 'invalid_model' %}
+  {{ labels.UPLOAD_INVALID_MODEL.format(value=request.query_params.get('value', '?')) }}
   {% elif error == 'queue' %}
   {{ labels.UPLOAD_QUEUE_ERROR.format(error='Redis') }}
   {% endif %}

@@ -14,10 +14,14 @@ class FileStore:
         self._upload_dir.mkdir(parents=True, exist_ok=True)
         self._output_dir.mkdir(parents=True, exist_ok=True)
 
-    def save_upload(self, job_id: str, filename: str, data: bytes) -> Path:
+    def prepare_upload_path(self, job_id: str, filename: str) -> Path:
+        """Create the upload directory for *job_id* and return the destination path."""
         job_dir = self._upload_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
-        dest = job_dir / Path(filename).name
+        return job_dir / Path(filename).name
+
+    def save_upload(self, job_id: str, filename: str, data: bytes) -> Path:
+        dest = self.prepare_upload_path(job_id, filename)
         dest.write_bytes(data)
         return dest
 

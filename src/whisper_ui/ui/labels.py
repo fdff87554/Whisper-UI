@@ -34,6 +34,9 @@ UPLOAD_CHOOSE_FOLDER = "選擇資料夾"
 UPLOAD_FOLDER_DESCRIPTION = "選擇包含音訊或影片檔案的資料夾，將自動篩選支援的格式並批次轉錄。"
 UPLOAD_FOLDER_FILTERED = "已自動篩選：略過 {skipped} 個不支援的檔案，保留 {remaining} 個支援的檔案。"
 UPLOAD_NO_SUPPORTED_FILES = "所選檔案中沒有支援的格式。"
+UPLOAD_FILE_TOO_LARGE = "檔案「{name}」超過大小限制（{limit}）。"
+UPLOAD_INVALID_LANGUAGE = "不支援的語言：{value}"
+UPLOAD_INVALID_MODEL = "不支援的模型：{value}"
 
 # -- Jobs page --
 JOBS_HEADER = "任務列表"

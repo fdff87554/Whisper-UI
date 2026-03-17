@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # HuggingFace
     hf_token: str = ""
 
+    # Upload
+    max_upload_size: int = 2 * 1024 * 1024 * 1024  # 2 GB
+
 
 @functools.lru_cache(maxsize=1)
 def get_settings() -> Settings:

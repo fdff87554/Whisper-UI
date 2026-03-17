@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, Response
 from whisper_ui.core.constants import DEFAULT_JOB_LIST_LIMIT
 from whisper_ui.core.models import JobStatus
 from whisper_ui.export.factory import get_exporter
-from whisper_ui.web.deps import DbDep, FileStoreDep, templates
+from whisper_ui.web.deps import DbDep, FileStoreDep, make_content_disposition, templates
 
 router = APIRouter()
 
@@ -67,5 +67,5 @@ async def export_download(job_id: str, format_name: str, db: DbDep, filestore: F
     return Response(
         content=data,
         media_type=exporter.mime_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": make_content_disposition(filename)},
     )
