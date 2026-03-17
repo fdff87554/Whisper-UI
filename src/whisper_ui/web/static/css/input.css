@@ -1,0 +1,165 @@
+@import "tailwindcss";
+@plugin "daisyui" {
+  themes: whisper-light --default, whisper-dark --prefersdark;
+}
+@source "../../templates/**/*.html";
+
+/* Custom light theme */
+@plugin "daisyui/theme" {
+  name: "whisper-light";
+  default: true;
+  prefersdark: false;
+  color-scheme: light;
+  --color-primary: oklch(52% 0.13 168);
+  --color-primary-content: oklch(98% 0.01 168);
+  --color-secondary: oklch(58% 0.14 240);
+  --color-secondary-content: oklch(98% 0.01 240);
+  --color-accent: oklch(68% 0.16 80);
+  --color-accent-content: oklch(20% 0.05 80);
+  --color-neutral: oklch(40% 0.03 260);
+  --color-neutral-content: oklch(95% 0.01 260);
+  --color-base-100: oklch(100% 0 0);
+  --color-base-200: oklch(97% 0.005 260);
+  --color-base-300: oklch(93% 0.01 260);
+  --color-base-content: oklch(25% 0.02 260);
+  --color-info: oklch(62% 0.15 240);
+  --color-info-content: oklch(98% 0.01 240);
+  --color-success: oklch(52% 0.13 168);
+  --color-success-content: oklch(98% 0.01 168);
+  --color-warning: oklch(72% 0.18 80);
+  --color-warning-content: oklch(20% 0.05 80);
+  --color-error: oklch(58% 0.2 25);
+  --color-error-content: oklch(98% 0.01 25);
+  --radius-selector: 0.5rem;
+  --radius-field: 0.5rem;
+  --radius-box: 0.5rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+
+/* Custom dark theme */
+@plugin "daisyui/theme" {
+  name: "whisper-dark";
+  default: false;
+  prefersdark: true;
+  color-scheme: dark;
+  --color-primary: oklch(65% 0.14 168);
+  --color-primary-content: oklch(98% 0.01 168);
+  --color-secondary: oklch(68% 0.14 240);
+  --color-secondary-content: oklch(98% 0.01 240);
+  --color-accent: oklch(75% 0.16 80);
+  --color-accent-content: oklch(20% 0.05 80);
+  --color-neutral: oklch(55% 0.03 260);
+  --color-neutral-content: oklch(90% 0.01 260);
+  --color-base-100: oklch(22% 0.02 260);
+  --color-base-200: oklch(18% 0.02 260);
+  --color-base-300: oklch(15% 0.02 260);
+  --color-base-content: oklch(90% 0.01 260);
+  --color-info: oklch(68% 0.15 240);
+  --color-info-content: oklch(98% 0.01 240);
+  --color-success: oklch(65% 0.14 168);
+  --color-success-content: oklch(98% 0.01 168);
+  --color-warning: oklch(78% 0.18 80);
+  --color-warning-content: oklch(20% 0.05 80);
+  --color-error: oklch(65% 0.2 25);
+  --color-error-content: oklch(98% 0.01 25);
+  --radius-selector: 0.5rem;
+  --radius-field: 0.5rem;
+  --radius-box: 0.5rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+
+@theme {
+  --font-sans: "Noto Sans TC", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* htmx transition classes */
+.htmx-settling {
+  opacity: 1;
+}
+.htmx-swapping {
+  opacity: 0.5;
+  transition: opacity 0.2s ease-out;
+}
+
+/* Page loading bar */
+#page-loader {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 3px;
+  background: oklch(52% 0.13 168);
+  z-index: 9999;
+  transition: width 0.3s ease;
+  width: 0;
+}
+[data-theme="whisper-dark"] #page-loader {
+  background: oklch(65% 0.14 168);
+}
+
+/* Status accent border colors for job cards */
+.border-status-queued {
+  border-left-color: oklch(62% 0.15 240);
+}
+.border-status-processing {
+  border-left-color: oklch(72% 0.18 80);
+}
+.border-status-completed {
+  border-left-color: oklch(52% 0.13 168);
+}
+.border-status-failed {
+  border-left-color: oklch(58% 0.2 25);
+}
+
+/* Speaker colors for viewer */
+.speaker-1 { color: oklch(55% 0.2 240); }
+.speaker-2 { color: oklch(55% 0.2 25); }
+.speaker-3 { color: oklch(55% 0.2 168); }
+.speaker-4 { color: oklch(55% 0.2 310); }
+.speaker-5 { color: oklch(55% 0.2 80); }
+.speaker-6 { color: oklch(55% 0.2 130); }
+.speaker-7 { color: oklch(55% 0.2 200); }
+.speaker-8 { color: oklch(55% 0.2 55); }
+
+[data-theme="whisper-dark"] .speaker-1 { color: oklch(75% 0.15 240); }
+[data-theme="whisper-dark"] .speaker-2 { color: oklch(75% 0.15 25); }
+[data-theme="whisper-dark"] .speaker-3 { color: oklch(75% 0.15 168); }
+[data-theme="whisper-dark"] .speaker-4 { color: oklch(75% 0.15 310); }
+[data-theme="whisper-dark"] .speaker-5 { color: oklch(75% 0.15 80); }
+[data-theme="whisper-dark"] .speaker-6 { color: oklch(75% 0.15 130); }
+[data-theme="whisper-dark"] .speaker-7 { color: oklch(75% 0.15 200); }
+[data-theme="whisper-dark"] .speaker-8 { color: oklch(75% 0.15 55); }
+
+/* Transcript reading experience */
+.transcript-container {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+/* Dialog animations */
+dialog::backdrop {
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+dialog {
+  animation: dialog-fade-in 0.2s ease-out;
+}
+@keyframes dialog-fade-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* Touch-friendly targets on coarse pointer devices */
+@media (pointer: coarse) {
+  .btn-sm, .btn-xs {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
