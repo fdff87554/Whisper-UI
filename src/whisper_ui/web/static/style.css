@@ -1,6 +1,122 @@
-/* Whisper UI — custom styles (supplements Pico CSS) */
+/* ============================================
+   Whisper UI — Custom Styles
+   Supplements Pico CSS with Medium-inspired design
+   ============================================ */
 
-/* Status badges */
+/* --- Design Tokens & Pico CSS Overrides --- */
+
+:root,
+[data-theme="light"] {
+  /* Typography */
+  --pico-font-family: "Noto Sans TC", system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* Spacing system (8px base) */
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2rem;
+  --space-2xl: 3rem;
+
+  /* Primary accent — Medium-inspired green */
+  --pico-primary: hsl(154, 45%, 40%);
+  --pico-primary-background: hsl(154, 45%, 40%);
+  --pico-primary-border: var(--pico-primary-background);
+  --pico-primary-underline: hsla(154, 45%, 40%, 0.5);
+  --pico-primary-hover: hsl(154, 48%, 33%);
+  --pico-primary-hover-background: hsl(154, 48%, 36%);
+  --pico-primary-hover-border: var(--pico-primary-hover-background);
+  --pico-primary-hover-underline: var(--pico-primary-hover);
+  --pico-primary-focus: hsla(154, 45%, 40%, 0.25);
+  --pico-primary-inverse: #fff;
+
+  /* Status colors */
+  --color-status-queued: hsl(217, 55%, 55%);
+  --color-status-processing: hsl(38, 80%, 48%);
+  --color-status-completed: hsl(154, 45%, 40%);
+  --color-status-failed: hsl(0, 60%, 55%);
+
+  /* Softer border radius */
+  --pico-border-radius: 0.5rem;
+}
+
+[data-theme="dark"] {
+  /* Primary accent — lighter for dark backgrounds */
+  --pico-primary: hsl(154, 40%, 55%);
+  --pico-primary-background: hsl(154, 40%, 42%);
+  --pico-primary-border: var(--pico-primary-background);
+  --pico-primary-underline: hsla(154, 40%, 55%, 0.5);
+  --pico-primary-hover: hsl(154, 40%, 65%);
+  --pico-primary-hover-background: hsl(154, 40%, 48%);
+  --pico-primary-hover-border: var(--pico-primary-hover-background);
+  --pico-primary-hover-underline: var(--pico-primary-hover);
+  --pico-primary-focus: hsla(154, 40%, 55%, 0.25);
+  --pico-primary-inverse: #fff;
+
+  /* Status colors — desaturated for dark mode */
+  --color-status-queued: hsl(217, 45%, 62%);
+  --color-status-processing: hsl(38, 60%, 58%);
+  --color-status-completed: hsl(154, 40%, 55%);
+  --color-status-failed: hsl(0, 50%, 62%);
+}
+
+/* --- Layout --- */
+
+.container {
+  max-width: 780px;
+}
+
+main.container {
+  padding-top: var(--space-2xl);
+  padding-bottom: var(--space-2xl);
+}
+
+/* --- Typography --- */
+
+body {
+  line-height: 1.75;
+}
+
+h1 {
+  --pico-font-weight: 500;
+  font-size: 1.75rem;
+  letter-spacing: -0.01em;
+}
+
+h2 {
+  --pico-font-weight: 500;
+  font-size: 1.35rem;
+}
+
+h3 {
+  --pico-font-weight: 500;
+}
+
+/* --- Navigation --- */
+
+header.container nav {
+  padding: var(--space-md) 0;
+  border-bottom: 1px solid var(--pico-muted-border-color);
+}
+
+nav a[aria-current="page"] {
+  font-weight: 600;
+  border-bottom: 2px solid var(--pico-primary);
+  padding-bottom: 0.25rem;
+}
+
+/* --- Global Transitions --- */
+
+a,
+button,
+.badge,
+input,
+select,
+textarea {
+  transition: color 0.2s, background-color 0.2s, border-color 0.2s, opacity 0.2s, box-shadow 0.2s;
+}
+
+/* --- Status badges --- */
 .badge {
   display: inline-block;
   padding: 0.15rem 0.5rem;
@@ -209,5 +325,5 @@ dialog footer {
 }
 .htmx-swapping {
   opacity: 0.5;
-  transition: opacity 0.15s ease-out;
+  transition: opacity 0.2s ease-out;
 }
