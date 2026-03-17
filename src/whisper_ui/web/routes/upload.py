@@ -38,7 +38,7 @@ async def _stream_to_file(upload: UploadFile, dest: Path, max_size: int) -> bool
                 if total > max_size:
                     return False
                 f.write(chunk)
-    except BaseException:
+    except Exception:
         dest.unlink(missing_ok=True)
         raise
     return True

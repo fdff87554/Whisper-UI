@@ -65,7 +65,8 @@ def _build_list_context(db: JobDatabase, redis, status: str, page: int) -> dict:
     status_filter = status or None
     total_count = db.count_jobs(status=status_filter)
     total_pages = max(1, math.ceil(total_count / DEFAULT_JOBS_PER_PAGE))
-    page = min(page, max(0, total_pages - 1))
+    page = max(0, page)
+    page = min(page, total_pages - 1)
 
     offset = page * DEFAULT_JOBS_PER_PAGE
     jobs = db.list_jobs_filtered(status=status_filter, limit=DEFAULT_JOBS_PER_PAGE, offset=offset)

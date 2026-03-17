@@ -33,7 +33,7 @@
       </header>
       <p x-text="message"></p>
       <footer>
-        <button class="secondary" @click="cancel()">取消</button>
+        <button class="secondary" @click="cancel()">{{ labels.DIALOG_CANCEL }}</button>
         <button @click="doConfirm()" x-text="confirmText"></button>
       </footer>
     </article>
@@ -57,7 +57,7 @@
         </select>
       </label>
       <footer>
-        <button class="secondary" @click="cancel()">取消</button>
+        <button class="secondary" @click="cancel()">{{ labels.DIALOG_CANCEL }}</button>
         <a :href="'/jobs/batch/' + batchId + '/download?format=' + format"
            role="button" @click="cancel()">
           {{ labels.JOBS_BATCH_DOWNLOAD_BUTTON }}
@@ -80,7 +80,7 @@ function confirmDialog() {
     show(detail) {
       this.title = detail.title;
       this.message = detail.message;
-      this.confirmText = detail.confirmText || '確認';
+      this.confirmText = detail.confirmText || '{{ labels.DIALOG_CONFIRM }}';
       this.actionUrl = detail.url;
       this.actionMethod = detail.method || 'POST';
       this.$refs.dialog.showModal();
