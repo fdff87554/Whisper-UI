@@ -31,9 +31,7 @@ class TestValidYouTubeURLs:
         assert "v=dQw4w9WgXcQ" in result
 
     def test_removes_extra_params(self):
-        result = validate_youtube_url(
-            "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLxyz&index=3&t=120"
-        )
+        result = validate_youtube_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLxyz&index=3&t=120")
         assert result == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
 
@@ -69,7 +67,5 @@ class TestPlaylistURLs:
 
     def test_video_with_list_param_accepted(self):
         """A URL with both v= and list= should be accepted (single video from playlist)."""
-        result = validate_youtube_url(
-            "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLxyz"
-        )
+        result = validate_youtube_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLxyz")
         assert "v=dQw4w9WgXcQ" in result
