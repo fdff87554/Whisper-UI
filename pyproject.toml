@@ -26,6 +26,8 @@ worker = [
   "pandas>=2.2.3",
   "pyannote.audio>=4.0.0",
   "opencc-python-reimplemented>=0.1.7",
+  "yt-dlp>=2024.5.26",
+  "yt-dlp-ejs>=0.7.0",
 ]
 dev = ["whisper-ui[frontend]", "pytest>=8.0,<9", "pytest-cov>=5.0,<6"]
 

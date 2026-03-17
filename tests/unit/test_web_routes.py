@@ -40,8 +40,8 @@ def _create_completed_job(db, filestore) -> Job:
     return job
 
 
-def _create_failed_job(db) -> Job:
-    job = Job(filename="fail.mp3", status=JobStatus.FAILED, error="test error")
+def _create_failed_job(db, *, source_url: str | None = None) -> Job:
+    job = Job(filename="fail.mp3", status=JobStatus.FAILED, error="test error", source_url=source_url)
     db.insert_job(job)
     return job
 
@@ -119,6 +119,24 @@ class TestJobsRoutes:
         resp = client.delete(f"/jobs/{job.id}")
         assert resp.status_code == 409
         assert db.get_job(job.id) is not None
+
+    def test_retry_file_job_uses_1h_timeout(self, client, db):
+        job = _create_failed_job(db)
+        mock_queue = MagicMock()
+        with patch("rq.Queue", return_value=mock_queue):
+            resp = client.post(f"/jobs/{job.id}/retry")
+        assert resp.status_code == 204
+        mock_queue.enqueue.assert_called_once()
+        assert mock_queue.enqueue.call_args[1]["job_timeout"] == "1h"
+
+    def test_retry_url_job_uses_2h_timeout(self, client, db):
+        job = _create_failed_job(db, source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        mock_queue = MagicMock()
+        with patch("rq.Queue", return_value=mock_queue):
+            resp = client.post(f"/jobs/{job.id}/retry")
+        assert resp.status_code == 204
+        mock_queue.enqueue.assert_called_once()
+        assert mock_queue.enqueue.call_args[1]["job_timeout"] == "2h"
 
 
 class TestViewerRoutes:
@@ -265,6 +283,105 @@ class TestUploadPost:
         assert "&lt;script&gt;" in resp.text
 
 
+class TestUploadURLPost:
+    def _post_url(self, client, url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", **form_data):
+        data = {
+            "url": url,
+            "language": form_data.get("language", "zh"),
+            "model_name": form_data.get("model_name", "large-v3"),
+            "num_speakers": form_data.get("num_speakers", "0"),
+        }
+        return client.post("/upload/url", data=data, follow_redirects=False)
+
+    def test_upload_url_submits_job(self, client, app, db):
+        mock_queue = MagicMock()
+        with patch("rq.Queue", return_value=mock_queue):
+            resp = self._post_url(client)
+        assert resp.status_code == 303
+        assert "/jobs?submitted=1" in resp.headers["location"]
+
+    def test_upload_url_creates_job_with_source_url(self, client, app, db):
+        mock_queue = MagicMock()
+        with patch("rq.Queue", return_value=mock_queue):
+            self._post_url(client)
+        jobs = db.list_jobs()
+        assert len(jobs) == 1
+        assert jobs[0].source_url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+    def test_upload_invalid_url_redirects(self, client):
+        resp = self._post_url(client, url="https://example.com/not-youtube")
+        assert resp.status_code == 303
+        assert "error=invalid_url" in resp.headers["location"]
+
+    def test_upload_playlist_url_redirects(self, client):
+        resp = self._post_url(client, url="https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf")
+        assert resp.status_code == 303
+        assert "error=playlist" in resp.headers["location"]
+
+    def test_upload_empty_url_returns_422(self, client):
+        resp = self._post_url(client, url="")
+        assert resp.status_code == 422
+
+    def test_upload_url_invalid_language(self, client):
+        resp = self._post_url(client, language="xx_invalid")
+        assert resp.status_code == 303
+        assert "error=invalid_language" in resp.headers["location"]
+
+    def test_upload_url_htmx_returns_redirect_header(self, client, app, db):
+        mock_queue = MagicMock()
+        with patch("rq.Queue", return_value=mock_queue):
+            resp = client.post(
+                "/upload/url",
+                data={
+                    "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                    "language": "zh",
+                    "model_name": "large-v3",
+                    "num_speakers": "0",
+                },
+                headers={"HX-Request": "true"},
+                follow_redirects=False,
+            )
+        assert resp.status_code == 204
+        assert resp.headers.get("HX-Redirect") == "/jobs?submitted=1"
+
+    def test_upload_url_uses_2h_timeout(self, client, app, db):
+        mock_queue = MagicMock()
+        with patch("rq.Queue", return_value=mock_queue):
+            self._post_url(client)
+        mock_queue.enqueue.assert_called_once()
+        call_kwargs = mock_queue.enqueue.call_args
+        assert call_kwargs[1]["job_timeout"] == "2h"
+
+    def test_upload_url_enqueue_failure_returns_error(self, client, app, db):
+        mock_queue = MagicMock()
+        mock_queue.enqueue.side_effect = Exception("Redis connection lost")
+        with patch("rq.Queue", return_value=mock_queue):
+            resp = self._post_url(client)
+        assert resp.status_code == 303
+        assert "error=queue" in resp.headers["location"]
+        jobs = db.list_jobs()
+        assert len(jobs) == 1
+        assert jobs[0].status == JobStatus.FAILED
+
+    def test_upload_url_enqueue_failure_htmx_returns_error_fragment(self, client, app, db):
+        mock_queue = MagicMock()
+        mock_queue.enqueue.side_effect = Exception("Redis connection lost")
+        with patch("rq.Queue", return_value=mock_queue):
+            resp = client.post(
+                "/upload/url",
+                data={
+                    "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                    "language": "zh",
+                    "model_name": "large-v3",
+                    "num_speakers": "0",
+                },
+                headers={"HX-Request": "true"},
+                follow_redirects=False,
+            )
+        assert resp.status_code == 200
+        assert "alert-error" in resp.text
+
+
 class TestBatchRoutes:
     _BATCH_ID = "a" * 32
 
@@ -311,6 +428,23 @@ class TestBatchRoutes:
         with patch("rq.Queue", return_value=mock_queue):
             resp = client.post(f"/jobs/batch/{batch_id}/retry")
         assert resp.status_code == 204
+
+    def test_retry_batch_url_job_uses_2h_timeout(self, client, db, app):
+        batch_id = "d" * 32
+        job = Job(
+            filename="url.mp3",
+            status=JobStatus.FAILED,
+            error="err",
+            batch_id=batch_id,
+            source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        )
+        db.insert_job(job)
+        mock_queue = MagicMock()
+        with patch("rq.Queue", return_value=mock_queue):
+            resp = client.post(f"/jobs/batch/{batch_id}/retry")
+        assert resp.status_code == 204
+        mock_queue.enqueue.assert_called_once()
+        assert mock_queue.enqueue.call_args[1]["job_timeout"] == "2h"
 
     def test_delete_batch(self, client, db, filestore):
         batch_id = "c" * 32
