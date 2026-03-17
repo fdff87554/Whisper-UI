@@ -109,7 +109,8 @@
       </div>
       <button class="btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
               title="{{ labels.VIEWER_COPY_SEGMENT }}"
-              @click="navigator.clipboard.writeText('{{ seg.text|e }}')">
+              data-copy-text="{{ seg.text|e }}"
+              @click="navigator.clipboard.writeText($el.dataset.copyText)">
         {{ icon_copy("w-3 h-3") }}
       </button>
     </div>
