@@ -16,6 +16,7 @@ from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
 from whisper_ui.ui import labels as ui_labels
 from whisper_ui.web.deps import DbDep, FileStoreDep, RedisDep, SettingsDep, templates
+from whisper_ui.web.url_validation import PlaylistURLError, YouTubeURLError, validate_youtube_url
 
 _READ_CHUNK_SIZE = 1024 * 1024  # 1 MB
 
@@ -173,6 +174,75 @@ async def upload_submit(
             db.update_job(job)
 
     redirect_url = f"/jobs?submitted={submitted_count}"
+    if htmx:
+        return Response(status_code=204, headers={"HX-Redirect": redirect_url})
+    return RedirectResponse(redirect_url, status_code=303)
+
+
+@router.post("/upload/url")
+async def upload_url_submit(
+    request: Request,
+    db: DbDep,
+    filestore: FileStoreDep,
+    redis: RedisDep,
+    settings: SettingsDep,
+    url: Annotated[str, Form()],
+    language: Annotated[str, Form()] = "zh",
+    model_name: Annotated[str, Form()] = "large-v3",
+    num_speakers: Annotated[int, Form()] = 0,
+    enable_diarization: Annotated[bool, Form()] = False,
+    convert_to_traditional: Annotated[bool, Form()] = False,
+):
+    htmx = _is_htmx(request)
+
+    if language not in SUPPORTED_LANGUAGES:
+        msg = ui_labels.UPLOAD_INVALID_LANGUAGE.format(value=language)
+        return _error_redirect_or_fragment(request, f"/upload?error=invalid_language&value={quote(language)}", msg)
+    if model_name not in WHISPER_MODELS:
+        msg = ui_labels.UPLOAD_INVALID_MODEL.format(value=model_name)
+        return _error_redirect_or_fragment(request, f"/upload?error=invalid_model&value={quote(model_name)}", msg)
+
+    try:
+        clean_url = validate_youtube_url(url)
+    except PlaylistURLError:
+        msg = ui_labels.UPLOAD_URL_PLAYLIST_NOT_SUPPORTED
+        return _error_redirect_or_fragment(request, "/upload?error=playlist", msg)
+    except YouTubeURLError:
+        msg = ui_labels.UPLOAD_INVALID_URL
+        return _error_redirect_or_fragment(request, "/upload?error=invalid_url", msg)
+
+    job = Job(
+        filename=clean_url,
+        source_url=clean_url,
+        language=language,
+        model_name=model_name,
+        num_speakers=num_speakers if num_speakers > 0 else None,
+        enable_diarization=enable_diarization,
+        convert_to_traditional=convert_to_traditional,
+    )
+
+    upload_dir = filestore.prepare_upload_path(job.id, "_").parent
+    job.filepath = str(upload_dir)
+    job.status = JobStatus.QUEUED
+    db.insert_job(job)
+
+    try:
+        from rq import Queue
+
+        q = Queue(connection=redis)
+        q.enqueue(
+            "whisper_ui.worker.tasks.process_transcription",
+            job.id,
+            job_timeout="2h",
+        )
+    except Exception as e:
+        job.status = JobStatus.FAILED
+        job.error = str(e)[:ERROR_MAX_LENGTH]
+        db.update_job(job)
+        msg = ui_labels.UPLOAD_QUEUE_ERROR.format(error=str(e))
+        return _error_redirect_or_fragment(request, "/upload?error=queue", msg)
+
+    redirect_url = "/jobs?submitted=1"
     if htmx:
         return Response(status_code=204, headers={"HX-Redirect": redirect_url})
     return RedirectResponse(redirect_url, status_code=303)

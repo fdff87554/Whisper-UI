@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     # Upload
     max_upload_size: int = 2 * 1024 * 1024 * 1024  # 2 GB
 
+    # YouTube
+    youtube_max_duration: int = 14400  # seconds (4 hours)
+
 
 @functools.lru_cache(maxsize=1)
 def get_settings() -> Settings:

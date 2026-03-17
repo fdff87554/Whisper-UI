@@ -73,6 +73,7 @@ class Job:
     result_path: str | None = None
     duration: float | None = None
     batch_id: str | None = None
+    source_url: str | None = None
 
     def touch(self) -> None:
         self.updated_at = datetime.now(UTC).isoformat()
