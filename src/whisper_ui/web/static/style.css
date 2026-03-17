@@ -328,26 +328,80 @@ dialog footer {
   to { opacity: 1; transform: scale(1); }
 }
 
-/* Drop zone */
+/* --- Upload Page --- */
+
+/* Underline-style tabs */
+.upload-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--pico-muted-border-color);
+  margin-bottom: var(--space-lg);
+}
+.upload-tabs .tab-btn {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: var(--space-sm) var(--space-md);
+  color: var(--pico-muted-color);
+  font-size: 0.9rem;
+  cursor: pointer;
+  margin-bottom: -1px;
+  box-shadow: none;
+}
+.upload-tabs .tab-btn:hover {
+  color: var(--pico-color);
+  background: transparent;
+  border-bottom-color: var(--pico-muted-border-color);
+}
+.upload-tabs .tab-btn.active {
+  color: var(--pico-primary);
+  border-bottom-color: var(--pico-primary);
+  font-weight: 500;
+  background: transparent;
+}
+
+/* Drop zone — generous padding, soft background */
 .drop-zone {
   border: 2px dashed var(--pico-muted-border-color);
-  padding: 2rem;
+  padding: 3rem 2rem;
   text-align: center;
-  border-radius: 8px;
+  border-radius: var(--pico-border-radius);
+  background: var(--pico-card-sectioning-background-color);
   transition: border-color 0.2s, background-color 0.2s;
+}
+.drop-zone p {
+  margin-bottom: var(--space-sm);
+  color: var(--pico-muted-color);
 }
 .drop-active {
   border-color: var(--pico-primary);
   background: var(--pico-primary-focus);
 }
 
+/* Settings area — reduced visual weight */
+.upload-settings {
+  margin-top: var(--space-lg);
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--pico-muted-border-color);
+}
+.upload-settings label {
+  font-size: 0.875rem;
+  color: var(--pico-muted-color);
+}
+
+/* Submit CTA */
+.submit-cta {
+  margin-top: var(--space-xl);
+  min-width: 200px;
+}
+
 /* Upload progress */
 .upload-progress {
-  margin-bottom: 1rem;
+  margin-bottom: var(--space-md);
 }
 .upload-progress progress {
   width: 100%;
-  margin-bottom: 0.25rem;
+  margin-bottom: var(--space-xs);
 }
 
 /* --- Progress bar (accent color, rounded) --- */

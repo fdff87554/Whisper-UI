@@ -43,11 +43,13 @@
   </template>
 
   <div x-data="{ tab: 'files' }">
-    <div role="group">
-      <button type="button" :class="tab === 'files' ? '' : 'secondary outline'" @click="tab = 'files'">
+    <div class="upload-tabs" role="tablist">
+      <button type="button" class="tab-btn" role="tab"
+              :class="{ active: tab === 'files' }" @click="tab = 'files'">
         {{ labels.UPLOAD_TAB_FILES }}
       </button>
-      <button type="button" :class="tab === 'folder' ? '' : 'secondary outline'" @click="tab = 'folder'">
+      <button type="button" class="tab-btn" role="tab"
+              :class="{ active: tab === 'folder' }" @click="tab = 'folder'">
         {{ labels.UPLOAD_TAB_FOLDER }}
       </button>
     </div>
@@ -76,52 +78,54 @@
     </div>
   </div>
 
-  <div class="grid">
-    <label>
-      {{ labels.UPLOAD_LANGUAGE }}
-      <select name="language">
-        {% for code in supported_languages %}
-        <option value="{{ code }}" {% if code == settings.language %}selected{% endif %}>
-          {{ LANGUAGE_LABELS.get(code, code) }}
-        </option>
-        {% endfor %}
-      </select>
-    </label>
+  <section class="upload-settings">
+    <div class="grid">
+      <label>
+        {{ labels.UPLOAD_LANGUAGE }}
+        <select name="language">
+          {% for code in supported_languages %}
+          <option value="{{ code }}" {% if code == settings.language %}selected{% endif %}>
+            {{ LANGUAGE_LABELS.get(code, code) }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
 
-    <label>
-      {{ labels.UPLOAD_MODEL }}
-      <select name="model_name">
-        {% for model in whisper_models %}
-        <option value="{{ model }}" {% if model == settings.whisper_model %}selected{% endif %}>
-          {{ model }}
-        </option>
-        {% endfor %}
-      </select>
-    </label>
+      <label>
+        {{ labels.UPLOAD_MODEL }}
+        <select name="model_name">
+          {% for model in whisper_models %}
+          <option value="{{ model }}" {% if model == settings.whisper_model %}selected{% endif %}>
+            {{ model }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
 
-    <label>
-      {{ labels.UPLOAD_NUM_SPEAKERS }}
-      <input type="number" name="num_speakers" value="0" min="0" max="20">
-    </label>
-  </div>
+      <label>
+        {{ labels.UPLOAD_NUM_SPEAKERS }}
+        <input type="number" name="num_speakers" value="0" min="0" max="20">
+      </label>
+    </div>
 
-  <fieldset>
-    <label>
-      <input type="checkbox" name="enable_diarization" value="true"
-             {% if settings.hf_token %}checked{% else %}disabled{% endif %}>
-      {{ labels.UPLOAD_ENABLE_DIARIZATION }}
-    </label>
-    {% if not settings.hf_token %}
-    <small>{{ labels.UPLOAD_DIARIZATION_UNAVAILABLE }}</small>
-    {% endif %}
+    <fieldset>
+      <label>
+        <input type="checkbox" name="enable_diarization" value="true"
+               {% if settings.hf_token %}checked{% else %}disabled{% endif %}>
+        {{ labels.UPLOAD_ENABLE_DIARIZATION }}
+      </label>
+      {% if not settings.hf_token %}
+      <small>{{ labels.UPLOAD_DIARIZATION_UNAVAILABLE }}</small>
+      {% endif %}
 
-    <label>
-      <input type="checkbox" name="convert_to_traditional" value="true" checked>
-      {{ labels.UPLOAD_CONVERT_TRADITIONAL }}
-    </label>
-  </fieldset>
+      <label>
+        <input type="checkbox" name="convert_to_traditional" value="true" checked>
+        {{ labels.UPLOAD_CONVERT_TRADITIONAL }}
+      </label>
+    </fieldset>
+  </section>
 
-  <button type="submit" :disabled="uploading">{{ labels.UPLOAD_START }}</button>
+  <button type="submit" class="submit-cta" :disabled="uploading">{{ labels.UPLOAD_START }}</button>
 </form>
 {% endblock %}
 
