@@ -23,10 +23,10 @@ ENV PIP_INDEX_URL=${PIP_INDEX_URL}
 RUN pip install --no-cache-dir --break-system-packages --no-deps "whisperx>=3.8,<3.9" && \
     pip install --no-cache-dir --break-system-packages ".[worker]"
 
-RUN useradd --uid 1000 --create-home appuser && \
-    mkdir -p /app/data/db /app/data/uploads /app/data/outputs /cache/huggingface && \
-    chown -R appuser:appuser /app/data /cache/huggingface
-USER appuser
+RUN useradd --uid 1000 --create-home appuser 2>/dev/null || true \
+    && mkdir -p /app/data/db /app/data/uploads /app/data/outputs /cache/huggingface \
+    && chown -R 1000 /app/data /cache/huggingface
+USER 1000
 
 ENV HF_HOME=/cache/huggingface
 ENV PYTHONUNBUFFERED=1
