@@ -148,6 +148,28 @@ dialog footer {
   gap: 0.5rem;
 }
 
+/* Drop zone */
+.drop-zone {
+  border: 2px dashed var(--pico-muted-border-color);
+  padding: 2rem;
+  text-align: center;
+  border-radius: 8px;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+.drop-active {
+  border-color: var(--pico-primary);
+  background: var(--pico-primary-focus);
+}
+
+/* Upload progress */
+.upload-progress {
+  margin-bottom: 1rem;
+}
+.upload-progress progress {
+  width: 100%;
+  margin-bottom: 0.25rem;
+}
+
 /* Smooth htmx transitions */
 .htmx-settling {
   opacity: 1;
