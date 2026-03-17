@@ -62,11 +62,13 @@ class AlignStage:
             raise AlignmentError(f"Alignment failed: {e}") from e
 
     def cleanup(self) -> None:
+        had_resources = self._model is not None or self._metadata is not None
         if self._model is not None:
             del self._model
             self._model = None
         if self._metadata is not None:
             del self._metadata
             self._metadata = None
-        gc.collect()
-        release_gpu_memory()
+        if had_resources:
+            gc.collect()
+            release_gpu_memory()
