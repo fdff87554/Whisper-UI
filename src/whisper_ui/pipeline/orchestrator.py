@@ -18,16 +18,32 @@ STAGE_WEIGHTS: dict[str, tuple[float, float]] = {
     "postprocess": (0.95, 1.00),
 }
 
+STAGE_WEIGHTS_WITH_DOWNLOAD: dict[str, tuple[float, float]] = {
+    "download": (0.00, 0.15),
+    "preprocess": (0.15, 0.20),
+    "transcribe": (0.20, 0.60),
+    "align": (0.60, 0.70),
+    "diarize": (0.70, 0.90),
+    "assign_speakers": (0.90, 0.95),
+    "postprocess": (0.95, 1.00),
+}
+
 
 class PipelineOrchestrator:
-    def __init__(self, stages: list[PipelineStage], on_progress: ProgressCallback | None = None) -> None:
+    def __init__(
+        self,
+        stages: list[PipelineStage],
+        on_progress: ProgressCallback | None = None,
+        stage_weights: dict[str, tuple[float, float]] | None = None,
+    ) -> None:
         self._stages = stages
         self._on_progress = on_progress
+        self._stage_weights = stage_weights or STAGE_WEIGHTS
 
     def run(self, context: dict[str, Any]) -> TranscriptResult:
         for stage in self._stages:
             stage_name = stage.name
-            weight = STAGE_WEIGHTS.get(stage_name, (0.0, 1.0))
+            weight = self._stage_weights.get(stage_name, (0.0, 1.0))
 
             logger.info("Starting stage: %s", stage_name)
 
