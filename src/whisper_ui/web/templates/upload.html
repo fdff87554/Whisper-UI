@@ -43,13 +43,17 @@
   </template>
 
   <div x-data="{ tab: 'files' }">
-    <div class="upload-tabs" role="tablist">
-      <button type="button" class="tab-btn" role="tab"
-              :class="{ active: tab === 'files' }" @click="tab = 'files'">
+    <div class="upload-tabs" role="group" aria-label="{{ labels.UPLOAD_MODE_GROUP }}">
+      <button type="button" class="tab-btn"
+              :class="{ active: tab === 'files' }"
+              :aria-pressed="tab === 'files' ? 'true' : 'false'"
+              @click="tab = 'files'">
         {{ labels.UPLOAD_TAB_FILES }}
       </button>
-      <button type="button" class="tab-btn" role="tab"
-              :class="{ active: tab === 'folder' }" @click="tab = 'folder'">
+      <button type="button" class="tab-btn"
+              :class="{ active: tab === 'folder' }"
+              :aria-pressed="tab === 'folder' ? 'true' : 'false'"
+              @click="tab = 'folder'">
         {{ labels.UPLOAD_TAB_FOLDER }}
       </button>
     </div>
