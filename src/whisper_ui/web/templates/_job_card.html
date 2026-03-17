@@ -3,6 +3,11 @@
   <strong class="job-card-filename">{{ job.filename }}</strong>
   <span class="badge badge-{{ job.status.value }}">{{ labels.STATUS_LABELS[job.status.value] }}</span>
 </div>
+{% if job.source_url %}
+<div class="job-card-row-source">
+  <small class="job-card-source-url" title="{{ job.source_url }}">{{ job.source_url[:60] }}{% if job.source_url|length > 60 %}...{% endif %}</small>
+</div>
+{% endif %}
 <div class="job-card-row-2">
   <small class="job-card-meta">{{ job.language }} | {{ job.model_name }} | {{ job.created_at[:TIMESTAMP_DISPLAY_LENGTH] }}</small>
   <div class="job-card-actions">

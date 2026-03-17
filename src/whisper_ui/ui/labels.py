@@ -40,6 +40,12 @@ UPLOAD_UPLOADING = "上傳中..."
 UPLOAD_FILE_TOO_LARGE = "檔案「{name}」超過大小限制（{limit}）。"
 UPLOAD_INVALID_LANGUAGE = "不支援的語言：{value}"
 UPLOAD_INVALID_MODEL = "不支援的模型：{value}"
+UPLOAD_TAB_URL = "YouTube 網址"
+UPLOAD_URL_PLACEHOLDER = "貼上 YouTube 影片網址..."
+UPLOAD_URL_DESCRIPTION = "輸入 YouTube 影片網址，系統將自動下載音訊並進行轉錄。"
+UPLOAD_INVALID_URL = "無效的 YouTube 網址格式。"
+UPLOAD_URL_PLAYLIST_NOT_SUPPORTED = "不支援播放清單網址，請提供單一影片網址。"
+UPLOAD_URL_DISCLAIMER = "請確認您有權下載該影片內容，並遵守相關服務條款。"
 
 # -- Jobs page --
 JOBS_HEADER = "任務列表"
