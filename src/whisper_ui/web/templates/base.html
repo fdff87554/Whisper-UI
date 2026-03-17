@@ -8,6 +8,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Whisper UI{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"
         integrity="sha384-L1dWfspMTHU/ApYnFiMz2QID/PlP1xCW9visvBdbEkOLkSSWsP6ZJWhPw6apiXxU" crossorigin="anonymous">
   <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
@@ -32,10 +35,10 @@
         <li><a href="/jobs" {% if active_page == 'jobs' %}aria-current="page"{% endif %}>{{ labels.PAGE_JOBS }}</a></li>
         <li><a href="/viewer" {% if active_page == 'viewer' %}aria-current="page"{% endif %}>{{ labels.PAGE_VIEWER }}</a></li>
         <li>
-          <a href="#" role="button" class="outline contrast small-btn theme-toggle"
-             @click.prevent="theme = theme === 'light' ? 'dark' : 'light'"
-             x-text="theme === 'light' ? '{{ labels.THEME_TOGGLE_DARK }}' : '{{ labels.THEME_TOGGLE_LIGHT }}'">
-          </a>
+          <button class="outline contrast small-btn theme-toggle"
+                  @click="theme = theme === 'light' ? 'dark' : 'light'"
+                  x-text="theme === 'light' ? '{{ labels.THEME_TOGGLE_DARK }}' : '{{ labels.THEME_TOGGLE_LIGHT }}'">
+          </button>
         </li>
       </ul>
     </nav>
