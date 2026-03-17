@@ -1,13 +1,14 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon_upload, icon_folder_open, icon_link, icon_x %}
 
 {% block content %}
-<h1>{{ labels.UPLOAD_HEADER }}</h1>
-<p>{{ labels.UPLOAD_DESCRIPTION }}</p>
-<small>{{ labels.UPLOAD_SUPPORTED_FORMATS.format(formats=supported_extensions|join(', ')) }}</small>
+<h1 class="text-2xl font-medium mb-2">{{ labels.UPLOAD_HEADER }}</h1>
+<p class="text-sm opacity-60 mb-1">{{ labels.UPLOAD_DESCRIPTION }}</p>
+<p class="text-xs opacity-40 mb-6">{{ labels.UPLOAD_SUPPORTED_FORMATS.format(formats=supported_extensions|join(', ')) }}</p>
 
 {% set error = request.query_params.get('error', '') %}
 {% if error %}
-<article class="alert-error" aria-label="Error">
+<div class="alert alert-error mb-4">
   {% if error == 'no_file' %}
   {{ labels.UPLOAD_NO_FILE }}
   {% elif error == 'no_files' %}
@@ -27,7 +28,7 @@
   {% elif error == 'playlist' %}
   {{ labels.UPLOAD_URL_PLAYLIST_NOT_SUPPORTED }}
   {% endif %}
-</article>
+</div>
 {% endif %}
 
 <form method="post"
@@ -43,71 +44,104 @@
       @htmx:after-request="uploading = false; progress = 0">
 
   <div id="upload-feedback"></div>
+
+  {# Upload progress overlay #}
   <template x-if="uploading">
-    <div class="upload-progress">
-      <progress :value="progress" max="100"></progress>
-      <small x-text="Math.round(progress) + '% — {{ labels.UPLOAD_UPLOADING }}'"></small>
+    <div class="fixed inset-0 bg-base-100/80 z-50 flex items-center justify-center">
+      <div class="card bg-base-100 border border-base-300 shadow-lg w-80">
+        <div class="card-body items-center text-center p-6">
+          <span class="loading loading-spinner loading-lg text-primary mb-2"></span>
+          <progress class="progress progress-primary w-full" :value="progress" max="100"></progress>
+          <p class="text-sm mt-2" x-text="Math.round(progress) + '% — {{ labels.UPLOAD_UPLOADING }}'"></p>
+        </div>
+      </div>
     </div>
   </template>
 
-  <div class="upload-tabs" role="group" aria-label="{{ labels.UPLOAD_MODE_GROUP }}">
-    <button type="button" class="tab-btn"
-            :class="{ active: tab === 'files' }"
-            :aria-pressed="tab === 'files' ? 'true' : 'false'"
+  {# Source selection tabs — pill style #}
+  <div role="tablist" class="tabs tabs-boxed mb-6 inline-flex" aria-label="{{ labels.UPLOAD_MODE_GROUP }}">
+    <button type="button" role="tab" class="tab gap-2"
+            :class="{ 'tab-active': tab === 'files' }"
+            :aria-selected="tab === 'files' ? 'true' : 'false'"
             @click="tab = 'files'">
+      {{ icon_upload("w-4 h-4") }}
       {{ labels.UPLOAD_TAB_FILES }}
     </button>
-    <button type="button" class="tab-btn"
-            :class="{ active: tab === 'folder' }"
-            :aria-pressed="tab === 'folder' ? 'true' : 'false'"
+    <button type="button" role="tab" class="tab gap-2"
+            :class="{ 'tab-active': tab === 'folder' }"
+            :aria-selected="tab === 'folder' ? 'true' : 'false'"
             @click="tab = 'folder'">
+      {{ icon_folder_open("w-4 h-4") }}
       {{ labels.UPLOAD_TAB_FOLDER }}
     </button>
-    <button type="button" class="tab-btn"
-            :class="{ active: tab === 'url' }"
-            :aria-pressed="tab === 'url' ? 'true' : 'false'"
+    <button type="button" role="tab" class="tab gap-2"
+            :class="{ 'tab-active': tab === 'url' }"
+            :aria-selected="tab === 'url' ? 'true' : 'false'"
             @click="tab = 'url'">
+      {{ icon_link("w-4 h-4") }}
       {{ labels.UPLOAD_TAB_URL }}
     </button>
   </div>
 
-  <div x-show="tab === 'files'">
-    <div class="drop-zone"
-         :class="{ 'drop-active': dragging }"
+  {# Files tab #}
+  <div x-show="tab === 'files'" x-transition.opacity>
+    <div class="border-2 border-dashed border-base-300 rounded-box p-8 sm:p-12 text-center transition-colors"
+         :class="{ 'border-primary bg-primary/5': dragging }"
          x-data="{ dragging: false }"
          @dragover.prevent="dragging = true"
          @dragleave.prevent="dragging = false"
-         @drop.prevent="dragging = false; $refs.fileInput.files = $event.dataTransfer.files">
-      <p>{{ labels.UPLOAD_DRAG_DROP }}</p>
-      <label for="upload-files">{{ labels.UPLOAD_CHOOSE_FILE }}</label>
+         @drop.prevent="dragging = false; $refs.fileInput.files = $event.dataTransfer.files; updateFileList()">
+      {{ icon_upload("w-10 h-10 mx-auto mb-3 opacity-30") }}
+      <p class="text-sm opacity-60 mb-4">{{ labels.UPLOAD_DRAG_DROP }}</p>
+      <label for="upload-files" class="btn btn-outline btn-sm">{{ labels.UPLOAD_CHOOSE_FILE }}</label>
       <input type="file" id="upload-files" name="files" multiple
              accept="{{ supported_extensions|join(',') }}"
              :disabled="tab !== 'files'"
-             x-ref="fileInput">
+             x-ref="fileInput"
+             @change="updateFileList()"
+             class="hidden">
     </div>
+    {# File preview list #}
+    <template x-if="selectedFiles.length > 0">
+      <div class="mt-4 space-y-2">
+        <template x-for="(file, idx) in selectedFiles" :key="idx">
+          <div class="flex items-center gap-3 px-3 py-2 bg-base-200 rounded-box text-sm">
+            <span class="flex-1 truncate" x-text="file.name"></span>
+            <span class="text-xs opacity-50" x-text="formatSize(file.size)"></span>
+            <button type="button" class="btn btn-ghost btn-xs" @click="removeFile(idx)">
+              {{ icon_x("w-3 h-3") }}
+            </button>
+          </div>
+        </template>
+      </div>
+    </template>
   </div>
 
-  <div x-show="tab === 'folder'">
-    <p><small>{{ labels.UPLOAD_FOLDER_DESCRIPTION }}</small></p>
-    <label for="upload-folder">{{ labels.UPLOAD_CHOOSE_FOLDER }}</label>
+  {# Folder tab #}
+  <div x-show="tab === 'folder'" x-transition.opacity>
+    <p class="text-sm opacity-60 mb-3">{{ labels.UPLOAD_FOLDER_DESCRIPTION }}</p>
+    <label for="upload-folder" class="btn btn-outline btn-sm">{{ labels.UPLOAD_CHOOSE_FOLDER }}</label>
     <input type="file" id="upload-folder" name="files" webkitdirectory
-           :disabled="tab !== 'folder'">
+           :disabled="tab !== 'folder'"
+           class="hidden">
   </div>
 
-  <div x-show="tab === 'url'">
-    <p><small>{{ labels.UPLOAD_URL_DESCRIPTION }}</small></p>
-    <label for="upload-url">{{ labels.UPLOAD_TAB_URL }}</label>
+  {# URL tab #}
+  <div x-show="tab === 'url'" x-transition.opacity>
+    <p class="text-sm opacity-60 mb-3">{{ labels.UPLOAD_URL_DESCRIPTION }}</p>
     <input type="url" id="upload-url" name="url"
            placeholder="{{ labels.UPLOAD_URL_PLACEHOLDER }}"
-           :disabled="tab !== 'url'">
-    <small>{{ labels.UPLOAD_URL_DISCLAIMER }}</small>
+           :disabled="tab !== 'url'"
+           class="input input-bordered w-full">
+    <p class="text-xs opacity-40 mt-2">{{ labels.UPLOAD_URL_DISCLAIMER }}</p>
   </div>
 
-  <section class="upload-settings">
-    <div class="grid">
-      <label>
-        {{ labels.UPLOAD_LANGUAGE }}
-        <select name="language">
+  {# Settings #}
+  <section class="mt-8 pt-6 border-t border-base-300">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+      <label class="form-control w-full">
+        <div class="label"><span class="label-text text-sm">{{ labels.UPLOAD_LANGUAGE }}</span></div>
+        <select name="language" class="select select-bordered w-full">
           {% for code in supported_languages %}
           <option value="{{ code }}" {% if code == settings.language %}selected{% endif %}>
             {{ LANGUAGE_LABELS.get(code, code) }}
@@ -115,42 +149,57 @@
           {% endfor %}
         </select>
       </label>
-
-      <label>
-        {{ labels.UPLOAD_MODEL }}
-        <select name="model_name">
+      <label class="form-control w-full">
+        <div class="label"><span class="label-text text-sm">{{ labels.UPLOAD_MODEL }}</span></div>
+        <select name="model_name" class="select select-bordered w-full">
           {% for model in whisper_models %}
-          <option value="{{ model }}" {% if model == settings.whisper_model %}selected{% endif %}>
-            {{ model }}
-          </option>
+          <option value="{{ model }}" {% if model == settings.whisper_model %}selected{% endif %}>{{ model }}</option>
           {% endfor %}
         </select>
       </label>
-
-      <label>
-        {{ labels.UPLOAD_NUM_SPEAKERS }}
-        <input type="number" name="num_speakers" value="0" min="0" max="20">
-      </label>
     </div>
 
-    <fieldset>
-      <label>
-        <input type="checkbox" name="enable_diarization" value="true"
-               {% if settings.hf_token %}checked{% else %}disabled{% endif %}>
-        {{ labels.UPLOAD_ENABLE_DIARIZATION }}
-      </label>
-      {% if not settings.hf_token %}
-      <small>{{ labels.UPLOAD_DIARIZATION_UNAVAILABLE }}</small>
-      {% endif %}
+    <div class="space-y-3">
+      <div class="form-control"
+           x-data="{ diarEnabled: {{ 'true' if settings.hf_token else 'false' }} }">
+        <label class="label cursor-pointer justify-start gap-3">
+          <input type="checkbox" name="enable_diarization" value="true"
+                 class="toggle toggle-primary toggle-sm"
+                 x-model="diarEnabled"
+                 {% if not settings.hf_token %}disabled{% endif %}>
+          <div>
+            <span class="label-text">{{ labels.UPLOAD_ENABLE_DIARIZATION }}</span>
+            {% if not settings.hf_token %}
+            <p class="text-xs opacity-40">{{ labels.UPLOAD_DIARIZATION_UNAVAILABLE }}</p>
+            {% endif %}
+          </div>
+        </label>
+        <div x-show="diarEnabled" x-transition class="ml-12 mt-2">
+          <label class="form-control w-full max-w-xs">
+            <div class="label"><span class="label-text text-sm">{{ labels.UPLOAD_NUM_SPEAKERS }}</span></div>
+            <input type="number" name="num_speakers" value="0" min="0" max="20"
+                   class="input input-bordered input-sm w-full max-w-xs">
+          </label>
+        </div>
+      </div>
 
-      <label>
-        <input type="checkbox" name="convert_to_traditional" value="true" checked>
-        {{ labels.UPLOAD_CONVERT_TRADITIONAL }}
-      </label>
-    </fieldset>
+      <div class="form-control">
+        <label class="label cursor-pointer justify-start gap-3">
+          <input type="checkbox" name="convert_to_traditional" value="true"
+                 class="toggle toggle-primary toggle-sm" checked>
+          <div>
+            <span class="label-text">{{ labels.UPLOAD_CONVERT_TRADITIONAL }}</span>
+            <p class="text-xs opacity-40">{{ labels.UPLOAD_CONVERT_TRADITIONAL_HELP }}</p>
+          </div>
+        </label>
+      </div>
+    </div>
   </section>
 
-  <button type="submit" class="submit-cta" :disabled="uploading">{{ labels.UPLOAD_START }}</button>
+  <button type="submit" class="btn btn-primary btn-lg w-full mt-6" :disabled="uploading">
+    {{ icon_upload("w-5 h-5") }}
+    {{ labels.UPLOAD_START }}
+  </button>
 </form>
 {% endblock %}
 
@@ -161,10 +210,30 @@ function uploadForm() {
     tab: 'files',
     uploading: false,
     progress: 0,
+    selectedFiles: [],
     onProgress(event) {
       if (event.detail && event.detail.loaded !== undefined && event.detail.total) {
         this.progress = (event.detail.loaded / event.detail.total) * 100;
       }
+    },
+    updateFileList() {
+      const input = this.$refs.fileInput;
+      if (input && input.files) {
+        this.selectedFiles = Array.from(input.files);
+      }
+    },
+    removeFile(idx) {
+      this.selectedFiles.splice(idx, 1);
+      // Rebuild the FileList on the input via DataTransfer
+      const dt = new DataTransfer();
+      this.selectedFiles.forEach(f => dt.items.add(f));
+      this.$refs.fileInput.files = dt.files;
+    },
+    formatSize(bytes) {
+      if (bytes >= 1024 * 1024 * 1024) return (bytes / (1024 ** 3)).toFixed(1) + ' GB';
+      if (bytes >= 1024 * 1024) return (bytes / (1024 ** 2)).toFixed(0) + ' MB';
+      if (bytes >= 1024) return (bytes / 1024).toFixed(0) + ' KB';
+      return bytes + ' B';
     }
   }
 }

@@ -13,3 +13,11 @@ taplo = "0.10.0"
 _.python.venv = { path = ".venv", create = true }
 # Optional: configure pip mirror in .mise.local.toml (not committed)
 # PIP_INDEX_URL = "https://pypi.cs.nycu.edu.tw/simple/"
+
+[tasks.css]
+run = "npx @tailwindcss/cli -i src/whisper_ui/web/static/css/input.css -o src/whisper_ui/web/static/style.css --minify"
+description = "Build production CSS"
+
+[tasks."css:watch"]
+run = "npx @tailwindcss/cli -i src/whisper_ui/web/static/css/input.css -o src/whisper_ui/web/static/style.css --watch"
+description = "Watch and rebuild CSS on change"

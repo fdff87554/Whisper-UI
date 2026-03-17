@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from whisper_ui.core.models import Job, JobStatus, Segment, TranscriptResult
 from whisper_ui.web.app import create_app
-from whisper_ui.web.deps import _format_time, make_content_disposition
+from whisper_ui.web.deps import _format_relative_time, _format_time, make_content_disposition
 
 
 @pytest.fixture
@@ -53,14 +53,20 @@ class TestHealthEndpoint:
         assert resp.json() == {"status": "ok"}
 
 
+class TestDashboardRoutes:
+    def test_root_serves_dashboard(self, client):
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "總覽" in resp.text
+
+    def test_dashboard_active_fragment(self, client):
+        resp = client.get("/dashboard/active")
+        assert resp.status_code == 200
+
+
 class TestUploadRoutes:
     def test_upload_page(self, client):
         resp = client.get("/upload")
-        assert resp.status_code == 200
-        assert "上傳音訊" in resp.text
-
-    def test_root_serves_upload_page(self, client):
-        resp = client.get("/")
         assert resp.status_code == 200
         assert "上傳音訊" in resp.text
 
@@ -86,6 +92,11 @@ class TestJobsRoutes:
         resp = client.get("/jobs")
         assert resp.status_code == 200
         assert "test.mp3" in resp.text
+
+    def test_jobs_page_invalid_status_ignored(self, client):
+        resp = client.get("/jobs?status=' %2B alert(1) %2B '")
+        assert resp.status_code == 200
+        assert "alert(1)" not in resp.text
 
     def test_jobs_list_filter(self, client, db, filestore):
         _create_completed_job(db, filestore)
@@ -140,10 +151,10 @@ class TestJobsRoutes:
 
 
 class TestViewerRoutes:
-    def test_viewer_page_empty(self, client):
-        resp = client.get("/viewer")
-        assert resp.status_code == 200
-        assert "檢視器" in resp.text
+    def test_viewer_redirects_to_jobs(self, client):
+        resp = client.get("/viewer", follow_redirects=False)
+        assert resp.status_code == 302
+        assert resp.headers["location"] == "/jobs"
 
     def test_viewer_with_job(self, client, db, filestore):
         job = _create_completed_job(db, filestore)
@@ -485,3 +496,15 @@ class TestFormatTime:
 
     def test_large_duration(self):
         assert _format_time(36000) == "10:00:00"
+
+
+class TestFormatRelativeTime:
+    def test_invalid_input(self):
+        assert _format_relative_time("not-a-date") == "not-a-date"
+
+    def test_recent_shows_just_now(self):
+        from datetime import UTC, datetime
+
+        now = datetime.now(UTC).isoformat()
+        result = _format_relative_time(now)
+        assert result == "剛剛"
