@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     error TEXT,
     result_path TEXT,
     duration REAL,
-    batch_id TEXT
+    batch_id TEXT,
+    source_url TEXT
 );
 """
 
@@ -32,6 +33,7 @@ _MIGRATIONS: list[str] = [
     "ALTER TABLE jobs ADD COLUMN enable_diarization INTEGER NOT NULL DEFAULT 1",
     "ALTER TABLE jobs ADD COLUMN convert_to_traditional INTEGER NOT NULL DEFAULT 1",
     "ALTER TABLE jobs ADD COLUMN batch_id TEXT",
+    "ALTER TABLE jobs ADD COLUMN source_url TEXT",
 ]
 
 
