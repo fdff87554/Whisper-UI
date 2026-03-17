@@ -9,6 +9,11 @@ ARG PIP_INDEX_URL=
 ENV PIP_INDEX_URL=${PIP_INDEX_URL}
 RUN pip install --no-cache-dir ".[frontend]"
 
+RUN useradd --uid 1000 --create-home appuser && \
+    mkdir -p /app/data/db /app/data/uploads /app/data/outputs && \
+    chown -R appuser:appuser /app/data
+USER appuser
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
