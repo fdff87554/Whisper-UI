@@ -41,6 +41,7 @@ def process_transcription(job_id: str) -> str:
     db = JobDatabase(settings.database_path)
     filestore = FileStore(settings.upload_dir, settings.output_dir)
 
+    context: dict = {}
     try:
         job = db.get_job(job_id)
         if job is None:

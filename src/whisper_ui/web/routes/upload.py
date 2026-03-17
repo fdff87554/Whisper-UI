@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import uuid
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -23,19 +24,23 @@ def _format_size(size_bytes: int) -> str:
     return f"{size_bytes / (1024**2):.0f} MB"
 
 
-async def _read_with_limit(upload: UploadFile, max_size: int) -> bytes | None:
-    """Read upload in chunks; return None if file exceeds max_size."""
-    chunks: list[bytes] = []
+async def _stream_to_file(upload: UploadFile, dest: Path, max_size: int) -> bool:
+    """Stream upload chunks directly to disk. Return False if file exceeds max_size."""
     total = 0
-    while True:
-        chunk = await upload.read(_READ_CHUNK_SIZE)
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > max_size:
-            return None
-        chunks.append(chunk)
-    return b"".join(chunks)
+    try:
+        with dest.open("wb") as f:
+            while True:
+                chunk = await upload.read(_READ_CHUNK_SIZE)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_size:
+                    return False
+                f.write(chunk)
+    except BaseException:
+        dest.unlink(missing_ok=True)
+        raise
+    return True
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -69,9 +74,9 @@ async def upload_submit(
 ):
     # Server-side validation of select inputs
     if language not in SUPPORTED_LANGUAGES:
-        return RedirectResponse("/upload?error=invalid_language", status_code=303)
+        return RedirectResponse(f"/upload?error=invalid_language&value={quote(language)}", status_code=303)
     if model_name not in WHISPER_MODELS:
-        return RedirectResponse("/upload?error=invalid_model", status_code=303)
+        return RedirectResponse(f"/upload?error=invalid_model&value={quote(model_name)}", status_code=303)
 
     # Distinguish "no file selected" from "unsupported format"
     has_any_files = files and any(f.filename for f in files)
@@ -101,11 +106,6 @@ async def upload_submit(
     for uploaded_file in valid_files:
         display_name = PurePosixPath(uploaded_file.filename or "unknown").name
 
-        file_data = await _read_with_limit(uploaded_file, max_size)
-        if file_data is None:
-            limit_str = _format_size(max_size)
-            return RedirectResponse(f"/upload?error=too_large&name={display_name}&limit={limit_str}", status_code=303)
-
         job = Job(
             filename=display_name,
             language=language,
@@ -116,7 +116,16 @@ async def upload_submit(
             batch_id=batch_id,
         )
 
-        dest = filestore.save_upload(job.id, display_name, file_data)
+        dest = filestore.prepare_upload_path(job.id, display_name)
+        within_limit = await _stream_to_file(uploaded_file, dest, max_size)
+        if not within_limit:
+            dest.unlink(missing_ok=True)
+            limit_str = _format_size(max_size)
+            return RedirectResponse(
+                f"/upload?error=too_large&name={quote(display_name)}&limit={quote(limit_str)}",
+                status_code=303,
+            )
+
         job.filepath = str(dest)
         job.status = JobStatus.QUEUED
         db.insert_job(job)

@@ -183,12 +183,16 @@ class TestUploadPost:
     def test_upload_invalid_language_redirects(self, client):
         resp = self._upload(client, language="xx_invalid")
         assert resp.status_code == 303
-        assert "error=invalid_language" in resp.headers["location"]
+        location = resp.headers["location"]
+        assert "error=invalid_language" in location
+        assert "value=xx_invalid" in location
 
     def test_upload_invalid_model_redirects(self, client):
         resp = self._upload(client, model_name="nonexistent-model")
         assert resp.status_code == 303
-        assert "error=invalid_model" in resp.headers["location"]
+        location = resp.headers["location"]
+        assert "error=invalid_model" in location
+        assert "value=nonexistent-model" in location
 
     def test_upload_file_too_large_redirects(self, client, app):
         app.state.settings = app.state.settings.model_copy(update={"max_upload_size": 10})
@@ -197,6 +201,26 @@ class TestUploadPost:
             resp = self._upload(client, files=files)
         assert resp.status_code == 303
         assert "error=too_large" in resp.headers["location"]
+
+    def test_upload_too_large_url_encodes_special_chars(self, client, app):
+        app.state.settings = app.state.settings.model_copy(update={"max_upload_size": 5})
+        files = [("files", ("evil&limit=1.mp3", b"x" * 10, "audio/mpeg"))]
+        with patch("rq.Queue", return_value=MagicMock()):
+            resp = self._upload(client, files=files)
+        assert resp.status_code == 303
+        location = resp.headers["location"]
+        # '&' in filename must be percent-encoded, not split the query string
+        assert "evil%26limit%3D1.mp3" in location
+
+    def test_upload_too_large_cleans_up_partial_file(self, client, app, filestore):
+        app.state.settings = app.state.settings.model_copy(update={"max_upload_size": 5})
+        files = [("files", ("big.mp3", b"x" * 10, "audio/mpeg"))]
+        with patch("rq.Queue", return_value=MagicMock()):
+            resp = self._upload(client, files=files)
+        assert resp.status_code == 303
+        # Verify no partial files remain in upload dir
+        upload_files = list(filestore._upload_dir.rglob("big.mp3"))
+        assert upload_files == []
 
     def test_upload_unsupported_format_redirects(self, client):
         files = [("files", ("document.pdf", b"fake pdf", "application/pdf"))]

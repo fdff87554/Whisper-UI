@@ -27,9 +27,6 @@ STALE_JOB_CHECK_INTERVAL = 60  # seconds
 # Batch upload limits
 MAX_BATCH_SIZE = 50
 
-# Upload file size limit (bytes)
-MAX_UPLOAD_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB
-
 # Redis expiry (seconds)
 REDIS_PROCESSING_EXPIRY = 7200  # 2 hours
 REDIS_COMPLETED_EXPIRY = 86400  # 24 hours
