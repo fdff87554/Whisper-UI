@@ -39,61 +39,56 @@
 <p class="text-sm opacity-50 mb-4">{{ labels.VIEWER_METADATA.format(minutes=minutes, seconds=seconds, segments=result.segments|length, language=result.language) }}</p>
 {% endif %}
 
-{# Sticky toolbar #}
-<div class="sticky top-0 z-10 bg-base-100 border-b border-base-300 pb-3 mb-4 pt-2">
-  {# Export buttons #}
-  <div class="flex flex-wrap items-center gap-2 mb-3">
-    <div class="join">
-      {% for fmt in export_formats %}
-      <a href="/viewer/{{ job.id }}/export/{{ fmt }}" class="btn btn-sm btn-outline join-item" download
-         title="{{ labels.VIEWER_EXPORT_TOOLTIPS.get(fmt, '') }}">
-        {{ fmt|upper }}
-      </a>
-      {% endfor %}
-    </div>
-    <button class="btn btn-sm btn-ghost gap-1"
-            x-data="{ copied: false }"
-            @click="
-              const text = Array.from(document.querySelectorAll('.segment'))
-                .filter(s => s.style.display !== 'none')
-                .map(s => s.textContent.trim()).join('\n');
-              navigator.clipboard.writeText(text).then(() => { copied = true; setTimeout(() => copied = false, 2000) });
-            ">
-      <template x-if="!copied">
-        <span class="flex items-center gap-1">{{ icon_copy("w-4 h-4") }} {{ labels.VIEWER_COPY }}</span>
-      </template>
-      <template x-if="copied">
-        <span class="flex items-center gap-1 text-success">{{ icon_check("w-4 h-4") }} {{ labels.VIEWER_COPIED }}</span>
-      </template>
-    </button>
-  </div>
-
-  {# Search #}
-  {% if result.segments %}
-  <div class="relative max-w-sm"
-       x-data="{
-         search: '',
-         get matchCount() {
-           if (!this.search) return {{ result.segments|length }};
-           const q = this.search.toLowerCase();
-           return Array.from(document.querySelectorAll('.segment[data-text]')).filter(el => el.dataset.text.includes(q)).length;
-         }
-       }">
-    <span class="absolute left-3 top-1/2 -translate-y-1/2 opacity-40">{{ icon_search("w-4 h-4") }}</span>
-    <input type="search" class="input input-bordered input-sm w-full pl-9 pr-20" x-model="search"
-           placeholder="{{ labels.VIEWER_SEARCH_PLACEHOLDER }}">
-    <span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs opacity-40"
-          x-show="search"
-          x-text="matchCount + ' / {{ result.segments|length }}'"></span>
-  </div>
-  {% endif %}
-</div>
-
-{# Segments #}
 {% if result.segments %}
-<div x-data="{ search: '' }"
-     x-effect="search = document.querySelector('[x-model=&quot;search&quot;]')?.value || ''"
-     @input.window="search = $event.target.matches('[x-model]') ? $event.target.value : search">
+<div x-data="{
+  search: '',
+  get matchCount() {
+    if (!this.search) return {{ result.segments|length }};
+    const q = this.search.toLowerCase();
+    return Array.from(document.querySelectorAll('.segment[data-text]')).filter(el => el.dataset.text.includes(q)).length;
+  }
+}">
+  {# Sticky toolbar #}
+  <div class="sticky top-0 z-10 bg-base-100 border-b border-base-300 pb-3 mb-4 pt-2">
+    {# Export buttons #}
+    <div class="flex flex-wrap items-center gap-2 mb-3">
+      <div class="join">
+        {% for fmt in export_formats %}
+        <a href="/viewer/{{ job.id }}/export/{{ fmt }}" class="btn btn-sm btn-outline join-item" download
+           title="{{ labels.VIEWER_EXPORT_TOOLTIPS.get(fmt, '') }}">
+          {{ fmt|upper }}
+        </a>
+        {% endfor %}
+      </div>
+      <button class="btn btn-sm btn-ghost gap-1"
+              x-data="{ copied: false }"
+              @click="
+                const text = Array.from(document.querySelectorAll('.segment'))
+                  .filter(s => s.style.display !== 'none')
+                  .map(s => s.textContent.trim()).join('\n');
+                navigator.clipboard.writeText(text).then(() => { copied = true; setTimeout(() => copied = false, 2000) });
+              ">
+        <template x-if="!copied">
+          <span class="flex items-center gap-1">{{ icon_copy("w-4 h-4") }} {{ labels.VIEWER_COPY }}</span>
+        </template>
+        <template x-if="copied">
+          <span class="flex items-center gap-1 text-success">{{ icon_check("w-4 h-4") }} {{ labels.VIEWER_COPIED }}</span>
+        </template>
+      </button>
+    </div>
+
+    {# Search #}
+    <div class="relative max-w-sm">
+      <span class="absolute left-3 top-1/2 -translate-y-1/2 opacity-40">{{ icon_search("w-4 h-4") }}</span>
+      <input type="search" class="input input-bordered input-sm w-full pl-9 pr-20" x-model="search"
+             placeholder="{{ labels.VIEWER_SEARCH_PLACEHOLDER }}">
+      <span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs opacity-40"
+            x-show="search"
+            x-text="matchCount + ' / {{ result.segments|length }}'"></span>
+    </div>
+  </div>
+
+  {# Segments #}
   <div class="transcript-container">
     {% for seg in result.segments %}
     <div class="segment group flex gap-3 py-2 px-3 rounded-box hover:bg-base-200 transition-colors"
@@ -117,15 +112,25 @@
     {% endfor %}
   </div>
   <p class="text-center py-8 opacity-50"
-     x-data="{ search: '' }"
-     x-effect="search = document.querySelector('[x-model=&quot;search&quot;]')?.value || ''"
-     @input.window="search = $event.target.matches('[x-model]') ? $event.target.value : search"
-     x-show="search && document.querySelectorAll('.segment[data-text]:not([style*=display])').length === 0"
+     x-show="search && matchCount === 0"
      x-transition.opacity>
     {{ labels.VIEWER_SEARCH_NO_RESULTS }}
   </p>
 </div>
 {% else %}
+{# No segments: export-only toolbar #}
+<div class="sticky top-0 z-10 bg-base-100 border-b border-base-300 pb-3 mb-4 pt-2">
+  <div class="flex flex-wrap items-center gap-2">
+    <div class="join">
+      {% for fmt in export_formats %}
+      <a href="/viewer/{{ job.id }}/export/{{ fmt }}" class="btn btn-sm btn-outline join-item" download
+         title="{{ labels.VIEWER_EXPORT_TOOLTIPS.get(fmt, '') }}">
+        {{ fmt|upper }}
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+</div>
 <p class="text-sm opacity-50">{{ labels.VIEWER_NO_SEGMENTS }}</p>
 {% endif %}
 
