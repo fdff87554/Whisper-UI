@@ -52,6 +52,7 @@ services:
       - BATCH_SIZE=${BATCH_SIZE:-4}
       - LANGUAGE=${LANGUAGE:-zh}
       - HF_TOKEN=${HF_TOKEN:-}
+      - YOUTUBE_MAX_DURATION=${YOUTUBE_MAX_DURATION:-14400}
     volumes:
       - app-data:/app/data
       - model-cache:/cache/huggingface
@@ -85,6 +86,7 @@ services:
       - BATCH_SIZE=${BATCH_SIZE:-4}
       - LANGUAGE=${LANGUAGE:-zh}
       - HF_TOKEN=${HF_TOKEN:-}
+      - YOUTUBE_MAX_DURATION=${YOUTUBE_MAX_DURATION:-14400}
     volumes:
       - app-data:/app/data
       - model-cache:/cache/huggingface
