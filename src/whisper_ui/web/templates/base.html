@@ -1,5 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-Hant" data-theme="light">
+<html lang="zh-Hant"
+      x-data="{ theme: $persist(
+        window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+      ).as('whisper-ui-theme') }"
+      :data-theme="theme">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,6 +13,9 @@
   <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
   <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"
           integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+"
+          crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/persist@3.14.8/dist/cdn.min.js"
+          integrity="sha384-9SDdYTFEfclsO6c7hnOgCm3X3Dh5gvAcXtVcEtfgDv/kQkhcBbqAOdEVMLskiSfZ"
           crossorigin="anonymous"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"
           integrity="sha384-X9kJyAubVxnP0hcA+AMMs21U445qsnqhnUF8EBlEpP3a42Kh/JwWjlv2ZcvGfphb"
@@ -24,6 +31,12 @@
         <li><a href="/upload" {% if active_page == 'upload' %}aria-current="page"{% endif %}>{{ labels.PAGE_UPLOAD }}</a></li>
         <li><a href="/jobs" {% if active_page == 'jobs' %}aria-current="page"{% endif %}>{{ labels.PAGE_JOBS }}</a></li>
         <li><a href="/viewer" {% if active_page == 'viewer' %}aria-current="page"{% endif %}>{{ labels.PAGE_VIEWER }}</a></li>
+        <li>
+          <a href="#" role="button" class="outline contrast small-btn theme-toggle"
+             @click.prevent="theme = theme === 'light' ? 'dark' : 'light'"
+             x-text="theme === 'light' ? '{{ labels.THEME_TOGGLE_DARK }}' : '{{ labels.THEME_TOGGLE_LIGHT }}'">
+          </a>
+        </li>
       </ul>
     </nav>
   </header>

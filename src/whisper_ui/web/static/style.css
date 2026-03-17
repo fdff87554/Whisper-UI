@@ -88,16 +88,21 @@ a.small-btn {
 
 /* Alert banners */
 .alert-error {
-  border-left: 4px solid #ef4444;
+  border-left: 4px solid var(--pico-del-color);
   padding: 0.8rem 1rem;
   margin-bottom: 1rem;
-  color: #ef4444;
+  color: var(--pico-del-color);
 }
 .alert-success {
-  border-left: 4px solid #22c55e;
+  border-left: 4px solid var(--pico-ins-color);
   padding: 0.8rem 1rem;
   margin-bottom: 1rem;
-  color: #22c55e;
+  color: var(--pico-ins-color);
+}
+
+/* Theme toggle button */
+.theme-toggle {
+  white-space: nowrap;
 }
 
 /* Pagination */
