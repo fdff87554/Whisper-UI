@@ -15,48 +15,56 @@
   {# ── Batch group ── #}
   {% set bi = batch_info[group_key] %}
   <article class="job-group">
-    <header>
-      <div class="batch-header">
-        <div class="batch-info">
-          <strong>{{ labels.JOBS_BATCH_LABEL.format(count=bi.total) }}</strong>
-          <br><small>{{ labels.JOBS_BATCH_PROGRESS.format(completed=bi.completed, total=bi.total) }}</small>
+    <details {% if not bi.all_done %}open{% endif %}>
+      <summary class="batch-summary">
+        <div class="batch-header">
+          <div class="batch-info">
+            <strong>{{ labels.JOBS_BATCH_LABEL.format(count=bi.total) }}</strong>
+            <span class="batch-progress-text">
+              {{ labels.JOBS_BATCH_PROGRESS.format(completed=bi.completed, total=bi.total) }}
+            </span>
+            {% if bi.failed > 0 %}
+            <span class="badge badge-failed">{{ bi.failed }} {{ labels.STATUS_LABELS['failed'] }}</span>
+            {% endif %}
+          </div>
+          <div class="batch-actions">
+            {% if bi.completed > 0 and bi.all_done %}
+            <button class="small-btn"
+                    @click.stop="$dispatch('open-batch-download', {
+                      batchId: '{{ group_key }}'
+                    })">{{ labels.JOBS_BATCH_DOWNLOAD }}</button>
+            {% endif %}
+            {% if bi.failed > 0 %}
+            <button class="outline secondary small-btn"
+                    @click.stop="$dispatch('open-confirm', {
+                      title: '{{ labels.JOBS_BATCH_RETRY_ALL }}',
+                      message: '{{ labels.JOBS_BATCH_RETRY_ALL_CONFIRM }}',
+                      confirmText: '{{ labels.JOBS_BATCH_RETRY_ALL_CONFIRM_BUTTON }}',
+                      url: '/jobs/batch/{{ group_key }}/retry',
+                      method: 'POST'
+                    })">{{ labels.JOBS_BATCH_RETRY_ALL }}</button>
+            {% endif %}
+            {% if bi.all_done %}
+            <button class="outline secondary small-btn"
+                    @click.stop="$dispatch('open-confirm', {
+                      title: '{{ labels.JOBS_BATCH_DELETE_ALL }}',
+                      message: '{{ labels.JOBS_BATCH_DELETE_ALL_CONFIRM }}',
+                      confirmText: '{{ labels.JOBS_BATCH_DELETE_ALL_CONFIRM_BUTTON }}',
+                      url: '/jobs/batch/{{ group_key }}',
+                      method: 'DELETE'
+                    })">{{ labels.JOBS_BATCH_DELETE_ALL }}</button>
+            {% endif %}
+          </div>
         </div>
-        <div class="batch-actions">
-          {% if bi.failed > 0 %}
-          <button class="outline secondary small-btn"
-                  @click="$dispatch('open-confirm', {
-                    title: '{{ labels.JOBS_BATCH_RETRY_ALL }}',
-                    message: '{{ labels.JOBS_BATCH_RETRY_ALL_CONFIRM }}',
-                    confirmText: '{{ labels.JOBS_BATCH_RETRY_ALL_CONFIRM_BUTTON }}',
-                    url: '/jobs/batch/{{ group_key }}/retry',
-                    method: 'POST'
-                  })">{{ labels.JOBS_BATCH_RETRY_ALL }}</button>
-          {% endif %}
-          {% if bi.completed > 0 and bi.all_done %}
-          <button class="outline small-btn"
-                  @click="$dispatch('open-batch-download', {
-                    batchId: '{{ group_key }}'
-                  })">{{ labels.JOBS_BATCH_DOWNLOAD }}</button>
-          {% endif %}
-          {% if bi.all_done %}
-          <button class="outline secondary small-btn"
-                  @click="$dispatch('open-confirm', {
-                    title: '{{ labels.JOBS_BATCH_DELETE_ALL }}',
-                    message: '{{ labels.JOBS_BATCH_DELETE_ALL_CONFIRM }}',
-                    confirmText: '{{ labels.JOBS_BATCH_DELETE_ALL_CONFIRM_BUTTON }}',
-                    url: '/jobs/batch/{{ group_key }}',
-                    method: 'DELETE'
-                  })">{{ labels.JOBS_BATCH_DELETE_ALL }}</button>
-          {% endif %}
-        </div>
-      </div>
-    </header>
+        <progress class="batch-progress-bar" value="{{ bi.completed + bi.failed }}" max="{{ bi.total }}"></progress>
+      </summary>
 
-    {% for job in group_jobs %}
-    <div class="job-card">
-      {% include "_job_card.html" %}
-    </div>
-    {% endfor %}
+      {% for job in group_jobs %}
+      <div class="job-card">
+        {% include "_job_card.html" %}
+      </div>
+      {% endfor %}
+    </details>
   </article>
 
   {% else %}

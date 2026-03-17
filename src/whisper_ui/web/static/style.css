@@ -30,18 +30,29 @@
   border-top: 1px solid var(--pico-muted-border-color);
 }
 
-.job-card-header {
+/* Job card two-row layout */
+.job-card-row-1 {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
-.job-card-info {
+.job-card-row-2 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+.job-card-filename {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   flex: 1;
-  min-width: 200px;
+  min-width: 0;
 }
-.job-card-status {
-  flex-shrink: 0;
+.job-card-meta {
+  white-space: nowrap;
 }
 .job-card-actions {
   display: flex;
@@ -49,20 +60,48 @@
   flex-shrink: 0;
 }
 
-/* Batch header */
-.batch-header {
+/* Batch summary with details/summary */
+.batch-summary {
+  cursor: pointer;
+}
+.batch-summary .batch-header {
   display: flex;
   align-items: center;
   gap: 1rem;
   flex-wrap: wrap;
 }
-.batch-info {
+.batch-summary .batch-info {
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.batch-progress-text {
+  color: var(--pico-muted-color);
+  font-size: 0.875rem;
+}
+.batch-progress-bar {
+  margin: 0.5rem 0 0;
+  height: 0.4rem;
 }
 .batch-actions {
   display: flex;
   gap: 0.4rem;
   flex-shrink: 0;
+}
+
+/* Job progress bar with percentage */
+.job-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+}
+.job-progress progress {
+  flex: 1;
+  margin: 0;
+  height: 0.5rem;
 }
 
 /* Small buttons */
@@ -72,12 +111,6 @@
 }
 a.small-btn {
   text-decoration: none;
-}
-
-/* Progress bar */
-.job-card progress {
-  margin: 0.3rem 0 0.1rem 0;
-  height: 0.5rem;
 }
 
 /* Error text */
