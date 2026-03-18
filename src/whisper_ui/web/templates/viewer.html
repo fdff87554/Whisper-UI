@@ -33,6 +33,14 @@
 {% if result %}
 <h1 class="text-xl font-medium mb-2">{{ labels.VIEWER_TRANSCRIPT_TITLE.format(name=job.filename) }}</h1>
 
+{% if job.source_url %}
+<p class="text-sm mb-1">
+  <span class="opacity-50">{{ labels.VIEWER_SOURCE_URL }}：</span>
+  <a href="{{ job.source_url }}" target="_blank" rel="noopener noreferrer"
+     class="link link-primary">{{ job.source_url }}</a>
+</p>
+{% endif %}
+
 {% if result.duration > 0 %}
 {% set minutes = (result.duration // 60)|int %}
 {% set seconds = (result.duration % 60)|int %}
@@ -59,6 +67,11 @@
           {{ fmt|upper }}
         </a>
         {% endfor %}
+        {% if job.source_url %}
+        <a href="/viewer/{{ job.id }}/media" class="btn btn-sm btn-outline" download>
+          {{ icon_download("w-4 h-4") }} {{ labels.VIEWER_DOWNLOAD_MEDIA }}
+        </a>
+        {% endif %}
       </div>
       <button class="btn btn-sm btn-ghost gap-1"
               x-data="{ copied: false }"
@@ -128,6 +141,11 @@
         {{ fmt|upper }}
       </a>
       {% endfor %}
+      {% if job.source_url %}
+      <a href="/viewer/{{ job.id }}/media" class="btn btn-sm btn-outline" download>
+        {{ icon_download("w-4 h-4") }} {{ labels.VIEWER_DOWNLOAD_MEDIA }}
+      </a>
+      {% endif %}
     </div>
   </div>
 </div>
