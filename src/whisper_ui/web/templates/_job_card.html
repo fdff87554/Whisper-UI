@@ -14,7 +14,9 @@
 
 {% if job.source_url %}
 <div class="mt-1">
-  <span class="text-xs opacity-40 truncate block" title="{{ job.source_url }}">{{ job.source_url[:60] }}{% if job.source_url|length > 60 %}...{% endif %}</span>
+  <a href="{{ job.source_url }}" target="_blank" rel="noopener noreferrer"
+     class="text-xs opacity-40 hover:opacity-70 truncate block link" title="{{ job.source_url }}"
+     @click.stop>{{ job.source_url[:60] }}{% if job.source_url|length > 60 %}...{% endif %}</a>
 </div>
 {% endif %}
 
@@ -30,6 +32,9 @@
         {% for fmt in export_formats %}
         <li><a href="/viewer/{{ job.id }}/export/{{ fmt }}" download class="text-xs">{{ fmt|upper }}</a></li>
         {% endfor %}
+        {% if job.source_url %}
+        <li><a href="/viewer/{{ job.id }}/media" download class="text-xs">{{ labels.VIEWER_DOWNLOAD_MEDIA }}</a></li>
+        {% endif %}
       </ul>
     </div>
     {% endif %}
