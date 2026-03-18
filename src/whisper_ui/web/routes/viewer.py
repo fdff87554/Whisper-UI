@@ -3,12 +3,22 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 
 from whisper_ui.core.models import JobStatus
 from whisper_ui.export.factory import get_exporter
 from whisper_ui.web.deps import DbDep, FileStoreDep, make_content_disposition, templates
 from whisper_ui.web.validation import validate_hex_id
+
+_MEDIA_MIME_TYPES: dict[str, str] = {
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".mkv": "video/x-matroska",
+    ".m4a": "audio/mp4",
+    ".opus": "audio/opus",
+    ".ogg": "audio/ogg",
+    ".wav": "audio/wav",
+}
 
 router = APIRouter()
 
@@ -96,4 +106,26 @@ async def export_download(job_id: str, format_name: str, db: DbDep, filestore: F
         content=data,
         media_type=exporter.mime_type,
         headers={"Content-Disposition": make_content_disposition(filename)},
+    )
+
+
+@router.get("/viewer/{job_id}/media")
+async def media_download(job_id: str, db: DbDep, filestore: FileStoreDep):
+    validate_hex_id(job_id, "job_id")
+    job = db.get_job(job_id)
+    if job is None or not job.source_url:
+        raise HTTPException(status_code=404)
+
+    media_path = filestore.get_source_media_path(job_id)
+    if media_path is None or not media_path.exists():
+        raise HTTPException(status_code=404)
+
+    ext = media_path.suffix.lower()
+    mime = _MEDIA_MIME_TYPES.get(ext, "application/octet-stream")
+    filename = f"{Path(job.filename).stem}{ext}"
+
+    return FileResponse(
+        path=media_path,
+        media_type=mime,
+        headers={"Content-Disposition": make_content_disposition(filename, "attachment")},
     )

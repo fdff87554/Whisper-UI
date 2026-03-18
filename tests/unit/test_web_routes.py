@@ -322,7 +322,7 @@ class TestUploadURLPost:
     def test_upload_invalid_url_redirects(self, client):
         resp = self._post_url(client, url="https://example.com/not-youtube")
         assert resp.status_code == 303
-        assert "error=invalid_url" in resp.headers["location"]
+        assert "error=all_invalid_urls" in resp.headers["location"]
 
     def test_upload_playlist_url_redirects(self, client):
         resp = self._post_url(client, url="https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf")

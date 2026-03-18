@@ -47,7 +47,7 @@ class TestDownloadStageWithMock:
             info = {"duration": duration, "title": title}
             if download:
                 # Simulate file creation
-                (Path(download_dir) / "audio.webm").write_bytes(b"fake audio")
+                (Path(download_dir) / "video.mp4").write_bytes(b"fake video")
             return info
 
         mock_ydl_instance.extract_info = extract_info
@@ -64,7 +64,7 @@ class TestDownloadStageWithMock:
             stage = DownloadStage()
             result = stage.execute(context)
 
-        assert result["input_path"] == str(download_dir / "audio.webm")
+        assert result["input_path"] == str(download_dir / "video.mp4")
         assert result["video_title"] == "Test Video"
 
     def test_progress_callback_called(self, context, download_dir):
