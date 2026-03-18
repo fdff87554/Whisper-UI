@@ -31,7 +31,7 @@
            el.style.display = !query || el.dataset.jobName.toLowerCase().includes(query.toLowerCase()) ? '' : 'none';
          })"
          placeholder="{{ labels.JOBS_SEARCH_PLACEHOLDER }}"
-         class="input input-bordered input-sm w-full max-w-sm pl-9">
+         class="input input-sm w-full max-w-sm pl-9">
 </div>
 
 {# Job list fragment — replaced by htmx polling and actions #}
@@ -58,14 +58,14 @@
     <div class="modal-box">
       <h3 class="text-lg font-bold">{{ labels.JOBS_BATCH_DOWNLOAD }}</h3>
       <div class="py-4">
-        <label class="form-control w-full">
-          <div class="label"><span class="label-text">{{ labels.JOBS_BATCH_DOWNLOAD_FORMAT }}</span></div>
-          <select x-model="format" class="select select-bordered w-full">
+        <fieldset class="fieldset w-full">
+          <legend class="fieldset-legend">{{ labels.JOBS_BATCH_DOWNLOAD_FORMAT }}</legend>
+          <select x-model="format" class="select w-full">
             {% for fmt in export_formats %}
             <option value="{{ fmt }}">{{ fmt|upper }}</option>
             {% endfor %}
           </select>
-        </label>
+        </fieldset>
       </div>
       <div class="modal-action">
         <button class="btn btn-ghost" @click="cancel()">{{ labels.DIALOG_CANCEL }}</button>
