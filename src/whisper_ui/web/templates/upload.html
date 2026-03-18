@@ -27,6 +27,12 @@
   {{ labels.UPLOAD_INVALID_URL }}
   {% elif error == 'playlist' %}
   {{ labels.UPLOAD_URL_PLAYLIST_NOT_SUPPORTED }}
+  {% elif error == 'no_url' %}
+  {{ labels.UPLOAD_URL_NO_INPUT }}
+  {% elif error == 'too_many_urls' %}
+  {{ labels.UPLOAD_URL_EXCEEDS_LIMIT.format(limit=MAX_BATCH_SIZE, count=request.query_params.get('count', '?')) }}
+  {% elif error == 'all_invalid_urls' %}
+  {{ labels.UPLOAD_URL_ALL_INVALID }}
   {% endif %}
 </div>
 {% endif %}
@@ -129,10 +135,10 @@
   {# URL tab #}
   <div x-show="tab === 'url'" x-transition.opacity>
     <p class="text-sm opacity-60 mb-3">{{ labels.UPLOAD_URL_DESCRIPTION }}</p>
-    <input type="url" id="upload-url" name="url"
-           placeholder="{{ labels.UPLOAD_URL_PLACEHOLDER }}"
-           :disabled="tab !== 'url'"
-           class="input w-full">
+    <textarea id="upload-url" name="url" rows="4"
+              placeholder="{{ labels.UPLOAD_URL_PLACEHOLDER }}"
+              :disabled="tab !== 'url'"
+              class="textarea w-full"></textarea>
     <p class="text-xs opacity-40 mt-2">{{ labels.UPLOAD_URL_DISCLAIMER }}</p>
   </div>
 
