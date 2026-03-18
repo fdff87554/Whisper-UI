@@ -52,9 +52,9 @@
   <div class="sticky top-0 z-10 bg-base-100 border-b border-base-300 pb-3 mb-4 pt-2">
     {# Export buttons #}
     <div class="flex flex-wrap items-center gap-2 mb-3">
-      <div class="join">
+      <div class="flex flex-wrap gap-1">
         {% for fmt in export_formats %}
-        <a href="/viewer/{{ job.id }}/export/{{ fmt }}" class="btn btn-sm btn-outline join-item" download
+        <a href="/viewer/{{ job.id }}/export/{{ fmt }}" class="btn btn-sm btn-outline" download
            title="{{ labels.VIEWER_EXPORT_TOOLTIPS.get(fmt, '') }}">
           {{ fmt|upper }}
         </a>
@@ -121,9 +121,9 @@
 {# No segments: export-only toolbar #}
 <div class="sticky top-0 z-10 bg-base-100 border-b border-base-300 pb-3 mb-4 pt-2">
   <div class="flex flex-wrap items-center gap-2">
-    <div class="join">
+    <div class="flex flex-wrap gap-1">
       {% for fmt in export_formats %}
-      <a href="/viewer/{{ job.id }}/export/{{ fmt }}" class="btn btn-sm btn-outline join-item" download
+      <a href="/viewer/{{ job.id }}/export/{{ fmt }}" class="btn btn-sm btn-outline" download
          title="{{ labels.VIEWER_EXPORT_TOOLTIPS.get(fmt, '') }}">
         {{ fmt|upper }}
       </a>
