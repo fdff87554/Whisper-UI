@@ -3,7 +3,7 @@
 <div class="flex flex-col h-full bg-base-200">
   {# Logo #}
   <div class="p-4 flex items-center gap-2 border-b border-base-300">
-    <span class="font-bold text-lg whitespace-nowrap overflow-hidden text-ellipsis">Whisper UI</span>
+    <span class="font-bold text-lg whitespace-nowrap overflow-hidden text-ellipsis hidden lg:block">Whisper UI</span>
   </div>
 
   {# Navigation #}
@@ -15,7 +15,7 @@
            :class="{ 'active': $store.nav.activePage === 'dashboard' }"
            title="{{ labels.NAV_DASHBOARD }}">
           {{ icon_home("w-5 h-5 shrink-0") }}
-          <span class="sidebar-label">{{ labels.NAV_DASHBOARD }}</span>
+          <span class="sidebar-label hidden lg:inline">{{ labels.NAV_DASHBOARD }}</span>
         </a>
       </li>
       <li>
@@ -24,7 +24,7 @@
            :class="{ 'active': $store.nav.activePage === 'upload' }"
            title="{{ labels.NAV_UPLOAD }}">
           {{ icon_upload("w-5 h-5 shrink-0") }}
-          <span class="sidebar-label">{{ labels.NAV_UPLOAD }}</span>
+          <span class="sidebar-label hidden lg:inline">{{ labels.NAV_UPLOAD }}</span>
         </a>
       </li>
       <li>
@@ -33,7 +33,7 @@
            :class="{ 'active': $store.nav.activePage === 'jobs' }"
            title="{{ labels.NAV_JOBS }}">
           {{ icon_list("w-5 h-5 shrink-0") }}
-          <span class="sidebar-label">{{ labels.NAV_JOBS }}</span>
+          <span class="sidebar-label hidden lg:inline">{{ labels.NAV_JOBS }}</span>
         </a>
       </li>
     </ul>
@@ -44,10 +44,10 @@
     <button class="btn btn-ghost btn-sm w-full justify-start gap-2"
             @click="theme = theme === 'whisper-light' ? 'whisper-dark' : 'whisper-light'">
       <template x-if="theme === 'whisper-light'">
-        <span class="flex items-center gap-2">{{ icon_moon("w-4 h-4") }} <span class="sidebar-label">{{ labels.THEME_TOGGLE_DARK }}</span></span>
+        <span class="flex items-center gap-2">{{ icon_moon("w-4 h-4") }} <span class="sidebar-label hidden lg:inline">{{ labels.THEME_TOGGLE_DARK }}</span></span>
       </template>
       <template x-if="theme !== 'whisper-light'">
-        <span class="flex items-center gap-2">{{ icon_sun("w-4 h-4") }} <span class="sidebar-label">{{ labels.THEME_TOGGLE_LIGHT }}</span></span>
+        <span class="flex items-center gap-2">{{ icon_sun("w-4 h-4") }} <span class="sidebar-label hidden lg:inline">{{ labels.THEME_TOGGLE_LIGHT }}</span></span>
       </template>
     </button>
   </div>
