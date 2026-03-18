@@ -47,14 +47,15 @@
   {# App shell: sidebar + main content #}
   <div class="flex min-h-screen">
     {# Sidebar — hidden on mobile, icon rail on tablet, full on desktop #}
-    <aside class="hidden md:flex md:w-14 lg:w-60 flex-col fixed inset-y-0 left-0 z-40 transition-all duration-200 border-r border-base-300 bg-base-200">
+    <aside class="hidden md:flex md:w-14 lg:w-60 flex-col fixed inset-y-0 left-0 z-40 transition-colors duration-200 border-r border-base-300 bg-base-200">
       {% include "_sidebar.html" %}
     </aside>
 
     {# Main content area #}
     <main class="main-content flex-1 md:ml-14 lg:ml-60 pb-16 md:pb-0">
-      <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+      <div id="page-content" class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {% block content %}{% endblock %}
+        {% block scripts %}{% endblock %}
       </div>
     </main>
   </div>
@@ -127,6 +128,5 @@
   })();
   </script>
 
-  {% block scripts %}{% endblock %}
 </body>
 </html>
