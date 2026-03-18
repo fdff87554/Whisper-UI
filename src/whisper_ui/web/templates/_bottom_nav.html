@@ -1,22 +1,22 @@
 {% from "_icons.html" import icon_home, icon_upload, icon_list %}
 {# Mobile bottom tab bar — visible only below md breakpoint #}
-<div class="btm-nav btm-nav-sm md:hidden z-50 border-t border-base-300 bg-base-100">
+<div class="dock dock-sm md:hidden z-50">
   <a href="/"
      hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true"
-     :class="{ 'active text-primary': $store.nav.activePage === 'dashboard' }">
+     :class="{ 'dock-active text-primary': $store.nav.activePage === 'dashboard' }">
     {{ icon_home("w-5 h-5") }}
-    <span class="btm-nav-label text-xs">{{ labels.NAV_DASHBOARD }}</span>
+    <span class="dock-label">{{ labels.NAV_DASHBOARD }}</span>
   </a>
   <a href="/upload"
      hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true"
-     :class="{ 'active text-primary': $store.nav.activePage === 'upload' }">
+     :class="{ 'dock-active text-primary': $store.nav.activePage === 'upload' }">
     {{ icon_upload("w-5 h-5") }}
-    <span class="btm-nav-label text-xs">{{ labels.NAV_UPLOAD }}</span>
+    <span class="dock-label">{{ labels.NAV_UPLOAD }}</span>
   </a>
   <a href="/jobs"
      hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true"
-     :class="{ 'active text-primary': $store.nav.activePage === 'jobs' }">
+     :class="{ 'dock-active text-primary': $store.nav.activePage === 'jobs' }">
     {{ icon_list("w-5 h-5") }}
-    <span class="btm-nav-label text-xs">{{ labels.NAV_JOBS }}</span>
+    <span class="dock-label">{{ labels.NAV_JOBS }}</span>
   </a>
 </div>
