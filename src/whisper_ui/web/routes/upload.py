@@ -16,7 +16,7 @@ from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
 from whisper_ui.ui import labels as ui_labels
 from whisper_ui.web.deps import DbDep, FileStoreDep, RedisDep, SettingsDep, templates
-from whisper_ui.web.url_validation import YouTubeURLError, validate_youtube_url
+from whisper_ui.web.url_validation import PlaylistURLError, YouTubeURLError, validate_youtube_url
 
 _READ_CHUNK_SIZE = 1024 * 1024  # 1 MB
 
@@ -216,14 +216,21 @@ async def upload_url_submit(
     # Validate each URL, separating valid from invalid
     valid_urls: list[str] = []
     invalid_line_nums: list[int] = []
+    has_playlist_error = False
     for line_num, raw_url in lines:
         try:
             clean_url = validate_youtube_url(raw_url)
             valid_urls.append(clean_url)
+        except PlaylistURLError:
+            invalid_line_nums.append(line_num)
+            has_playlist_error = True
         except YouTubeURLError:
             invalid_line_nums.append(line_num)
 
     if not valid_urls:
+        if has_playlist_error:
+            msg = ui_labels.UPLOAD_URL_PLAYLIST_NOT_SUPPORTED
+            return _error_redirect_or_fragment(request, "/upload?error=playlist", msg)
         msg = ui_labels.UPLOAD_URL_ALL_INVALID
         return _error_redirect_or_fragment(request, "/upload?error=all_invalid_urls", msg)
 
@@ -271,6 +278,11 @@ async def upload_url_submit(
             job.status = JobStatus.FAILED
             job.error = str(e)[:ERROR_MAX_LENGTH]
             db.update_job(job)
+
+    # All enqueue attempts failed — treat as queue error (likely Redis issue)
+    if submitted_count == 0:
+        msg = ui_labels.UPLOAD_QUEUE_ERROR.format(error="Redis")
+        return _error_redirect_or_fragment(request, "/upload?error=queue", msg)
 
     # Build redirect URL with toast info
     parts = [f"/jobs?submitted={submitted_count}"]

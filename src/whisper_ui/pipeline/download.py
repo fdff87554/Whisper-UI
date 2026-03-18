@@ -75,7 +75,7 @@ class DownloadStage:
         except DownloadError:
             raise
         except Exception as e:
-            raise DownloadError(f"Failed to download audio: {e}") from e
+            raise DownloadError(f"Failed to download video: {e}") from e
 
         downloaded_files = list(download_dir.glob("video.*"))
         if not downloaded_files:

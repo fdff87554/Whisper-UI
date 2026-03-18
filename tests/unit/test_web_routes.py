@@ -327,7 +327,7 @@ class TestUploadURLPost:
     def test_upload_playlist_url_redirects(self, client):
         resp = self._post_url(client, url="https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf")
         assert resp.status_code == 303
-        assert "error=all_invalid_urls" in resp.headers["location"]
+        assert "error=playlist" in resp.headers["location"]
 
     def test_upload_empty_url_returns_422(self, client):
         resp = self._post_url(client, url="")
@@ -369,13 +369,12 @@ class TestUploadURLPost:
         with patch("rq.Queue", return_value=mock_queue):
             resp = self._post_url(client)
         assert resp.status_code == 303
-        assert "/jobs?" in resp.headers["location"]
-        assert "submitted=0" in resp.headers["location"]
+        assert "error=queue" in resp.headers["location"]
         jobs = db.list_jobs()
         assert len(jobs) == 1
         assert jobs[0].status == JobStatus.FAILED
 
-    def test_upload_url_enqueue_failure_htmx_returns_redirect(self, client, app, db):
+    def test_upload_url_enqueue_failure_htmx_returns_error_fragment(self, client, app, db):
         mock_queue = MagicMock()
         mock_queue.enqueue.side_effect = Exception("Redis connection lost")
         with patch("rq.Queue", return_value=mock_queue):
@@ -390,8 +389,8 @@ class TestUploadURLPost:
                 headers={"HX-Request": "true"},
                 follow_redirects=False,
             )
-        assert resp.status_code == 204
-        assert "submitted=0" in resp.headers.get("HX-Redirect", "")
+        assert resp.status_code == 200
+        assert "alert-error" in resp.text
 
 
 class TestBatchRoutes:
