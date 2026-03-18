@@ -11,7 +11,7 @@
     <ul class="menu gap-1 px-2">
       <li>
         <a href="/"
-           hx-boost="true" hx-target=".main-content" hx-swap="innerHTML transition:true" hx-push-url="true"
+           hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true" hx-push-url="true"
            :class="{ 'active': $store.nav.activePage === 'dashboard' }"
            title="{{ labels.NAV_DASHBOARD }}">
           {{ icon_home("w-5 h-5 shrink-0") }}
@@ -20,7 +20,7 @@
       </li>
       <li>
         <a href="/upload"
-           hx-boost="true" hx-target=".main-content" hx-swap="innerHTML transition:true" hx-push-url="true"
+           hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true" hx-push-url="true"
            :class="{ 'active': $store.nav.activePage === 'upload' }"
            title="{{ labels.NAV_UPLOAD }}">
           {{ icon_upload("w-5 h-5 shrink-0") }}
@@ -29,7 +29,7 @@
       </li>
       <li>
         <a href="/jobs"
-           hx-boost="true" hx-target=".main-content" hx-swap="innerHTML transition:true" hx-push-url="true"
+           hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true" hx-push-url="true"
            :class="{ 'active': $store.nav.activePage === 'jobs' }"
            title="{{ labels.NAV_JOBS }}">
           {{ icon_list("w-5 h-5 shrink-0") }}
