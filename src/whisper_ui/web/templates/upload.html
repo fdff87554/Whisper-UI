@@ -59,7 +59,7 @@
   </template>
 
   {# Source selection tabs — pill style #}
-  <div role="tablist" class="tabs tabs-boxed mb-6 inline-flex" aria-label="{{ labels.UPLOAD_MODE_GROUP }}">
+  <div role="tablist" class="tabs tabs-box mb-6 inline-flex" aria-label="{{ labels.UPLOAD_MODE_GROUP }}">
     <button type="button" role="tab" class="tab gap-2"
             :class="{ 'tab-active': tab === 'files' }"
             :aria-selected="tab === 'files' ? 'true' : 'false'"
@@ -132,63 +132,63 @@
     <input type="url" id="upload-url" name="url"
            placeholder="{{ labels.UPLOAD_URL_PLACEHOLDER }}"
            :disabled="tab !== 'url'"
-           class="input input-bordered w-full">
+           class="input w-full">
     <p class="text-xs opacity-40 mt-2">{{ labels.UPLOAD_URL_DISCLAIMER }}</p>
   </div>
 
   {# Settings #}
   <section class="mt-8 pt-6 border-t border-base-300">
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-      <label class="form-control w-full">
-        <div class="label"><span class="label-text text-sm">{{ labels.UPLOAD_LANGUAGE }}</span></div>
-        <select name="language" class="select select-bordered w-full">
+      <fieldset class="fieldset w-full">
+        <legend class="fieldset-legend text-sm">{{ labels.UPLOAD_LANGUAGE }}</legend>
+        <select name="language" class="select w-full">
           {% for code in supported_languages %}
           <option value="{{ code }}" {% if code == settings.language %}selected{% endif %}>
             {{ LANGUAGE_LABELS.get(code, code) }}
           </option>
           {% endfor %}
         </select>
-      </label>
-      <label class="form-control w-full">
-        <div class="label"><span class="label-text text-sm">{{ labels.UPLOAD_MODEL }}</span></div>
-        <select name="model_name" class="select select-bordered w-full">
+      </fieldset>
+      <fieldset class="fieldset w-full">
+        <legend class="fieldset-legend text-sm">{{ labels.UPLOAD_MODEL }}</legend>
+        <select name="model_name" class="select w-full">
           {% for model in whisper_models %}
           <option value="{{ model }}" {% if model == settings.whisper_model %}selected{% endif %}>{{ model }}</option>
           {% endfor %}
         </select>
-      </label>
+      </fieldset>
     </div>
 
     <div class="space-y-3">
-      <div class="form-control"
+      <div class="fieldset"
            x-data="{ diarEnabled: {{ 'true' if settings.hf_token else 'false' }} }">
-        <label class="label cursor-pointer justify-start gap-3">
+        <label class="fieldset-label gap-3">
           <input type="checkbox" name="enable_diarization" value="true"
                  class="toggle toggle-primary toggle-sm"
                  x-model="diarEnabled"
                  {% if not settings.hf_token %}disabled{% endif %}>
           <div>
-            <span class="label-text">{{ labels.UPLOAD_ENABLE_DIARIZATION }}</span>
+            <span>{{ labels.UPLOAD_ENABLE_DIARIZATION }}</span>
             {% if not settings.hf_token %}
             <p class="text-xs opacity-40">{{ labels.UPLOAD_DIARIZATION_UNAVAILABLE }}</p>
             {% endif %}
           </div>
         </label>
         <div x-show="diarEnabled" x-transition class="ml-12 mt-2">
-          <label class="form-control w-full max-w-xs">
-            <div class="label"><span class="label-text text-sm">{{ labels.UPLOAD_NUM_SPEAKERS }}</span></div>
+          <fieldset class="fieldset w-full max-w-xs">
+            <legend class="fieldset-legend text-sm">{{ labels.UPLOAD_NUM_SPEAKERS }}</legend>
             <input type="number" name="num_speakers" value="0" min="0" max="20"
-                   class="input input-bordered input-sm w-full max-w-xs">
-          </label>
+                   class="input input-sm w-full max-w-xs">
+          </fieldset>
         </div>
       </div>
 
-      <div class="form-control">
-        <label class="label cursor-pointer justify-start gap-3">
+      <div class="fieldset">
+        <label class="fieldset-label gap-3">
           <input type="checkbox" name="convert_to_traditional" value="true"
                  class="toggle toggle-primary toggle-sm" checked>
           <div>
-            <span class="label-text">{{ labels.UPLOAD_CONVERT_TRADITIONAL }}</span>
+            <span>{{ labels.UPLOAD_CONVERT_TRADITIONAL }}</span>
             <p class="text-xs opacity-40">{{ labels.UPLOAD_CONVERT_TRADITIONAL_HELP }}</p>
           </div>
         </label>

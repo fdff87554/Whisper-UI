@@ -12,7 +12,7 @@
       <li>
         <a href="/"
            hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true"
-           :class="{ 'active': $store.nav.activePage === 'dashboard' }"
+           :class="{ 'menu-active': $store.nav.activePage === 'dashboard' }"
            title="{{ labels.NAV_DASHBOARD }}">
           {{ icon_home("w-5 h-5 shrink-0") }}
           <span class="sidebar-label sr-only lg:not-sr-only">{{ labels.NAV_DASHBOARD }}</span>
@@ -21,7 +21,7 @@
       <li>
         <a href="/upload"
            hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true"
-           :class="{ 'active': $store.nav.activePage === 'upload' }"
+           :class="{ 'menu-active': $store.nav.activePage === 'upload' }"
            title="{{ labels.NAV_UPLOAD }}">
           {{ icon_upload("w-5 h-5 shrink-0") }}
           <span class="sidebar-label sr-only lg:not-sr-only">{{ labels.NAV_UPLOAD }}</span>
@@ -30,7 +30,7 @@
       <li>
         <a href="/jobs"
            hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true"
-           :class="{ 'active': $store.nav.activePage === 'jobs' }"
+           :class="{ 'menu-active': $store.nav.activePage === 'jobs' }"
            title="{{ labels.NAV_JOBS }}">
           {{ icon_list("w-5 h-5 shrink-0") }}
           <span class="sidebar-label sr-only lg:not-sr-only">{{ labels.NAV_JOBS }}</span>
