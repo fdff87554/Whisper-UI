@@ -71,11 +71,30 @@
     const params = new URLSearchParams(window.location.search);
     const toast = params.get('toast');
     const message = params.get('message');
+    let dirty = false;
     if (toast && message) {
       $store.toasts.add({ message: decodeURIComponent(message), type: toast });
+      params.delete('toast');
+      params.delete('message');
+      dirty = true;
+    }
+    const submitted = params.get('submitted');
+    if (submitted) {
+      const n = parseInt(submitted, 10);
+      const skipped = parseInt(params.get('skipped') || '0', 10);
+      const deduped = parseInt(params.get('deduped') || '0', 10);
+      let msg = '{{ labels.TOAST_UPLOAD_SUCCESS }}'.replace('{count}', n);
+      if (skipped > 0) msg += '{{ labels.TOAST_URL_SKIPPED }}'.replace('{count}', skipped);
+      if (deduped > 0) msg += '{{ labels.TOAST_URL_DEDUPED }}'.replace('{count}', deduped);
+      $store.toasts.add({ message: msg, type: skipped > 0 ? 'warning' : 'success' });
+      params.delete('submitted');
+      params.delete('skipped');
+      params.delete('deduped');
+      dirty = true;
+    }
+    if (dirty) {
       const url = new URL(window.location);
-      url.searchParams.delete('toast');
-      url.searchParams.delete('message');
+      url.search = params.toString();
       history.replaceState({}, '', url);
     }
   "></div>

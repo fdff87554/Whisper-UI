@@ -48,8 +48,9 @@ class DownloadStage:
                 on_progress(1.0, DOWNLOAD_DONE)
 
         ydl_opts: dict[str, Any] = {
-            "format": "bestaudio/best",
-            "outtmpl": str(download_dir / "audio.%(ext)s"),
+            "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "outtmpl": str(download_dir / "video.%(ext)s"),
+            "merge_output_format": "mp4",
             "noplaylist": True,
             "socket_timeout": YT_DLP_SOCKET_TIMEOUT,
             "progress_hooks": [progress_hook],
@@ -74,11 +75,11 @@ class DownloadStage:
         except DownloadError:
             raise
         except Exception as e:
-            raise DownloadError(f"Failed to download audio: {e}") from e
+            raise DownloadError(f"Failed to download video: {e}") from e
 
-        downloaded_files = list(download_dir.glob("audio.*"))
+        downloaded_files = list(download_dir.glob("video.*"))
         if not downloaded_files:
-            raise DownloadError("Download completed but no audio file was found.")
+            raise DownloadError("Download completed but no video file was found.")
 
         context["input_path"] = str(downloaded_files[0])
         context["video_title"] = info.get("title", "")

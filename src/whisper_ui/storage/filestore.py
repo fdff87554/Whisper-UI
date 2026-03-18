@@ -45,6 +45,19 @@ class FileStore:
     def get_output_dir(self, job_id: str) -> Path:
         return self._output_dir / job_id
 
+    def get_source_media_path(self, job_id: str) -> Path | None:
+        """Return the downloaded media file for a YouTube job, or None if not found.
+
+        Searches for video.* first, then falls back to audio.* for backward
+        compatibility with jobs downloaded before the video format change.
+        """
+        job_dir = self._upload_dir / job_id
+        for pattern in ("video.*", "audio.*"):
+            matches = list(job_dir.glob(pattern))
+            if matches:
+                return matches[0]
+        return None
+
     def delete_job_files(self, job_id: str) -> None:
         for base in (self._upload_dir, self._output_dir):
             job_dir = base / job_id

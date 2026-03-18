@@ -201,47 +201,97 @@ async def upload_url_submit(
         msg = ui_labels.UPLOAD_INVALID_MODEL.format(value=model_name)
         return _error_redirect_or_fragment(request, f"/upload?error=invalid_model&value={quote(model_name)}", msg)
 
-    try:
-        clean_url = validate_youtube_url(url)
-    except PlaylistURLError:
-        msg = ui_labels.UPLOAD_URL_PLAYLIST_NOT_SUPPORTED
-        return _error_redirect_or_fragment(request, "/upload?error=playlist", msg)
-    except YouTubeURLError:
-        msg = ui_labels.UPLOAD_INVALID_URL
-        return _error_redirect_or_fragment(request, "/upload?error=invalid_url", msg)
+    # Parse textarea: split by newlines, strip whitespace, filter empty lines
+    raw_lines = url.replace("\r\n", "\n").split("\n")
+    lines = [(i + 1, line.strip()) for i, line in enumerate(raw_lines) if line.strip()]
 
-    job = Job(
-        filename=clean_url,
-        source_url=clean_url,
-        language=language,
-        model_name=model_name,
-        num_speakers=num_speakers if num_speakers > 0 else None,
-        enable_diarization=enable_diarization,
-        convert_to_traditional=convert_to_traditional,
-    )
+    if not lines:
+        msg = ui_labels.UPLOAD_URL_NO_INPUT
+        return _error_redirect_or_fragment(request, "/upload?error=no_url", msg)
 
-    upload_dir = filestore.prepare_upload_path(job.id, "_").parent
-    job.filepath = str(upload_dir)
-    job.status = JobStatus.QUEUED
-    db.insert_job(job)
+    if len(lines) > MAX_BATCH_SIZE:
+        msg = ui_labels.UPLOAD_URL_EXCEEDS_LIMIT.format(limit=MAX_BATCH_SIZE, count=len(lines))
+        return _error_redirect_or_fragment(request, f"/upload?error=too_many_urls&count={len(lines)}", msg)
+
+    # Validate each URL, separating valid from invalid
+    valid_urls: list[str] = []
+    invalid_line_nums: list[int] = []
+    has_playlist_error = False
+    for line_num, raw_url in lines:
+        try:
+            clean_url = validate_youtube_url(raw_url)
+            valid_urls.append(clean_url)
+        except PlaylistURLError:
+            invalid_line_nums.append(line_num)
+            has_playlist_error = True
+        except YouTubeURLError:
+            invalid_line_nums.append(line_num)
+
+    if not valid_urls:
+        if has_playlist_error:
+            msg = ui_labels.UPLOAD_URL_PLAYLIST_NOT_SUPPORTED
+            return _error_redirect_or_fragment(request, "/upload?error=playlist", msg)
+        msg = ui_labels.UPLOAD_URL_ALL_INVALID
+        return _error_redirect_or_fragment(request, "/upload?error=all_invalid_urls", msg)
+
+    # Deduplicate while preserving order
+    unique_urls = list(dict.fromkeys(valid_urls))
+    duplicates_removed = len(valid_urls) - len(unique_urls)
+
+    # Batch ID only when multiple URLs
+    batch_id = uuid.uuid4().hex if len(unique_urls) > 1 else None
 
     try:
         from rq import Queue
 
         q = Queue(connection=redis)
-        q.enqueue(
-            "whisper_ui.worker.tasks.process_transcription",
-            job.id,
-            job_timeout="2h",
-        )
     except Exception as e:
-        job.status = JobStatus.FAILED
-        job.error = str(e)[:ERROR_MAX_LENGTH]
-        db.update_job(job)
         msg = ui_labels.UPLOAD_QUEUE_ERROR.format(error=str(e))
         return _error_redirect_or_fragment(request, "/upload?error=queue", msg)
 
-    redirect_url = "/jobs?submitted=1"
+    submitted_count = 0
+    for clean_url in unique_urls:
+        job = Job(
+            filename=clean_url,
+            source_url=clean_url,
+            language=language,
+            model_name=model_name,
+            num_speakers=num_speakers if num_speakers > 0 else None,
+            enable_diarization=enable_diarization,
+            convert_to_traditional=convert_to_traditional,
+            batch_id=batch_id,
+        )
+
+        upload_dir = filestore.prepare_upload_path(job.id, "_").parent
+        job.filepath = str(upload_dir)
+        job.status = JobStatus.QUEUED
+        db.insert_job(job)
+
+        try:
+            q.enqueue(
+                "whisper_ui.worker.tasks.process_transcription",
+                job.id,
+                job_timeout="2h",
+            )
+            submitted_count += 1
+        except Exception as e:
+            job.status = JobStatus.FAILED
+            job.error = str(e)[:ERROR_MAX_LENGTH]
+            db.update_job(job)
+
+    # All enqueue attempts failed — treat as queue error (likely Redis issue)
+    if submitted_count == 0:
+        msg = ui_labels.UPLOAD_QUEUE_ERROR.format(error="Redis")
+        return _error_redirect_or_fragment(request, "/upload?error=queue", msg)
+
+    # Build redirect URL with toast info
+    parts = [f"/jobs?submitted={submitted_count}"]
+    if invalid_line_nums:
+        parts.append(f"skipped={len(invalid_line_nums)}")
+    if duplicates_removed > 0:
+        parts.append(f"deduped={duplicates_removed}")
+    redirect_url = "&".join(parts)
+
     if htmx:
         return Response(status_code=204, headers={"HX-Redirect": redirect_url})
     return RedirectResponse(redirect_url, status_code=303)
