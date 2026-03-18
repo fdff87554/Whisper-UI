@@ -11,29 +11,29 @@
     <ul class="menu gap-1 px-2">
       <li>
         <a href="/"
-           hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true" hx-push-url="true"
+           hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true"
            :class="{ 'active': $store.nav.activePage === 'dashboard' }"
            title="{{ labels.NAV_DASHBOARD }}">
           {{ icon_home("w-5 h-5 shrink-0") }}
-          <span class="sidebar-label hidden lg:inline">{{ labels.NAV_DASHBOARD }}</span>
+          <span class="sidebar-label sr-only lg:not-sr-only">{{ labels.NAV_DASHBOARD }}</span>
         </a>
       </li>
       <li>
         <a href="/upload"
-           hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true" hx-push-url="true"
+           hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true"
            :class="{ 'active': $store.nav.activePage === 'upload' }"
            title="{{ labels.NAV_UPLOAD }}">
           {{ icon_upload("w-5 h-5 shrink-0") }}
-          <span class="sidebar-label hidden lg:inline">{{ labels.NAV_UPLOAD }}</span>
+          <span class="sidebar-label sr-only lg:not-sr-only">{{ labels.NAV_UPLOAD }}</span>
         </a>
       </li>
       <li>
         <a href="/jobs"
-           hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true" hx-push-url="true"
+           hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true"
            :class="{ 'active': $store.nav.activePage === 'jobs' }"
            title="{{ labels.NAV_JOBS }}">
           {{ icon_list("w-5 h-5 shrink-0") }}
-          <span class="sidebar-label hidden lg:inline">{{ labels.NAV_JOBS }}</span>
+          <span class="sidebar-label sr-only lg:not-sr-only">{{ labels.NAV_JOBS }}</span>
         </a>
       </li>
     </ul>
@@ -42,12 +42,13 @@
   {# Theme toggle #}
   <div class="p-4 border-t border-base-300">
     <button class="btn btn-ghost btn-sm w-full justify-start gap-2"
+            :aria-label="theme === 'whisper-light' ? '{{ labels.THEME_TOGGLE_DARK }}' : '{{ labels.THEME_TOGGLE_LIGHT }}'"
             @click="theme = theme === 'whisper-light' ? 'whisper-dark' : 'whisper-light'">
       <template x-if="theme === 'whisper-light'">
-        <span class="flex items-center gap-2">{{ icon_moon("w-4 h-4") }} <span class="sidebar-label hidden lg:inline">{{ labels.THEME_TOGGLE_DARK }}</span></span>
+        <span class="flex items-center gap-2">{{ icon_moon("w-4 h-4") }} <span class="sidebar-label sr-only lg:not-sr-only">{{ labels.THEME_TOGGLE_DARK }}</span></span>
       </template>
       <template x-if="theme !== 'whisper-light'">
-        <span class="flex items-center gap-2">{{ icon_sun("w-4 h-4") }} <span class="sidebar-label hidden lg:inline">{{ labels.THEME_TOGGLE_LIGHT }}</span></span>
+        <span class="flex items-center gap-2">{{ icon_sun("w-4 h-4") }} <span class="sidebar-label sr-only lg:not-sr-only">{{ labels.THEME_TOGGLE_LIGHT }}</span></span>
       </template>
     </button>
   </div>

@@ -2,19 +2,19 @@
 {# Mobile bottom tab bar — visible only below md breakpoint #}
 <div class="btm-nav btm-nav-sm md:hidden z-50 border-t border-base-300 bg-base-100">
   <a href="/"
-     hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true" hx-push-url="true"
+     hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true"
      :class="{ 'active text-primary': $store.nav.activePage === 'dashboard' }">
     {{ icon_home("w-5 h-5") }}
     <span class="btm-nav-label text-xs">{{ labels.NAV_DASHBOARD }}</span>
   </a>
   <a href="/upload"
-     hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true" hx-push-url="true"
+     hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true"
      :class="{ 'active text-primary': $store.nav.activePage === 'upload' }">
     {{ icon_upload("w-5 h-5") }}
     <span class="btm-nav-label text-xs">{{ labels.NAV_UPLOAD }}</span>
   </a>
   <a href="/jobs"
-     hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true" hx-push-url="true"
+     hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true"
      :class="{ 'active text-primary': $store.nav.activePage === 'jobs' }">
     {{ icon_list("w-5 h-5") }}
     <span class="btm-nav-label text-xs">{{ labels.NAV_JOBS }}</span>
