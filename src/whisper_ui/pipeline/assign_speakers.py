@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from whisper_ui.core.messages import ASSIGN_DONE, ASSIGN_FAILED, ASSIGN_RUNNING, ASSIGN_SKIPPED
-from whisper_ui.pipeline.base import ProgressCallback
+
+if TYPE_CHECKING:
+    from whisper_ui.pipeline.base import ProgressCallback
 
 logger = logging.getLogger(__name__)
 

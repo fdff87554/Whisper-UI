@@ -3,17 +3,20 @@ from __future__ import annotations
 import logging
 import math
 from collections import OrderedDict
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 
 from whisper_ui.core.constants import DEFAULT_JOBS_PER_PAGE, ERROR_MAX_LENGTH
 from whisper_ui.core.models import Job, JobStatus
-from whisper_ui.storage.database import JobDatabase
 from whisper_ui.web.batch_zip import create_batch_zip
 from whisper_ui.web.deps import DbDep, FileStoreDep, RedisDep, make_content_disposition, templates
 from whisper_ui.web.validation import validate_hex_id
 from whisper_ui.worker.progress import RedisProgressReporter
+
+if TYPE_CHECKING:
+    from whisper_ui.storage.database import JobDatabase
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

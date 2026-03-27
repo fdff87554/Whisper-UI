@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from whisper_ui.core.messages import POSTPROCESS_DONE, POSTPROCESS_EMPTY, POSTPROCESS_RUNNING
 from whisper_ui.core.models import Segment, TranscriptResult
-from whisper_ui.pipeline.base import ProgressCallback
+
+if TYPE_CHECKING:
+    from whisper_ui.pipeline.base import ProgressCallback
 
 logger = logging.getLogger(__name__)
 
@@ -51,17 +53,15 @@ class PostprocessStage:
         self._converter = None
 
     def _build_segments(self, raw: dict[str, Any]) -> list[Segment]:
-        segments: list[Segment] = []
-        for seg in raw.get("segments", []):
-            segments.append(
-                Segment(
-                    start=seg.get("start", 0.0),
-                    end=seg.get("end", 0.0),
-                    text=seg.get("text", "").strip(),
-                    speaker=seg.get("speaker"),
-                )
+        return [
+            Segment(
+                start=seg.get("start", 0.0),
+                end=seg.get("end", 0.0),
+                text=seg.get("text", "").strip(),
+                speaker=seg.get("speaker"),
             )
-        return segments
+            for seg in raw.get("segments", [])
+        ]
 
     def _convert_chinese(self, segments: list[Segment]) -> list[Segment]:
         try:

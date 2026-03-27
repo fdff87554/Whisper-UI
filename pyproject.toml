@@ -7,8 +7,8 @@ requires-python = ">=3.12"
 dependencies = [
   "pydantic>=2.0,<3",
   "pydantic-settings>=2.0,<3",
-  "redis>=5.0,<6",
-  "rq>=1.16,<2",
+  "redis>=5.0,<8",
+  "rq>=2.0,<3",
 ]
 
 [project.optional-dependencies]
@@ -29,7 +29,7 @@ worker = [
   "yt-dlp>=2024.5.26",
   "yt-dlp-ejs>=0.7.0",
 ]
-dev = ["whisper-ui[frontend]", "pytest>=8.0,<9", "pytest-cov>=5.0,<6"]
+dev = ["whisper-ui[frontend]", "pytest>=9.0,<10", "pytest-cov>=7.0,<8"]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -46,8 +46,31 @@ target-version = "py312"
 line-length = 120
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+select = [
+  "E",
+  "F",
+  "W",    # pycodestyle, pyflakes
+  "I",    # isort
+  "UP",   # pyupgrade
+  "B",    # flake8-bugbear
+  "SIM",  # flake8-simplify
+  "RUF",  # ruff-specific
+  "FAST", # FastAPI
+  "C4",   # flake8-comprehensions
+  "PERF", # perflint
+  "FURB", # refurb
+  "TC",   # flake8-type-checking
+  "A",    # flake8-builtins
+  "FA",   # flake8-future-annotations
+  "T20",  # flake8-print
+  "RET",  # flake8-return
+  "PTH",  # flake8-use-pathlib
+]
 ignore = ["RUF012"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"tests/**" = ["T20"]
 
 [tool.ruff.format]
 quote-style = "double"

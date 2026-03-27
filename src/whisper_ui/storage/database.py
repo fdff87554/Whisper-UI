@@ -4,11 +4,14 @@ import dataclasses
 import logging
 import sqlite3
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from whisper_ui.core.constants import DEFAULT_JOB_LIST_LIMIT, SQLITE_BUSY_TIMEOUT_MS
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.storage.migrations import init_db
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 

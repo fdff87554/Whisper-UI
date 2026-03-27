@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import logging
-
-from redis import Redis
+from typing import TYPE_CHECKING
 
 from whisper_ui.core.constants import (
     ERROR_MAX_LENGTH,
@@ -12,6 +11,9 @@ from whisper_ui.core.constants import (
     REDIS_PROCESSING_EXPIRY,
 )
 from whisper_ui.core.messages import PIPELINE_COMPLETE
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 logger = logging.getLogger(__name__)
 
