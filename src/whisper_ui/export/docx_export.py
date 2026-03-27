@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import io
 import logging
+from typing import TYPE_CHECKING
 
 from whisper_ui.core.exceptions import ExportError
 from whisper_ui.core.messages import EXPORT_DOCX_HEADING
-from whisper_ui.core.models import TranscriptResult
+
+if TYPE_CHECKING:
+    from whisper_ui.core.models import TranscriptResult
 
 logger = logging.getLogger(__name__)
 

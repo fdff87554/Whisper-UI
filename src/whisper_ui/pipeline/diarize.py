@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import gc
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from whisper_ui.core.device import release_gpu_memory
 from whisper_ui.core.exceptions import DiarizationError
@@ -13,7 +13,9 @@ from whisper_ui.core.messages import (
     DIARIZE_SKIPPED,
     DIARIZE_SKIPPED_DISABLED,
 )
-from whisper_ui.pipeline.base import ProgressCallback
+
+if TYPE_CHECKING:
+    from whisper_ui.pipeline.base import ProgressCallback
 
 logger = logging.getLogger(__name__)
 

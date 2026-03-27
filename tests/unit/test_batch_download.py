@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import zipfile
 from io import BytesIO
+from typing import TYPE_CHECKING
 
 from whisper_ui.core.models import Job, JobStatus, Segment, TranscriptResult
-from whisper_ui.storage.filestore import FileStore
 from whisper_ui.web.batch_zip import create_batch_zip
+
+if TYPE_CHECKING:
+    from whisper_ui.storage.filestore import FileStore
 
 
 def _make_job(filename: str, status: JobStatus = JobStatus.COMPLETED, batch_id: str = "batch1") -> Job:

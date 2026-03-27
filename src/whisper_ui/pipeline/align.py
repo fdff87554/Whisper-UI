@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import gc
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from whisper_ui.core.device import release_gpu_memory
 from whisper_ui.core.exceptions import AlignmentError
 from whisper_ui.core.messages import ALIGN_DONE, ALIGN_LOADING, ALIGN_RUNNING
-from whisper_ui.pipeline.base import ProgressCallback
+
+if TYPE_CHECKING:
+    from whisper_ui.pipeline.base import ProgressCallback
 
 logger = logging.getLogger(__name__)
 

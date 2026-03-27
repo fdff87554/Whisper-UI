@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
-from whisper_ui.core.models import TranscriptResult
+if TYPE_CHECKING:
+    from whisper_ui.core.models import TranscriptResult
 
 
 class JsonExporter:

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-from whisper_ui.core.models import Segment, TranscriptResult
+from typing import TYPE_CHECKING
+
 from whisper_ui.export.utils import format_timestamp
+
+if TYPE_CHECKING:
+    from whisper_ui.core.models import Segment, TranscriptResult
 
 
 def _format_text(segment: Segment) -> str:

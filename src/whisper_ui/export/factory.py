@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from whisper_ui.export.base import Exporter
+from typing import TYPE_CHECKING
+
 from whisper_ui.export.docx_export import DocxExporter
 from whisper_ui.export.json_export import JsonExporter
 from whisper_ui.export.srt import SrtExporter
 from whisper_ui.export.txt import TxtExporter
 from whisper_ui.export.vtt import VttExporter
+
+if TYPE_CHECKING:
+    from whisper_ui.export.base import Exporter
 
 _EXPORTERS: dict[str, type[Exporter]] = {
     "srt": SrtExporter,

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 from whisper_ui.core.models import Job
-from whisper_ui.storage.database import JobDatabase
+
+if TYPE_CHECKING:
+    from whisper_ui.storage.database import JobDatabase
 
 
 class TestWorkerTaskSetup:
