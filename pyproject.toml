@@ -47,9 +47,9 @@ line-length = 120
 
 [tool.ruff.lint]
 select = [
-  "E",
-  "F",
-  "W",    # pycodestyle, pyflakes
+  "E",    # pycodestyle errors
+  "F",    # pyflakes
+  "W",    # pycodestyle warnings
   "I",    # isort
   "UP",   # pyupgrade
   "B",    # flake8-bugbear
