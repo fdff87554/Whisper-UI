@@ -19,6 +19,7 @@ TRANSCRIBE_DONE = "轉錄完成。"
 ALIGN_LOADING = "正在載入對齊模型..."
 ALIGN_RUNNING = "正在對齊時間戳記..."
 ALIGN_DONE = "對齊完成。"
+ALIGN_SKIPPED = "對齊失敗，使用未對齊的時間戳記。"
 
 DIARIZE_LOADING = "正在載入說話者分離模型..."
 DIARIZE_RUNNING = "正在進行說話者分離..."
