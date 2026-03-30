@@ -197,6 +197,26 @@ class TestAlignStage:
         assert "ja" in str(call_args)
         assert "model not found" in str(call_args)
 
+    def test_align_execution_failure_skips_without_partial_result(self):
+        stage = AlignStage(device="cpu")
+        mock_whisperx = MagicMock()
+        mock_whisperx.load_align_model.return_value = ("model", "metadata")
+        mock_whisperx.align.side_effect = RuntimeError("alignment crashed")
+        progress_calls = []
+
+        with patch.dict("sys.modules", {"whisperx": mock_whisperx}):
+            context = {
+                "transcription_result": {"segments": [{"text": "hello"}], "language": "ja"},
+                "whisperx_audio": "audio",
+                "language": "ja",
+            }
+            result = stage.execute(context, on_progress=lambda p, m: progress_calls.append((p, m)))
+
+        assert "aligned_result" not in result
+        assert progress_calls[-1] == (1.0, ALIGN_SKIPPED)
+        assert stage._model is not None
+        assert stage._metadata is not None
+
 
 class TestDiarizeStage:
     def test_disabled_skips(self):
