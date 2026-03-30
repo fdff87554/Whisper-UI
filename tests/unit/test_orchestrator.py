@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from whisper_ui.core.exceptions import PipelineError
 from whisper_ui.core.models import Segment, TranscriptResult
-from whisper_ui.pipeline.base import ProgressCallback
 from whisper_ui.pipeline.orchestrator import PipelineOrchestrator
+
+if TYPE_CHECKING:
+    from whisper_ui.pipeline.base import ProgressCallback
 
 
 class FakeStage:

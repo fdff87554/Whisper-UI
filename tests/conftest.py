@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from whisper_ui.core.config import Settings
 from whisper_ui.storage.database import JobDatabase
 from whisper_ui.storage.filestore import FileStore
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture

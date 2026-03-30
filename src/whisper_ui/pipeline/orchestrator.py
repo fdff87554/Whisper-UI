@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from whisper_ui.core.exceptions import PipelineError
-from whisper_ui.core.models import TranscriptResult
-from whisper_ui.pipeline.base import PipelineStage, ProgressCallback
+
+if TYPE_CHECKING:
+    from whisper_ui.core.models import TranscriptResult
+    from whisper_ui.pipeline.base import PipelineStage, ProgressCallback
 
 logger = logging.getLogger(__name__)
 

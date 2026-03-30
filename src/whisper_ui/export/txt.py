@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from whisper_ui.core.models import TranscriptResult
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from whisper_ui.core.models import TranscriptResult
 
 
 class TxtExporter:

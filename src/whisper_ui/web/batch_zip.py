@@ -3,10 +3,13 @@ from __future__ import annotations
 import io
 import zipfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.export.factory import get_exporter
-from whisper_ui.storage.filestore import FileStore
+
+if TYPE_CHECKING:
+    from whisper_ui.storage.filestore import FileStore
 
 
 def create_batch_zip(
