@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from whisper_ui.core.device import release_gpu_memory
 from whisper_ui.core.exceptions import AlignmentError
-from whisper_ui.core.messages import ALIGN_DONE, ALIGN_LOADING, ALIGN_RUNNING
+from whisper_ui.core.messages import ALIGN_DONE, ALIGN_LOADING, ALIGN_RUNNING, ALIGN_SKIPPED
 
 if TYPE_CHECKING:
     from whisper_ui.pipeline.base import ProgressCallback
@@ -61,7 +61,15 @@ class AlignStage:
         except ImportError as err:
             raise AlignmentError("whisperx is not installed.") from err
         except Exception as e:
-            raise AlignmentError(f"Alignment failed: {e}") from e
+            logger.warning(
+                "Alignment failed for language '%s', continuing without alignment: %s",
+                context.get("language", "unknown"),
+                e,
+                exc_info=True,
+            )
+            if on_progress:
+                on_progress(1.0, ALIGN_SKIPPED)
+            return context
 
     def cleanup(self) -> None:
         had_resources = self._model is not None or self._metadata is not None

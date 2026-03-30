@@ -10,6 +10,7 @@ from whisper_ui.core.exceptions import AlignmentError, DiarizationError, Transcr
 from whisper_ui.core.messages import (
     ALIGN_DONE,
     ALIGN_LOADING,
+    ALIGN_SKIPPED,
     ASSIGN_DONE,
     ASSIGN_FAILED,
     ASSIGN_SKIPPED,
@@ -140,6 +141,61 @@ class TestAlignStage:
             pytest.raises(AlignmentError, match="not installed"),
         ):
             stage.execute({"transcription_result": {"segments": []}, "whisperx_audio": "audio"})
+
+    def test_alignment_failure_returns_context_without_aligned_result(self):
+        stage = AlignStage(device="cpu")
+        mock_whisperx = MagicMock()
+        mock_whisperx.load_align_model.side_effect = ValueError("model not found")
+
+        with patch.dict("sys.modules", {"whisperx": mock_whisperx}):
+            context = {
+                "transcription_result": {"segments": [], "language": "ja"},
+                "whisperx_audio": "audio",
+                "language": "ja",
+            }
+            result = stage.execute(context)
+
+        assert "aligned_result" not in result
+
+    def test_alignment_failure_reports_skipped_progress(self):
+        stage = AlignStage(device="cpu")
+        mock_whisperx = MagicMock()
+        mock_whisperx.load_align_model.side_effect = ValueError("model not found")
+        progress_calls = []
+
+        with patch.dict("sys.modules", {"whisperx": mock_whisperx}):
+            stage.execute(
+                {
+                    "transcription_result": {"segments": [], "language": "ja"},
+                    "whisperx_audio": "audio",
+                    "language": "ja",
+                },
+                on_progress=lambda p, m: progress_calls.append((p, m)),
+            )
+
+        assert progress_calls[-1] == (1.0, ALIGN_SKIPPED)
+
+    def test_alignment_failure_logs_warning(self):
+        stage = AlignStage(device="cpu")
+        mock_whisperx = MagicMock()
+        mock_whisperx.load_align_model.side_effect = ValueError("model not found")
+
+        with (
+            patch.dict("sys.modules", {"whisperx": mock_whisperx}),
+            patch("whisper_ui.pipeline.align.logger") as mock_logger,
+        ):
+            stage.execute(
+                {
+                    "transcription_result": {"segments": [], "language": "ja"},
+                    "whisperx_audio": "audio",
+                    "language": "ja",
+                },
+            )
+
+        mock_logger.warning.assert_called_once()
+        call_args = mock_logger.warning.call_args
+        assert "ja" in str(call_args)
+        assert "model not found" in str(call_args)
 
 
 class TestDiarizeStage:
