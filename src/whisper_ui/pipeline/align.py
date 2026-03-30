@@ -28,6 +28,7 @@ class AlignStage:
         if on_progress:
             on_progress(0.0, ALIGN_LOADING)
 
+        language = context.get("language", "unknown")
         try:
             import whisperx
 
@@ -63,7 +64,7 @@ class AlignStage:
         except Exception as e:
             logger.warning(
                 "Alignment failed for language '%s', continuing without alignment: %s",
-                context.get("language", "unknown"),
+                language,
                 e,
                 exc_info=True,
             )
