@@ -3,12 +3,14 @@ from __future__ import annotations
 import logging
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from whisper_ui.core.constants import FFMPEG_CONVERT_TIMEOUT, FFPROBE_TIMEOUT, STDERR_MAX_LENGTH
 from whisper_ui.core.exceptions import PreprocessError
 from whisper_ui.core.messages import PREPROCESS_CONVERTING, PREPROCESS_DONE
-from whisper_ui.pipeline.base import ProgressCallback
+
+if TYPE_CHECKING:
+    from whisper_ui.pipeline.base import ProgressCallback
 
 logger = logging.getLogger(__name__)
 

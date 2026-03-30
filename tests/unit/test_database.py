@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from whisper_ui.core.models import Job, JobStatus
-from whisper_ui.storage.database import JobDatabase
+
+if TYPE_CHECKING:
+    from whisper_ui.storage.database import JobDatabase
 
 
 def test_insert_and_get(db: JobDatabase):

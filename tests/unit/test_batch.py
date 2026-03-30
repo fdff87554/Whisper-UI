@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import uuid
 from pathlib import PurePosixPath
+from typing import TYPE_CHECKING
 
 from whisper_ui.core.constants import MAX_BATCH_SIZE
 from whisper_ui.core.models import Job, JobStatus
-from whisper_ui.storage.database import JobDatabase
+
+if TYPE_CHECKING:
+    from whisper_ui.storage.database import JobDatabase
 
 
 def test_job_batch_id_default():

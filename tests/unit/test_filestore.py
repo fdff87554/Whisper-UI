@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from whisper_ui.core.models import Segment, TranscriptResult
-from whisper_ui.storage.filestore import FileStore
+
+if TYPE_CHECKING:
+    from whisper_ui.storage.filestore import FileStore
 
 
 def test_save_and_load_upload(filestore: FileStore):

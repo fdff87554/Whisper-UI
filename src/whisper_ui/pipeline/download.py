@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from whisper_ui.core.constants import YT_DLP_SOCKET_TIMEOUT
 from whisper_ui.core.exceptions import DownloadError
 from whisper_ui.core.messages import DOWNLOAD_DONE, DOWNLOAD_EXTRACTING_INFO, DOWNLOAD_IN_PROGRESS
-from whisper_ui.pipeline.base import ProgressCallback
+
+if TYPE_CHECKING:
+    from whisper_ui.pipeline.base import ProgressCallback
 
 logger = logging.getLogger(__name__)
 
