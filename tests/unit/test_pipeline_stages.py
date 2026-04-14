@@ -19,6 +19,7 @@ from whisper_ui.core.messages import (
     DIARIZE_SKIPPED_DISABLED,
     TRANSCRIBE_DONE,
     TRANSCRIBE_LOADING,
+    TRANSCRIBE_RUNNING,
 )
 from whisper_ui.pipeline.align import AlignStage
 from whisper_ui.pipeline.assign_speakers import AssignSpeakersStage
@@ -55,6 +56,108 @@ class TestTranscribeStage:
 
         assert progress_calls[0] == (0.0, TRANSCRIBE_LOADING)
         assert progress_calls[-1] == (1.0, TRANSCRIBE_DONE)
+
+    def test_passes_progress_callback_when_whisperx_supports_it(self):
+        """Modern whisperx (>=3.4) exposes progress_callback. Wire it through
+        so the bar moves continuously instead of jumping from 10% to 100%.
+        """
+        stage = TranscribeStage(device="cpu")
+        captured: dict = {}
+
+        def fake_transcribe(audio, *, batch_size, language, progress_callback=None):
+            captured["progress_callback"] = progress_callback
+            if progress_callback is not None:
+                progress_callback(0.0)
+                progress_callback(50.0)
+                progress_callback(100.0)
+            return {"segments": []}
+
+        fake_model = MagicMock()
+        fake_model.transcribe = fake_transcribe
+        mock_whisperx = MagicMock()
+        mock_whisperx.load_model.return_value = fake_model
+        mock_whisperx.load_audio.return_value = "audio"
+
+        progress_calls: list[tuple[float, str]] = []
+        with patch.dict("sys.modules", {"whisperx": mock_whisperx}):
+            stage.execute(
+                {"audio_path": "/tmp/test.wav"},
+                on_progress=lambda p, m: progress_calls.append((p, m)),
+            )
+
+        assert callable(captured["progress_callback"])
+
+        # Stage band is 0.1 → 0.95; whisperx 0/50/100 should map there.
+        running_calls = [(p, m) for p, m in progress_calls if m == TRANSCRIBE_RUNNING]
+        # First entry comes from the manual on_progress(0.1, TRANSCRIBE_RUNNING)
+        # before model.transcribe is invoked; the next three are from the
+        # forwarded whisperx percent values.
+        assert running_calls[0] == (pytest.approx(0.1), TRANSCRIBE_RUNNING)
+        assert running_calls[1] == (pytest.approx(0.1), TRANSCRIBE_RUNNING)
+        assert running_calls[2] == (pytest.approx(0.525), TRANSCRIBE_RUNNING)
+        assert running_calls[3] == (pytest.approx(0.95), TRANSCRIBE_RUNNING)
+        # And the final settle to 1.0 still fires after transcribe returns.
+        assert progress_calls[-1] == (1.0, TRANSCRIBE_DONE)
+
+    def test_skips_progress_callback_on_legacy_whisperx_signature(self):
+        """If a future / older whisperx drops progress_callback, fall back
+        cleanly to the coarse 3-point progress instead of crashing the worker
+        with TypeError: unexpected keyword argument.
+        """
+        stage = TranscribeStage(device="cpu")
+
+        def legacy_transcribe(audio, *, batch_size, language):
+            return {"segments": []}
+
+        fake_model = MagicMock()
+        fake_model.transcribe = legacy_transcribe
+        mock_whisperx = MagicMock()
+        mock_whisperx.load_model.return_value = fake_model
+        mock_whisperx.load_audio.return_value = "audio"
+
+        progress_calls: list[tuple[float, str]] = []
+        with patch.dict("sys.modules", {"whisperx": mock_whisperx}):
+            stage.execute(
+                {"audio_path": "/tmp/test.wav"},
+                on_progress=lambda p, m: progress_calls.append((p, m)),
+            )
+
+        # Only the 3 manual progress points; nothing from whisperx percent.
+        assert progress_calls == [
+            (0.0, TRANSCRIBE_LOADING),
+            (0.1, TRANSCRIBE_RUNNING),
+            (1.0, TRANSCRIBE_DONE),
+        ]
+
+    def test_progress_callback_clamps_out_of_range_percent(self):
+        """whisperx has previously emitted slightly-over-100 percent values
+        in edge cases; the adapter must clamp instead of overflowing past
+        the stage band end and confusing the orchestrator weight maths.
+        """
+        stage = TranscribeStage(device="cpu")
+
+        def fake_transcribe(audio, *, batch_size, language, progress_callback=None):
+            progress_callback(-5.0)
+            progress_callback(150.0)
+            return {"segments": []}
+
+        fake_model = MagicMock()
+        fake_model.transcribe = fake_transcribe
+        mock_whisperx = MagicMock()
+        mock_whisperx.load_model.return_value = fake_model
+        mock_whisperx.load_audio.return_value = "audio"
+
+        progress_calls: list[tuple[float, str]] = []
+        with patch.dict("sys.modules", {"whisperx": mock_whisperx}):
+            stage.execute(
+                {"audio_path": "/tmp/test.wav"},
+                on_progress=lambda p, m: progress_calls.append((p, m)),
+            )
+
+        running = [p for p, m in progress_calls if m == TRANSCRIBE_RUNNING]
+        # -5 clamps to 0.1, 150 clamps to 0.95
+        assert pytest.approx(0.1) == running[1]
+        assert pytest.approx(0.95) == running[2]
 
     def test_cleanup_guard_no_model(self):
         stage = TranscribeStage(device="cpu")
