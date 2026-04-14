@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     num_speakers INTEGER,
     enable_diarization INTEGER NOT NULL DEFAULT 1,
     convert_to_traditional INTEGER NOT NULL DEFAULT 1,
+    llm_correction_enabled INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     error TEXT,
@@ -34,6 +35,7 @@ _MIGRATIONS: list[str] = [
     "ALTER TABLE jobs ADD COLUMN convert_to_traditional INTEGER NOT NULL DEFAULT 1",
     "ALTER TABLE jobs ADD COLUMN batch_id TEXT",
     "ALTER TABLE jobs ADD COLUMN source_url TEXT",
+    "ALTER TABLE jobs ADD COLUMN llm_correction_enabled INTEGER NOT NULL DEFAULT 0",
 ]
 
 
