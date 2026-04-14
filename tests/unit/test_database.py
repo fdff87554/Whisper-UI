@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import sqlite3
 from typing import TYPE_CHECKING
 
 from whisper_ui.core.models import Job, JobStatus
+from whisper_ui.storage.database import JobDatabase
 
 if TYPE_CHECKING:
-    from whisper_ui.storage.database import JobDatabase
+    from pathlib import Path
 
 
 def test_insert_and_get(db: JobDatabase):
@@ -187,6 +189,67 @@ def test_has_active_jobs_with_processing(db: JobDatabase):
     db.insert_job(processing)
 
     assert db.has_active_jobs() is True
+
+
+def test_llm_correction_enabled_roundtrip(db: JobDatabase):
+    job = Job(filename="t.mp3", filepath="/tmp/t.mp3", llm_correction_enabled=True)
+    db.insert_job(job)
+    fetched = db.get_job(job.id)
+    assert fetched is not None
+    assert fetched.llm_correction_enabled is True
+
+
+def test_llm_correction_enabled_defaults_false(db: JobDatabase):
+    job = Job(filename="t.mp3", filepath="/tmp/t.mp3")
+    db.insert_job(job)
+    fetched = db.get_job(job.id)
+    assert fetched is not None
+    assert fetched.llm_correction_enabled is False
+
+
+def test_legacy_db_without_llm_column_upgrades(tmp_dir: Path):
+    """Simulate a pre-upgrade database with the older schema (no llm_correction_enabled)
+    and verify that init_db adds the column with DEFAULT 0, without losing existing rows."""
+    db_path = tmp_dir / "legacy.db"
+    legacy_schema = """
+    CREATE TABLE IF NOT EXISTS jobs (
+        id TEXT PRIMARY KEY,
+        filename TEXT NOT NULL,
+        filepath TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        progress REAL NOT NULL DEFAULT 0.0,
+        progress_message TEXT DEFAULT '',
+        language TEXT NOT NULL DEFAULT 'zh',
+        model_name TEXT NOT NULL DEFAULT 'large-v3',
+        num_speakers INTEGER,
+        enable_diarization INTEGER NOT NULL DEFAULT 1,
+        convert_to_traditional INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        error TEXT,
+        result_path TEXT,
+        duration REAL,
+        batch_id TEXT,
+        source_url TEXT
+    );
+    """
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(legacy_schema)
+    conn.execute(
+        "INSERT INTO jobs (id, filename, filepath, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        ("legacy-1", "old.mp3", "/tmp/old.mp3", "2024-01-01T00:00:00+00:00", "2024-01-01T00:00:00+00:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    database = JobDatabase(db_path)
+    try:
+        fetched = database.get_job("legacy-1")
+        assert fetched is not None
+        assert fetched.filename == "old.mp3"
+        assert fetched.llm_correction_enabled is False
+    finally:
+        database.close()
 
 
 def test_recover_stale_jobs_ignores_non_processing(db: JobDatabase):

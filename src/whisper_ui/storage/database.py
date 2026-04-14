@@ -27,6 +27,7 @@ _JOB_COLUMNS = [
     "num_speakers",
     "enable_diarization",
     "convert_to_traditional",
+    "llm_correction_enabled",
     "created_at",
     "updated_at",
     "error",
@@ -49,6 +50,7 @@ def _row_to_job(row: sqlite3.Row) -> Job:
     d["status"] = JobStatus(d["status"])
     d["enable_diarization"] = bool(d.get("enable_diarization", 1))
     d["convert_to_traditional"] = bool(d.get("convert_to_traditional", 1))
+    d["llm_correction_enabled"] = bool(d.get("llm_correction_enabled", 0))
     return Job(**d)
 
 
