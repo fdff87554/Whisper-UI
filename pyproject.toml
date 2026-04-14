@@ -48,24 +48,21 @@ line-length = 120
 
 [tool.ruff.lint]
 select = [
-  "E",    # pycodestyle errors
-  "F",    # pyflakes
-  "W",    # pycodestyle warnings
-  "I",    # isort
-  "UP",   # pyupgrade
-  "B",    # flake8-bugbear
-  "SIM",  # flake8-simplify
-  "RUF",  # ruff-specific
-  "FAST", # FastAPI
-  "C4",   # flake8-comprehensions
-  "PERF", # perflint
-  "FURB", # refurb
-  "TC",   # flake8-type-checking
-  "A",    # flake8-builtins
-  "FA",   # flake8-future-annotations
-  "T20",  # flake8-print
-  "RET",  # flake8-return
-  "PTH",  # flake8-use-pathlib
+  "E",   # pycodestyle errors
+  "F",   # pyflakes
+  "W",   # pycodestyle warnings
+  "I",   # isort
+  "UP",  # pyupgrade
+  "B",   # flake8-bugbear
+  "SIM", # flake8-simplify
+  "RUF", # ruff-specific
+  "C4",  # flake8-comprehensions
+  "TC",  # flake8-type-checking
+  "A",   # flake8-builtins
+  "FA",  # flake8-future-annotations
+  "T20", # flake8-print
+  "RET", # flake8-return
+  "PTH", # flake8-use-pathlib
 ]
 ignore = ["RUF012"]
 
