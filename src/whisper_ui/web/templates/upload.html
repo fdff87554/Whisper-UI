@@ -199,6 +199,22 @@
           </div>
         </label>
       </div>
+
+      <div class="fieldset">
+        <label class="fieldset-label gap-3">
+          <input type="checkbox" name="llm_correction_enabled" value="true"
+                 class="toggle toggle-primary toggle-sm"
+                 {% if not settings.ollama_base_url %}disabled{% endif %}>
+          <div>
+            <span>{{ labels.UPLOAD_ENABLE_LLM_CORRECTION }}</span>
+            {% if settings.ollama_base_url %}
+            <p class="text-xs opacity-40">{{ labels.UPLOAD_LLM_CORRECTION_HELP }}</p>
+            {% else %}
+            <p class="text-xs opacity-40">{{ labels.UPLOAD_LLM_CORRECTION_UNAVAILABLE }}</p>
+            {% endif %}
+          </div>
+        </label>
+      </div>
     </div>
   </section>
 
