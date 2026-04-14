@@ -156,6 +156,16 @@ class LLMCorrectionStage:
         on_progress: ProgressCallback | None = None,
     ) -> dict[str, Any]:
         transcript = context.get("transcript_result")
+        # The system prompt is crafted for Traditional Chinese typo / homophone
+        # correction. Running it on other languages would feed a Chinese
+        # instruction to a model looking at English (or other) text, with
+        # unpredictable results. Skip entirely for non-zh transcripts rather
+        # than silently producing garbage. The upload form's help text also
+        # tells users this is Chinese-only.
+        if context.get("language") != "zh":
+            if on_progress:
+                on_progress(1.0, LLM_CORRECTION_SKIPPED)
+            return context
         if not self._base_url or not isinstance(transcript, TranscriptResult) or not transcript.segments:
             if on_progress:
                 on_progress(1.0, LLM_CORRECTION_SKIPPED)

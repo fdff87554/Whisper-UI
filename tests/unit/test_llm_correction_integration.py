@@ -95,7 +95,7 @@ def test_orchestrator_runs_postprocess_then_llm_correction():
         stage_weights=STAGE_WEIGHTS_WITH_LLM,
     )
 
-    result = orchestrator.run({})
+    result = orchestrator.run({"language": "zh"})
 
     # Corrected text applied in-place; timings and speakers preserved.
     assert [s.text for s in result.segments] == ["校正一", "校正二", "校正三"]

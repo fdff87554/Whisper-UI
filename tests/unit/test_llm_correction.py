@@ -97,7 +97,7 @@ def _valid_response_for(indices: list[int], corrected: list[str]) -> str:
 def test_stage_skipped_when_base_url_empty():
     stage, client = _make_stage(base_url="")
     transcript = _make_transcript(["甲", "乙"])
-    context = {"transcript_result": transcript}
+    context = {"transcript_result": transcript, "language": "zh"}
 
     progress, on_progress = _capture_progress()
     result = stage.execute(context, on_progress)
@@ -108,10 +108,39 @@ def test_stage_skipped_when_base_url_empty():
     assert progress[-1] == (1.0, LLM_CORRECTION_SKIPPED)
 
 
+def test_stage_skipped_when_language_not_zh():
+    """The system prompt is crafted for Chinese; other languages must skip
+    entirely to avoid feeding Chinese instructions to non-Chinese input.
+    """
+    stage, client = _make_stage()
+    transcript = _make_transcript(["hello world", "good morning"])
+    progress, on_progress = _capture_progress()
+
+    stage.execute({"transcript_result": transcript, "language": "en"}, on_progress)
+
+    assert client.calls == []
+    assert [s.text for s in transcript.segments] == ["hello world", "good morning"]
+    assert progress[-1] == (1.0, LLM_CORRECTION_SKIPPED)
+
+
+def test_stage_skipped_when_language_missing():
+    """Missing language key is treated the same as non-zh: skip the stage.
+    This keeps the pipeline safe when older contexts don't supply the key.
+    """
+    stage, client = _make_stage()
+    transcript = _make_transcript(["甲", "乙"])
+    progress, on_progress = _capture_progress()
+
+    stage.execute({"transcript_result": transcript}, on_progress)
+
+    assert client.calls == []
+    assert progress[-1] == (1.0, LLM_CORRECTION_SKIPPED)
+
+
 def test_stage_skipped_when_transcript_missing():
     stage, client = _make_stage()
     progress, on_progress = _capture_progress()
-    stage.execute({}, on_progress)
+    stage.execute({"language": "zh"}, on_progress)
     assert client.calls == []
     assert progress[-1] == (1.0, LLM_CORRECTION_SKIPPED)
 
@@ -120,9 +149,13 @@ def test_stage_skipped_when_segments_empty():
     stage, client = _make_stage()
     transcript = TranscriptResult(segments=[], language="zh")
     progress, on_progress = _capture_progress()
-    stage.execute({"transcript_result": transcript}, on_progress)
+    stage.execute({"transcript_result": transcript, "language": "zh"}, on_progress)
     assert client.calls == []
     assert progress[-1] == (1.0, LLM_CORRECTION_SKIPPED)
+
+
+def _zh_context(transcript: TranscriptResult, **extra: Any) -> dict[str, Any]:
+    return {"transcript_result": transcript, "language": "zh", **extra}
 
 
 def test_chunking_splits_with_context_window():
@@ -136,7 +169,7 @@ def test_chunking_splits_with_context_window():
         _valid_response_for([10, 11], ["x10", "x11"]),
     ]
 
-    stage.execute({"transcript_result": transcript})
+    stage.execute({"transcript_result": transcript, "language": "zh"})
 
     assert len(client.calls) == 3
     # First chunk: edit 0..4, ctx_before = [], ctx_after = [5, 6]
@@ -165,7 +198,7 @@ def test_applies_corrected_text_and_preserves_timings():
     original_speakers = [s.speaker for s in transcript.segments]
 
     client.responses = [_valid_response_for([0, 1], ["校正一", "校正二"])]
-    stage.execute({"transcript_result": transcript})
+    stage.execute({"transcript_result": transcript, "language": "zh"})
 
     assert [s.text for s in transcript.segments] == ["校正一", "校正二"]
     assert [s.start for s in transcript.segments] == original_starts
@@ -179,7 +212,7 @@ def test_fallback_on_malformed_json():
     client.responses = ["not json at all"]
 
     progress, on_progress = _capture_progress()
-    stage.execute({"transcript_result": transcript}, on_progress)
+    stage.execute({"transcript_result": transcript, "language": "zh"}, on_progress)
 
     assert [s.text for s in transcript.segments] == ["甲", "乙"]
     assert progress[-1][0] == 1.0
@@ -196,7 +229,7 @@ def test_fallback_on_idx_mismatch_preserves_other_chunks():
     ]
 
     progress, on_progress = _capture_progress()
-    stage.execute({"transcript_result": transcript}, on_progress)
+    stage.execute({"transcript_result": transcript, "language": "zh"}, on_progress)
 
     assert [s.text for s in transcript.segments] == ["甲", "乙", "丙校", "丁校"]
     assert progress[-1][1].startswith(LLM_CORRECTION_DEGRADED)
@@ -216,7 +249,7 @@ def test_rq_timeout_propagates_from_llm_correction():
     client.responses = [JobTimeoutException("Task exceeded maximum timeout value (3600 seconds)")]
 
     with pytest.raises(JobTimeoutException):
-        stage.execute({"transcript_result": transcript})
+        stage.execute({"transcript_result": transcript, "language": "zh"})
 
 
 def test_fallback_on_http_error_never_raises():
@@ -225,7 +258,7 @@ def test_fallback_on_http_error_never_raises():
     client.responses = [httpx.ConnectError("boom")]
 
     progress, on_progress = _capture_progress()
-    stage.execute({"transcript_result": transcript}, on_progress)
+    stage.execute({"transcript_result": transcript, "language": "zh"}, on_progress)
 
     assert [s.text for s in transcript.segments] == ["甲", "乙"]
     assert progress[-1] == (1.0, LLM_CORRECTION_SKIPPED)
@@ -241,7 +274,7 @@ def test_progress_monotonic_and_ends_at_one():
     ]
 
     progress, on_progress = _capture_progress()
-    stage.execute({"transcript_result": transcript}, on_progress)
+    stage.execute({"transcript_result": transcript, "language": "zh"}, on_progress)
 
     values = [p for p, _ in progress]
     assert values == sorted(values)
@@ -253,7 +286,7 @@ def test_request_parameters_passed_through():
     transcript = _make_transcript(["甲"])
     client.responses = [_valid_response_for([0], ["改"])]
 
-    stage.execute({"transcript_result": transcript})
+    stage.execute({"transcript_result": transcript, "language": "zh"})
 
     call = client.calls[0]
     assert call.temperature == 0.1
@@ -266,7 +299,7 @@ def test_aligned_result_not_touched():
     stage, client = _make_stage(chunk_size=10, chunk_context=0)
     transcript = _make_transcript(["甲"])
     aligned = {"segments": [{"start": 0.0, "end": 1.0, "text": "甲", "words": [{"word": "甲"}]}]}
-    context = {"transcript_result": transcript, "aligned_result": aligned}
+    context = _zh_context(transcript, aligned_result=aligned)
     client.responses = [_valid_response_for([0], ["乙"])]
 
     stage.execute(context)
@@ -287,7 +320,7 @@ def test_fallback_when_segments_key_missing():
     transcript = _make_transcript(["甲", "乙"])
     client.responses = ['{"other": []}']
 
-    stage.execute({"transcript_result": transcript})
+    stage.execute({"transcript_result": transcript, "language": "zh"})
     assert [s.text for s in transcript.segments] == ["甲", "乙"]
 
 
@@ -304,5 +337,5 @@ def test_fallback_on_shape_errors(bad_payload: str):
     transcript = _make_transcript(["甲"])
     client.responses = [bad_payload]
 
-    stage.execute({"transcript_result": transcript})
+    stage.execute({"transcript_result": transcript, "language": "zh"})
     assert transcript.segments[0].text == "甲"
