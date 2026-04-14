@@ -28,9 +28,16 @@ worker = [
   "opencc-python-reimplemented>=0.1.7",
   "yt-dlp>=2024.5.26",
   "yt-dlp-ejs>=0.7.0",
-  "httpx>=0.27,<1",
 ]
-dev = ["whisper-ui[frontend]", "pytest>=9.0,<10", "pytest-cov>=7.0,<8"]
+# Optional LLM correction stage. Only required when OLLAMA_BASE_URL is set.
+# Workers built without this extra still boot; the LLM stage is gated by the
+# env var and httpx is imported lazily.
+worker-llm = ["httpx>=0.27,<1"]
+dev = [
+  "whisper-ui[frontend,worker-llm]",
+  "pytest>=9.0,<10",
+  "pytest-cov>=7.0,<8",
+]
 
 [build-system]
 requires = ["setuptools>=68"]

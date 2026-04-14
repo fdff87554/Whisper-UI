@@ -22,7 +22,6 @@ from whisper_ui.pipeline.align import AlignStage
 from whisper_ui.pipeline.assign_speakers import AssignSpeakersStage
 from whisper_ui.pipeline.diarize import DiarizeStage
 from whisper_ui.pipeline.download import DownloadStage
-from whisper_ui.pipeline.llm_correction import LLMCorrectionStage
 from whisper_ui.pipeline.orchestrator import (
     STAGE_WEIGHTS_WITH_DOWNLOAD,
     STAGE_WEIGHTS_WITH_DOWNLOAD_AND_LLM,
@@ -191,9 +190,13 @@ def process_transcription(job_id: str) -> str:
         # *and* an Ollama endpoint is configured at the deployment level.
         # Empty base URL acts as a kill-switch — even opted-in jobs just
         # skip it silently, so operators can disable the feature globally
-        # without redeploying the web tier.
+        # without redeploying the web tier. The import is lazy so workers
+        # built without the worker-llm extras (httpx) can still boot and
+        # process non-LLM jobs.
         llm_enabled = job.llm_correction_enabled and bool(settings.ollama_base_url)
         if llm_enabled:
+            from whisper_ui.pipeline.llm_correction import LLMCorrectionStage
+
             common_stages.append(
                 LLMCorrectionStage(
                     base_url=settings.ollama_base_url,

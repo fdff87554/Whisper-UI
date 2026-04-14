@@ -3,7 +3,6 @@ from __future__ import annotations
 import functools
 from pathlib import Path
 
-import httpx
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -110,9 +109,22 @@ class Settings(BaseSettings):
         ``HttpxOllamaClient.__init__`` and break an opted-in job before the
         per-chunk fallback has a chance to run. Fail-fast is strictly better
         than letting every job silently skip with no visible error.
+
+        Imports httpx lazily so the dependency only needs to be installed
+        when LLM correction is actually configured (the ``worker-llm``
+        extras group). Workers running without the LLM extras can still
+        boot Settings as long as OLLAMA_BASE_URL stays unset.
         """
         if not v:
             return v
+        try:
+            import httpx
+        except ImportError as exc:
+            raise ValueError(
+                "OLLAMA_BASE_URL is set but httpx is not installed. "
+                "Install the worker-llm extras (pip install '.[worker,worker-llm]') "
+                "or unset OLLAMA_BASE_URL to disable LLM correction."
+            ) from exc
         try:
             parsed = httpx.URL(v)
         except httpx.InvalidURL as exc:
