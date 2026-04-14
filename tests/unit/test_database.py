@@ -269,3 +269,66 @@ def test_recover_stale_jobs_ignores_non_processing(db: JobDatabase):
     fetched = db.get_job(queued.id)
     assert fetched is not None
     assert fetched.status == JobStatus.QUEUED
+
+
+def test_recover_stale_jobs_concurrent_workers_dont_double_recover(tmp_path: Path):
+    """Two workers calling recover_stale_jobs at the same instant must not
+    double-recover the same job. SQLite WAL serializes writers; once the
+    first commit lands, the bumped updated_at takes the row out of the
+    WHERE clause for every subsequent recovery call.
+    """
+    import threading
+
+    db_path = tmp_path / "concurrent_recover.db"
+    seed = JobDatabase(db_path)
+    try:
+        # Seed 5 stale PROCESSING jobs.
+        ids = []
+        for i in range(5):
+            job = Job(filename=f"stale{i}.mp3", filepath=f"/tmp/stale{i}.mp3")
+            job.status = JobStatus.PROCESSING
+            seed.insert_job(job)
+            ids.append(job.id)
+        seed._conn.execute(
+            "UPDATE jobs SET updated_at = '2000-01-01T00:00:00+00:00' WHERE id IN ({})".format(
+                ",".join("?" * len(ids))
+            ),
+            ids,
+        )
+        seed._conn.commit()
+    finally:
+        seed.close()
+
+    rowcounts: list[int] = []
+    rowcounts_lock = threading.Lock()
+    barrier = threading.Barrier(3)
+
+    def worker():
+        local = JobDatabase(db_path)
+        try:
+            barrier.wait()
+            count = local.recover_stale_jobs(timeout_seconds=60, error_message="timeout")
+            with rowcounts_lock:
+                rowcounts.append(count)
+        finally:
+            local.close()
+
+    threads = [threading.Thread(target=worker) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # Sum of recovered rowcounts equals the number of distinct stale jobs;
+    # no row gets recovered twice.
+    assert sum(rowcounts) == 5
+
+    # All 5 jobs are now FAILED — verify via a fresh connection.
+    verify = JobDatabase(db_path)
+    try:
+        for job_id in ids:
+            row = verify.get_job(job_id)
+            assert row is not None
+            assert row.status == JobStatus.FAILED
+    finally:
+        verify.close()
