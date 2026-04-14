@@ -42,6 +42,37 @@ class Settings(BaseSettings):
     # YouTube
     youtube_max_duration: int = 14400  # seconds (4 hours)
 
+    # Queue / job timeouts (seconds)
+    # Fallback when audio duration is unknown (e.g., YouTube URL before download).
+    job_timeout_default: int = 7200  # 2h
+    # Lower bound applied to dynamically calculated timeouts so short audio still
+    # gets enough headroom for model loading and overhead.
+    job_timeout_floor: int = 1800  # 30min
+    # Dynamic timeout = audio_duration_seconds * multiplier, then clamped into
+    # [job_timeout_floor, job_timeout_max]. 3x gives comfortable headroom on GPU
+    # for large-v3 + alignment + diarization across the pipeline.
+    job_timeout_audio_multiplier: float = 3.0
+    # Hard upper cap to prevent runaway jobs; also the basis for stale recovery.
+    job_timeout_max: int = 28800  # 8h
+    # Extra buffer added on top of job_timeout_max when reclaiming stale jobs
+    # whose worker died without updating the DB.
+    stale_job_buffer: int = 1800  # 30min
+    # Redis TTL for progress keys of running jobs. Should exceed the longest
+    # possible job timeout so the UI does not lose progress state mid-run.
+    redis_processing_expiry: int = 30600  # job_timeout_max + stale_job_buffer
+    # How often DiarizeStage's background heartbeat refreshes progress so
+    # stale-job-recovery and the UI can see the task is still alive.
+    diarize_heartbeat_interval: int = 30
+
+    @property
+    def stale_job_timeout(self) -> int:
+        """Threshold (seconds) after which a PROCESSING job is considered stale.
+
+        Derived from ``job_timeout_max`` plus ``stale_job_buffer`` so it always
+        stays consistent when the cap is tuned.
+        """
+        return self.job_timeout_max + self.stale_job_buffer
+
 
 @functools.lru_cache(maxsize=1)
 def get_settings() -> Settings:

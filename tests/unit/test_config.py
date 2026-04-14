@@ -21,6 +21,32 @@ def test_default_settings(tmp_path, monkeypatch):
     assert s.batch_size == 4
 
 
+def test_timeout_defaults_are_consistent(tmp_path):
+    s = Settings(
+        _env_file="/dev/null",
+        database_path=tmp_path / "test.db",
+        upload_dir=tmp_path / "uploads",
+        output_dir=tmp_path / "outputs",
+    )
+    assert s.job_timeout_floor < s.job_timeout_default <= s.job_timeout_max
+    assert s.job_timeout_audio_multiplier >= 1.0
+    assert s.stale_job_timeout == s.job_timeout_max + s.stale_job_buffer
+    assert s.redis_processing_expiry >= s.stale_job_timeout - s.stale_job_buffer
+    assert s.diarize_heartbeat_interval > 0
+
+
+def test_stale_job_timeout_tracks_max(tmp_path):
+    s = Settings(
+        _env_file="/dev/null",
+        database_path=tmp_path / "test.db",
+        upload_dir=tmp_path / "uploads",
+        output_dir=tmp_path / "outputs",
+        job_timeout_max=10000,
+        stale_job_buffer=500,
+    )
+    assert s.stale_job_timeout == 10500
+
+
 def test_settings_override(tmp_path):
     s = Settings(
         whisper_model="large-v3-turbo",
