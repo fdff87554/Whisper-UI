@@ -27,6 +27,10 @@ services:
       - STALE_JOB_BUFFER=${STALE_JOB_BUFFER:-1800}
       - REDIS_PROCESSING_EXPIRY=${REDIS_PROCESSING_EXPIRY:-30600}
       - DIARIZE_HEARTBEAT_INTERVAL=${DIARIZE_HEARTBEAT_INTERVAL:-30}
+      # Optional LLM text correction (Ollama). Empty string disables the
+      # feature globally and greys out the upload-form toggle.
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e2b}
     volumes:
       - app-data:/app/data
     depends_on:
@@ -72,6 +76,14 @@ services:
       - STALE_JOB_BUFFER=${STALE_JOB_BUFFER:-1800}
       - REDIS_PROCESSING_EXPIRY=${REDIS_PROCESSING_EXPIRY:-30600}
       - DIARIZE_HEARTBEAT_INTERVAL=${DIARIZE_HEARTBEAT_INTERVAL:-30}
+      # Optional LLM text correction (Ollama).
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e2b}
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
+      - OLLAMA_REQUEST_TIMEOUT=${OLLAMA_REQUEST_TIMEOUT:-120}
+      - LLM_CHUNK_SIZE=${LLM_CHUNK_SIZE:-8}
+      - LLM_CHUNK_CONTEXT=${LLM_CHUNK_CONTEXT:-2}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.1}
     volumes:
       - app-data:/app/data
       - model-cache:/cache/huggingface
@@ -83,7 +95,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              device_ids: ["${WORKER_GPU_DEVICE_ID:-0}"]
               capabilities: [gpu]
     restart: unless-stopped
   worker-cpu:
@@ -114,6 +126,14 @@ services:
       - STALE_JOB_BUFFER=${STALE_JOB_BUFFER:-1800}
       - REDIS_PROCESSING_EXPIRY=${REDIS_PROCESSING_EXPIRY:-30600}
       - DIARIZE_HEARTBEAT_INTERVAL=${DIARIZE_HEARTBEAT_INTERVAL:-30}
+      # Optional LLM text correction (Ollama).
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e2b}
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
+      - OLLAMA_REQUEST_TIMEOUT=${OLLAMA_REQUEST_TIMEOUT:-120}
+      - LLM_CHUNK_SIZE=${LLM_CHUNK_SIZE:-8}
+      - LLM_CHUNK_CONTEXT=${LLM_CHUNK_CONTEXT:-2}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.1}
     volumes:
       - app-data:/app/data
       - model-cache:/cache/huggingface
@@ -121,7 +141,47 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+  # Optional bundled Ollama server for LLM text correction. Enable with:
+  #   docker compose --profile gpu --profile llm up -d
+  # Users who already run Ollama elsewhere should skip this profile and
+  # point OLLAMA_BASE_URL at their existing server instead.
+  ollama:
+    profiles: [llm]
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${OLLAMA_GPU_DEVICE_ID:-1}"]
+              capabilities: [gpu]
+    restart: unless-stopped
+  # One-shot init sidecar: waits until Ollama is healthy, pulls the
+  # configured model, then exits. Idempotent — pulling an already-present
+  # model is a fast no-op.
+  ollama-pull:
+    profiles: [llm]
+    image: ollama/ollama:latest
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - 'OLLAMA_HOST=http://ollama:11434 ollama pull ${OLLAMA_MODEL:-gemma4:e2b}'
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
 volumes:
   app-data:
   redis-data:
   model-cache:
+  ollama-data:
