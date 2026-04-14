@@ -183,7 +183,13 @@ class DiarizeStage:
             yield
         finally:
             stop_event.set()
-            thread.join(timeout=self._heartbeat_interval + 1)
+            # Block unconditionally: a timeout-bounded join could let the
+            # heartbeat fire one more on_progress(<curve>, …) update *after*
+            # the main thread has already emitted on_progress(1.0, DONE),
+            # rewinding the visible bar from 100% back to ~94%. _beat()'s
+            # body is just the next on_progress call, so this waits at most
+            # one Redis/SQLite write — measured in tens of milliseconds.
+            thread.join()
 
 
 def _compute_heartbeat_tau(audio_duration_seconds: float | None) -> float:
