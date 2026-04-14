@@ -3,7 +3,7 @@ from __future__ import annotations
 import functools
 from pathlib import Path
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -78,6 +78,24 @@ class Settings(BaseSettings):
     llm_chunk_size: int = 8
     llm_chunk_context: int = 2
     llm_temperature: float = 0.1
+
+    @field_validator("ollama_base_url", mode="before")
+    @classmethod
+    def _normalize_ollama_base_url(cls, v: object) -> object:
+        """Strip trailing ``/`` and ``/api`` so that ``POST /api/chat`` built
+        via ``httpx.Client(base_url=...)`` never ends up as ``/api/api/chat``.
+
+        Users sometimes copy the URL from third-party Ollama docs that show
+        the value as ``http://host:11434/api``. httpx concatenates (rather
+        than replaces) the base when the request path also starts with
+        ``/api``, which silently duplicates the prefix and makes every
+        ``/api/chat`` call 404 — the whole LLM stage then fails over to its
+        no-op fallback and the job completes as if LLM correction had never
+        been enabled. Normalize defensively here so the footgun cannot land.
+        """
+        if not isinstance(v, str):
+            return v
+        return v.rstrip("/").removesuffix("/api")
 
     @property
     def stale_job_timeout(self) -> int:
