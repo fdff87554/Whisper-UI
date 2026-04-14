@@ -44,8 +44,12 @@ def get_audio_duration_seconds(path: Path | str) -> float | None:
             text=True,
             timeout=FFPROBE_TIMEOUT,
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        logger.warning("ffprobe unavailable or timed out while probing %s", path)
+    except (subprocess.TimeoutExpired, OSError):
+        # OSError covers FileNotFoundError (ffprobe missing) and
+        # PermissionError / IsADirectoryError / IOError on the target
+        # path. The probe contract is "return None on any failure so
+        # upload/pipeline is never blocked".
+        logger.warning("ffprobe unavailable or failed while probing %s", path)
         return None
 
     stdout = result.stdout.strip()

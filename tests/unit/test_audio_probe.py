@@ -50,3 +50,22 @@ def test_returns_none_on_timeout():
         side_effect=subprocess.TimeoutExpired(cmd="ffprobe", timeout=30),
     ):
         assert get_audio_duration_seconds("/tmp/test.wav") is None
+
+
+def test_returns_none_on_permission_error():
+    """PermissionError is an OSError subclass that is not FileNotFoundError;
+    the helper must still honor its 'never block upload' contract.
+    """
+    with patch(
+        "whisper_ui.pipeline.audio_probe.subprocess.run",
+        side_effect=PermissionError("read access denied"),
+    ):
+        assert get_audio_duration_seconds("/tmp/test.wav") is None
+
+
+def test_returns_none_on_generic_oserror():
+    with patch(
+        "whisper_ui.pipeline.audio_probe.subprocess.run",
+        side_effect=OSError("I/O failure"),
+    ):
+        assert get_audio_duration_seconds("/tmp/test.wav") is None
