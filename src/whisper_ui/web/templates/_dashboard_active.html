@@ -1,28 +1,45 @@
-{# htmx fragment: active jobs on dashboard — polled every 5s #}
-{% if active_jobs %}
-<section class="mb-8">
-  <h2 class="text-lg font-medium mb-3">{{ labels.DASHBOARD_ACTIVE_SECTION }}</h2>
-  {% for job in active_jobs %}
-  <div id="dashboard-active-{{ job.id }}"
-       class="card bg-base-200 border border-base-300 mb-2">
-    <div class="card-body p-4">
-      <div class="flex items-center justify-between gap-4 mb-2">
-        <span class="font-medium truncate flex-1 min-w-0">{{ job.filename }}</span>
-        <span class="badge badge-sm
-          {% if job.status.value == 'processing' %}badge-warning{% else %}badge-info{% endif %}">
-          {{ labels.STATUS_LABELS[job.status.value] }}
-        </span>
-      </div>
-      {% set pd = progress_data.get(job.id, {}) %}
-      {% set progress_val = pd.get('progress', '0')|float %}
-      {% set progress_msg = pd.get('message', labels.JOBS_WAITING) %}
-      <progress class="progress progress-primary w-full" value="{{ (progress_val * 100)|int }}" max="100"></progress>
-      <div class="flex justify-between text-sm opacity-60 mt-1">
-        <span>{{ progress_msg }}</span>
-        <span>{{ (progress_val * 100)|int }}%</span>
+{# htmx fragment: active jobs on dashboard.
+
+   The wrapper div lives inside the fragment (not the parent page) so every
+   poll re-renders its own hx-trigger with the up-to-date active_jobs state.
+   Combined with hx-swap="morph:outerHTML", this gives us the same self-
+   replacing pattern as _job_list.html: when the dashboard transitions
+   between idle and active, the next poll picks up the new interval instead
+   of being frozen at whatever dashboard.html chose on initial render.
+
+   Fast cadence while there is at least one queued/processing job to watch;
+   slower cadence while idle, so we don't burn Redis/SQLite reads for a
+   dashboard with nothing to show — but idle->active is still picked up
+   within one tick of the slow cadence, not stuck at that interval forever. #}
+<div id="dashboard-active"
+     hx-get="/dashboard/active"
+     hx-trigger="every {% if active_jobs %}5s{% else %}30s{% endif %}"
+     hx-swap="morph:outerHTML">
+  {% if active_jobs %}
+  <section class="mb-8">
+    <h2 class="text-lg font-medium mb-3">{{ labels.DASHBOARD_ACTIVE_SECTION }}</h2>
+    {% for job in active_jobs %}
+    <div id="dashboard-active-{{ job.id }}"
+         class="card bg-base-200 border border-base-300 mb-2">
+      <div class="card-body p-4">
+        <div class="flex items-center justify-between gap-4 mb-2">
+          <span class="font-medium truncate flex-1 min-w-0">{{ job.filename }}</span>
+          <span class="badge badge-sm
+            {% if job.status.value == 'processing' %}badge-warning{% else %}badge-info{% endif %}">
+            {{ labels.STATUS_LABELS[job.status.value] }}
+          </span>
+        </div>
+        {% set pd = progress_data.get(job.id, {}) %}
+        {% set progress_val = pd.get('progress', '0')|float %}
+        {% set progress_msg = pd.get('message', labels.JOBS_WAITING) %}
+        <progress class="progress progress-primary w-full" value="{{ (progress_val * 100)|int }}" max="100"></progress>
+        <div class="flex justify-between text-sm opacity-60 mt-1">
+          <span>{{ progress_msg }}</span>
+          <span>{{ (progress_val * 100)|int }}%</span>
+        </div>
       </div>
     </div>
-  </div>
-  {% endfor %}
-</section>
-{% endif %}
+    {% endfor %}
+  </section>
+  {% endif %}
+</div>

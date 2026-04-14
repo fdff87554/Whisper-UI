@@ -90,6 +90,12 @@
       </button>
     </div>
 
+    {% if search_disabled %}
+    {# Live search would lock up the browser tab on transcripts this large. #}
+    <div class="alert alert-info text-xs">
+      {{ labels.VIEWER_SEARCH_DISABLED.format(count=result.segments|length) }}
+    </div>
+    {% else %}
     {# Search #}
     <div class="relative max-w-sm">
       <span class="absolute left-3 top-1/2 -translate-y-1/2 opacity-40">{{ icon_search("w-4 h-4") }}</span>
@@ -99,15 +105,16 @@
             x-show="search"
             x-text="matchCount + ' / {{ result.segments|length }}'"></span>
     </div>
+    {% endif %}
   </div>
 
   {# Segments #}
   <div class="transcript-container">
     {% for seg in result.segments %}
     <div class="segment group flex gap-3 py-2 px-3 rounded-box hover:bg-base-200 transition-colors"
-         data-text="{{ seg.text|lower|e }}"
+         {% if not search_disabled %}data-text="{{ seg.text|lower|e }}"
          x-show="!search || $el.dataset.text.includes(search.toLowerCase())"
-         x-transition.opacity>
+         x-transition.opacity{% endif %}>
       <code class="text-xs font-mono opacity-40 whitespace-nowrap pt-0.5">{{ seg.start|format_time }}</code>
       <div class="flex-1 min-w-0">
         {% if seg.speaker %}
@@ -124,11 +131,13 @@
     </div>
     {% endfor %}
   </div>
+  {% if not search_disabled %}
   <p class="text-center py-8 opacity-50"
      x-show="search && matchCount === 0"
      x-transition.opacity>
     {{ labels.VIEWER_SEARCH_NO_RESULTS }}
   </p>
+  {% endif %}
 </div>
 {% else %}
 {# No segments: export-only toolbar #}

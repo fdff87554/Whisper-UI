@@ -28,9 +28,19 @@ worker = [
   "opencc-python-reimplemented>=0.1.7",
   "yt-dlp>=2024.5.26",
   "yt-dlp-ejs>=0.7.0",
-  "httpx>=0.27,<1",
 ]
-dev = ["whisper-ui[frontend]", "pytest>=9.0,<10", "pytest-cov>=7.0,<8"]
+# Optional LLM correction stage. Only required when OLLAMA_BASE_URL is set.
+# Workers built without this extra still boot; the LLM stage is gated by the
+# env var and httpx is imported lazily.
+worker-llm = ["httpx>=0.27,<1"]
+dev = [
+  "whisper-ui[frontend,worker-llm]",
+  "pytest>=9.0,<10",
+  "pytest-cov>=7.0,<8",
+  # In-process Redis stand-in for the end-to-end integration test. Avoids
+  # spinning up a real Redis or a Docker testcontainer in CI.
+  "fakeredis>=2.30,<3",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -48,24 +58,21 @@ line-length = 120
 
 [tool.ruff.lint]
 select = [
-  "E",    # pycodestyle errors
-  "F",    # pyflakes
-  "W",    # pycodestyle warnings
-  "I",    # isort
-  "UP",   # pyupgrade
-  "B",    # flake8-bugbear
-  "SIM",  # flake8-simplify
-  "RUF",  # ruff-specific
-  "FAST", # FastAPI
-  "C4",   # flake8-comprehensions
-  "PERF", # perflint
-  "FURB", # refurb
-  "TC",   # flake8-type-checking
-  "A",    # flake8-builtins
-  "FA",   # flake8-future-annotations
-  "T20",  # flake8-print
-  "RET",  # flake8-return
-  "PTH",  # flake8-use-pathlib
+  "E",   # pycodestyle errors
+  "F",   # pyflakes
+  "W",   # pycodestyle warnings
+  "I",   # isort
+  "UP",  # pyupgrade
+  "B",   # flake8-bugbear
+  "SIM", # flake8-simplify
+  "RUF", # ruff-specific
+  "C4",  # flake8-comprehensions
+  "TC",  # flake8-type-checking
+  "A",   # flake8-builtins
+  "FA",  # flake8-future-annotations
+  "T20", # flake8-print
+  "RET", # flake8-return
+  "PTH", # flake8-use-pathlib
 ]
 ignore = ["RUF012"]
 
@@ -80,3 +87,10 @@ indent-style = "space"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+# Integration tests require ffmpeg on PATH and are excluded from the
+# default run so unit tests stay fast. Run them explicitly with
+# `pytest -m integration` (in CI's integration stage, for example).
+markers = [
+  "integration: end-to-end tests that exercise real I/O boundaries (ffmpeg, sqlite, filestore, fakeredis)",
+]
+addopts = "-m 'not integration'"

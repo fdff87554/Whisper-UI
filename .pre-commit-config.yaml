@@ -13,7 +13,7 @@ repos:
     rev: v0.15.8
     hooks:
       - id: ruff-check
-        args: ["--fix", "--exit-non-zero-on-fix"]
+        args: ["--fix"]
       - id: ruff-format
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.11.0.1

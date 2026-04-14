@@ -17,10 +17,12 @@ ARG PIP_INDEX_URL=
 ENV PIP_INDEX_URL=${PIP_INDEX_URL}
 
 # Install CPU-only PyTorch first, then whisperx without deps to avoid
-# pulling in CUDA torch, then remaining worker dependencies.
+# pulling in CUDA torch, then remaining worker dependencies. The worker-llm
+# extra adds httpx for the optional Ollama-backed correction stage; the
+# stage is still gated by OLLAMA_BASE_URL at runtime.
 RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir --no-deps "whisperx>=3.8,<3.9" && \
-    pip install --no-cache-dir ".[worker]"
+    pip install --no-cache-dir ".[worker,worker-llm]"
 
 RUN useradd --uid 1000 --create-home appuser 2>/dev/null || true \
     && mkdir -p /app/data/db /app/data/uploads /app/data/outputs /cache/huggingface \
