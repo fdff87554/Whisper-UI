@@ -196,6 +196,20 @@ docker compose --profile gpu up -d
 to GPU 1 by default so they don't evict each other's models. Override via
 `WORKER_GPU_DEVICE_ID` / `OLLAMA_GPU_DEVICE_ID` if your topology differs.
 
+> **Operational breaking change (multi-GPU hosts only):** this release
+> switches `worker-gpu`'s GPU reservation from `count: 1` (runtime picks
+> any available GPU) to `device_ids: ["${WORKER_GPU_DEVICE_ID:-0}"]`
+> (pinned to GPU 0 by default). This is required so the `llm` profile can
+> reliably split Whisper and Ollama onto different devices. Impact:
+>
+> - **Single-GPU hosts:** no change.
+> - **Multi-GPU hosts using only the `gpu` profile (no `llm`):** the
+>   worker now always uses GPU 0 unless you set `WORKER_GPU_DEVICE_ID`
+>   explicitly. If you previously relied on the NVIDIA runtime's
+>   automatic selection (e.g. to route workloads away from a GPU already
+>   held by another container), set `WORKER_GPU_DEVICE_ID` in your `.env`
+>   to restore the intended placement.
+
 **Tuning (all optional):**
 
 | Variable                 | Default      | Description                                                                            |
