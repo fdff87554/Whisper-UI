@@ -3,6 +3,7 @@ from __future__ import annotations
 import functools
 from pathlib import Path
 
+import httpx
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -96,6 +97,31 @@ class Settings(BaseSettings):
         if not isinstance(v, str):
             return v
         return v.rstrip("/").removesuffix("/api")
+
+    @field_validator("ollama_base_url", mode="after")
+    @classmethod
+    def _validate_ollama_base_url(cls, v: str) -> str:
+        """Reject malformed Ollama URLs at startup so misconfigurations fail fast.
+
+        Empty string is allowed (disables LLM correction entirely). Non-empty
+        values must parse as an ``http`` / ``https`` URL with a non-empty
+        host — this catches typos like ``http://ollama:bad`` that would
+        otherwise raise ``httpx.InvalidURL`` deep inside
+        ``HttpxOllamaClient.__init__`` and break an opted-in job before the
+        per-chunk fallback has a chance to run. Fail-fast is strictly better
+        than letting every job silently skip with no visible error.
+        """
+        if not v:
+            return v
+        try:
+            parsed = httpx.URL(v)
+        except httpx.InvalidURL as exc:
+            raise ValueError(f"OLLAMA_BASE_URL is not a valid URL: {exc}") from exc
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(f"OLLAMA_BASE_URL must use http or https scheme, got {parsed.scheme!r}")
+        if not parsed.host:
+            raise ValueError(f"OLLAMA_BASE_URL must include a host, got {v!r}")
+        return v
 
     @property
     def stale_job_timeout(self) -> int:
