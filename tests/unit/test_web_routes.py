@@ -74,6 +74,25 @@ class TestDashboardRoutes:
         assert resp.status_code == 200
         assert 'hx-trigger="every 5s"' in resp.text
 
+    def test_dashboard_active_fragment_carries_idle_trigger(self, client, db):
+        """Regression: the fragment must include its own wrapper + hx-trigger
+        so the interval gets recomputed on every poll. Previously the trigger
+        was pinned to whatever dashboard.html chose on initial render."""
+        resp = client.get("/dashboard/active")
+        assert resp.status_code == 200
+        assert 'id="dashboard-active"' in resp.text
+        assert 'hx-trigger="every 30s"' in resp.text
+        assert 'hx-swap="morph:outerHTML"' in resp.text
+
+    def test_dashboard_active_fragment_switches_to_fast_trigger(self, client, db):
+        """Fragment requested while a job is active must return the fast
+        trigger, proving the swap path picks up state transitions."""
+        db.insert_job(Job(filename="active.mp3", status=JobStatus.PROCESSING, language="zh"))
+        resp = client.get("/dashboard/active")
+        assert resp.status_code == 200
+        assert 'id="dashboard-active"' in resp.text
+        assert 'hx-trigger="every 5s"' in resp.text
+
 
 class TestUploadRoutes:
     def test_upload_page(self, client):
