@@ -192,9 +192,10 @@ docker compose --profile gpu up -d
 #   ollama pull gemma4:e2b
 ```
 
-**Dual-GPU hosts:** the bundled profile pins Whisper to GPU 0 and Ollama
-to GPU 1 by default so they don't evict each other's models. Override via
-`WORKER_GPU_DEVICE_ID` / `OLLAMA_GPU_DEVICE_ID` if your topology differs.
+**Dual-GPU hosts:** the `gpu` profile pins the Whisper worker to
+`WORKER_GPU_DEVICE_ID` (default 0); adding the `llm` profile also pins
+the bundled Ollama container to `OLLAMA_GPU_DEVICE_ID` (default 1).
+Override either variable in `.env` if your topology differs.
 
 > **Operational breaking change (multi-GPU hosts only):** this release
 > switches `worker-gpu`'s GPU reservation from `count: 1` (runtime picks
