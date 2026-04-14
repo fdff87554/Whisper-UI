@@ -68,6 +68,7 @@ def process_transcription(job_id: str) -> str:
                 hf_token=settings.hf_token,
                 device=settings.device,
                 enabled=job.enable_diarization,
+                heartbeat_interval=settings.diarize_heartbeat_interval,
             ),
             AssignSpeakersStage(),
             PostprocessStage(convert_to_traditional=job.convert_to_traditional),

@@ -23,6 +23,7 @@ ALIGN_SKIPPED = "對齊失敗，使用未對齊的時間戳記。"
 
 DIARIZE_LOADING = "正在載入說話者分離模型..."
 DIARIZE_RUNNING = "正在進行說話者分離..."
+DIARIZE_RUNNING_HEARTBEAT = "正在進行說話者分離（已執行 {elapsed} 秒）..."
 DIARIZE_DONE = "說話者分離完成。"
 DIARIZE_SKIPPED = "已跳過說話者分離（未提供 HF Token）。"
 DIARIZE_SKIPPED_DISABLED = "已跳過說話者分離（使用者停用）。"
