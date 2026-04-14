@@ -88,10 +88,10 @@ class TestJobsRoutes:
         assert "job-list-wrapper" in resp.text
 
     def test_jobs_list_fragment_emits_stable_id_for_single_job(self, client, db, filestore):
-        """Regression for PR #35 R7: without a stable wrapper id, Idiomorph
-        falls back to positional matching and a new job inserted at the
-        front of the list can morph an old wrapper into a different job,
-        dragging preserved state (collapse, Alpine) onto the wrong entity.
+        """Without a stable wrapper id Idiomorph falls back to positional
+        matching, so a new job inserted at the top of the list can morph an
+        old wrapper into a different job and drag preserved state (collapse
+        checkbox, Alpine dropdown) onto the wrong entity.
         """
         job = _create_completed_job(db, filestore)
         resp = client.get("/jobs/list")
