@@ -64,6 +64,21 @@ class Settings(BaseSettings):
     # stale-job-recovery and the UI can see the task is still alive.
     diarize_heartbeat_interval: int = 30
 
+    # -- Optional LLM text correction (Ollama) --
+    # Empty string disables the feature entirely — even jobs that opt in via
+    # the UI checkbox will be silently skipped. Set to a reachable Ollama URL
+    # to enable: "http://ollama:11434" for the bundled `llm` compose profile,
+    # or any external Ollama server.
+    ollama_base_url: str = ""
+    ollama_model: str = "gemma4:e2b"
+    # keep_alive format follows Ollama's duration string (e.g. "30m", "1h",
+    # "-1" = forever). Longer values amortize model load cost across chunks.
+    ollama_keep_alive: str = "30m"
+    ollama_request_timeout: int = 120
+    llm_chunk_size: int = 8
+    llm_chunk_context: int = 2
+    llm_temperature: float = 0.1
+
     @property
     def stale_job_timeout(self) -> int:
         """Threshold (seconds) after which a PROCESSING job is considered stale.
@@ -109,6 +124,14 @@ class Settings(BaseSettings):
                 f"stale_job_timeout ({self.stale_job_timeout}) = "
                 f"job_timeout_max + stale_job_buffer"
             )
+        if self.llm_chunk_size <= 0:
+            raise ValueError(f"llm_chunk_size must be > 0, got {self.llm_chunk_size}")
+        if self.llm_chunk_context < 0:
+            raise ValueError(f"llm_chunk_context must be >= 0, got {self.llm_chunk_context}")
+        if not 0.0 <= self.llm_temperature <= 2.0:
+            raise ValueError(f"llm_temperature must be within [0.0, 2.0], got {self.llm_temperature}")
+        if self.ollama_request_timeout <= 0:
+            raise ValueError(f"ollama_request_timeout must be > 0, got {self.ollama_request_timeout}")
         return self
 
 
