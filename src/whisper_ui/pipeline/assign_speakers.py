@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from rq.timeouts import BaseTimeoutException
+
 from whisper_ui.core.messages import ASSIGN_DONE, ASSIGN_FAILED, ASSIGN_RUNNING, ASSIGN_SKIPPED
 
 if TYPE_CHECKING:
@@ -39,6 +41,11 @@ class AssignSpeakersStage:
             context["final_result"] = result
             return context
 
+        except BaseTimeoutException:
+            # RQ's death penalty must never be swallowed by the "degrade to
+            # unassigned" fallback — otherwise the job would keep running
+            # past its deadline. Propagate unchanged.
+            raise
         except Exception as e:
             logger.warning("Speaker assignment failed: %s. Using aligned result without speakers.", e)
             context["final_result"] = aligned_result
