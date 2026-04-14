@@ -104,6 +104,9 @@ VIEWER_METADATA = "時長：{minutes}分{seconds}秒 | 段落：{segments} | 語
 VIEWER_NO_SEGMENTS = "轉錄結果中無段落資料。"
 VIEWER_SEARCH_PLACEHOLDER = "輸入關鍵字篩選..."
 VIEWER_SEARCH_NO_RESULTS = "找不到符合的段落。"
+VIEWER_SEARCH_DISABLED = (
+    "段落過多（{count} 段），已停用即時搜尋以避免瀏覽器卡頓。請改用瀏覽器內建搜尋（Ctrl/Cmd + F）或匯出 TXT 後搜尋。"
+)
 VIEWER_EMPTY_STATE = "請從上方選擇一個已完成的任務來檢視轉錄結果。"
 VIEWER_COPY = "複製全文"
 VIEWER_COPIED = "已複製"
