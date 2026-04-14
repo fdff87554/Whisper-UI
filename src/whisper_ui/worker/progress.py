@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from redis.exceptions import RedisError
+
 from whisper_ui.core.constants import (
     ERROR_MAX_LENGTH,
     MESSAGE_MAX_LENGTH,
@@ -37,44 +39,61 @@ class RedisProgressReporter:
         self._processing_ttl = processing_ttl
 
     def report(self, progress: float, message: str) -> None:
-        self._redis.hset(
-            self._key,
-            mapping={
-                "progress": str(progress),
-                "message": message,
-                "status": "processing",
-            },
-        )
-        self._redis.expire(self._key, self._processing_ttl)
+        # Progress reports are best-effort: SQLite remains the source of
+        # truth for job state. A transient Redis outage mid-job must not
+        # take down the worker — log and swallow so the pipeline keeps
+        # running and the user only loses live progress updates.
+        try:
+            self._redis.hset(
+                self._key,
+                mapping={
+                    "progress": str(progress),
+                    "message": message,
+                    "status": "processing",
+                },
+            )
+            self._redis.expire(self._key, self._processing_ttl)
+        except RedisError:
+            logger.warning("Redis progress write failed for %s", self._job_id, exc_info=True)
 
     def complete(self, result_path: str) -> None:
-        self._redis.hset(
-            self._key,
-            mapping={
-                "progress": "1.0",
-                "message": PIPELINE_COMPLETE,
-                "status": "completed",
-                "result_path": result_path,
-            },
-        )
-        self._redis.expire(self._key, REDIS_COMPLETED_EXPIRY)
+        try:
+            self._redis.hset(
+                self._key,
+                mapping={
+                    "progress": "1.0",
+                    "message": PIPELINE_COMPLETE,
+                    "status": "completed",
+                    "result_path": result_path,
+                },
+            )
+            self._redis.expire(self._key, REDIS_COMPLETED_EXPIRY)
+        except RedisError:
+            logger.warning("Redis complete write failed for %s", self._job_id, exc_info=True)
 
     def fail(self, error: str) -> None:
-        self._redis.hset(
-            self._key,
-            mapping={
-                "progress": "0.0",
-                "message": error[:MESSAGE_MAX_LENGTH],
-                "status": "failed",
-                "error": error[:ERROR_MAX_LENGTH],
-            },
-        )
-        self._redis.expire(self._key, REDIS_FAILED_EXPIRY)
+        try:
+            self._redis.hset(
+                self._key,
+                mapping={
+                    "progress": "0.0",
+                    "message": error[:MESSAGE_MAX_LENGTH],
+                    "status": "failed",
+                    "error": error[:ERROR_MAX_LENGTH],
+                },
+            )
+            self._redis.expire(self._key, REDIS_FAILED_EXPIRY)
+        except RedisError:
+            logger.warning("Redis fail write failed for %s", self._job_id, exc_info=True)
 
     @staticmethod
     def get_progress(redis: Redis, job_id: str) -> dict[str, str]:
         key = f"job:{job_id}"
-        data = redis.hgetall(key)
+        try:
+            data = redis.hgetall(key)
+        except RedisError:
+            logger.warning("Redis progress read failed for %s", job_id, exc_info=True)
+            return {}
         if not data:
             return {}
         return {
