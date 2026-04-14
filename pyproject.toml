@@ -1,6 +1,6 @@
 [project]
 name = "whisper-ui"
-version = "1.10.0"
+version = "1.11.0"
 description = "Speech-to-text system using OpenAI Whisper with speaker diarization and Docker GPU support"
 license = "MIT"
 requires-python = ">=3.12"
