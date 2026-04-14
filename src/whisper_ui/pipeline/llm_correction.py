@@ -2,9 +2,18 @@
 
 Runs after ``PostprocessStage`` and asks a small Ollama-hosted model to fix
 obvious typos / homophones / punctuation errors in each segment's text,
-without touching timing or speaker information. Designed so it can never
-turn a successful transcription into a failed job: any network, parsing or
-validation failure falls back to the original text for that chunk.
+without touching timing or speaker information.
+
+Failure semantics:
+- *Logic failures* (network errors, bad JSON, idx mismatch, etc.) fall back
+  to the original text for that chunk. A successful transcription is never
+  turned into a failed job by this stage.
+- *RQ death-penalty timeouts* (``rq.timeouts.BaseTimeoutException``) must
+  propagate unchanged — they indicate the whole job has exhausted its
+  budget, so silently swallowing them would misreport a timed-out job as
+  "completed with LLM correction skipped". This mirrors the convention
+  already followed by ``AlignStage`` / ``AssignSpeakersStage`` /
+  ``DownloadStage`` / ``DiarizeStage``.
 """
 
 # ruff: noqa: RUF001
@@ -17,6 +26,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
 import httpx
+from rq.timeouts import BaseTimeoutException
 
 from whisper_ui.core.messages import (
     LLM_CORRECTION_DEGRADED,
@@ -165,6 +175,11 @@ class LLMCorrectionStage:
             try:
                 corrections = self._correct_chunk(client, chunk)
                 self._apply_corrections(segments, corrections)
+            except BaseTimeoutException:
+                # RQ's death penalty must propagate unchanged so the worker
+                # task layer can classify the job as timed out instead of
+                # masking it as a successful-with-llm-skipped run.
+                raise
             except Exception as exc:
                 failed_chunks.append(i)
                 logger.warning(

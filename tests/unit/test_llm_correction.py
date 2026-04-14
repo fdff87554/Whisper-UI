@@ -202,6 +202,23 @@ def test_fallback_on_idx_mismatch_preserves_other_chunks():
     assert progress[-1][1].startswith(LLM_CORRECTION_DEGRADED)
 
 
+def test_rq_timeout_propagates_from_llm_correction():
+    """RQ death-penalty exceptions must NOT be swallowed by the per-chunk
+    fallback. The broad ``except Exception`` catches everything up to but
+    not including ``BaseTimeoutException``, which has to propagate so the
+    worker task layer can classify the job as timed out. This guards the
+    same class of bug that PR #34 Finding 1 had to fix for other stages.
+    """
+    from rq.timeouts import JobTimeoutException
+
+    stage, client = _make_stage(chunk_size=10, chunk_context=0)
+    transcript = _make_transcript(["甲", "乙"])
+    client.responses = [JobTimeoutException("Task exceeded maximum timeout value (3600 seconds)")]
+
+    with pytest.raises(JobTimeoutException):
+        stage.execute({"transcript_result": transcript})
+
+
 def test_fallback_on_http_error_never_raises():
     stage, client = _make_stage(chunk_size=10, chunk_context=0)
     transcript = _make_transcript(["甲", "乙"])
