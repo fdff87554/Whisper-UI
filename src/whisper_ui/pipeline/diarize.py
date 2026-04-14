@@ -20,6 +20,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _is_rq_timeout(exc: BaseException) -> bool:
+    """True when exc comes from rq's death-penalty timeout machinery."""
+    try:
+        from rq.timeouts import BaseTimeoutException
+    except ImportError:
+        return False
+    return isinstance(exc, BaseTimeoutException)
+
+
 class DiarizeStage:
     def __init__(self, hf_token: str = "", device: str = "cuda", *, enabled: bool = True) -> None:
         self._hf_token = hf_token
@@ -77,7 +86,15 @@ class DiarizeStage:
 
         except ImportError as err:
             raise DiarizationError("whisperx is not installed.") from err
-        except Exception as e:
+        except BaseException as e:
+            # RQ's death penalty raises JobTimeoutException from a signal
+            # handler. Letting it be wrapped as DiarizationError produced
+            # the misleading "Diarization failed: Task exceeded maximum
+            # timeout value (3600 seconds)" message. Re-raise the raw
+            # timeout (and any non-Exception BaseException like SystemExit)
+            # so worker.tasks.process_transcription can classify it.
+            if _is_rq_timeout(e) or not isinstance(e, Exception):
+                raise
             error_str = str(e)
             if "401" in error_str or "Unauthorized" in error_str:
                 raise DiarizationError(

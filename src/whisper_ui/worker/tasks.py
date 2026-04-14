@@ -19,6 +19,7 @@ from whisper_ui.pipeline.preprocess import PreprocessStage
 from whisper_ui.pipeline.transcribe import TranscribeStage
 from whisper_ui.storage.database import JobDatabase
 from whisper_ui.storage.filestore import FileStore
+from whisper_ui.ui.labels import JOBS_TIMEOUT_ERROR
 from whisper_ui.worker.progress import RedisProgressReporter
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,8 @@ def _cleanup_preprocessed(context: dict) -> None:
 
 
 def process_transcription(job_id: str) -> str:
+    from rq.timeouts import BaseTimeoutException
+
     settings = get_settings()
     redis = Redis.from_url(settings.redis_url)
     reporter = RedisProgressReporter(redis, job_id, processing_ttl=settings.redis_processing_expiry)
@@ -113,6 +116,19 @@ def process_transcription(job_id: str) -> str:
 
         logger.info("Job %s completed successfully.", job_id)
         return f"Job {job_id} completed"
+
+    except BaseTimeoutException as e:
+        _cleanup_preprocessed(context)
+        timeout_seconds = getattr(e, "_timeout", None) or "?"
+        error_msg = JOBS_TIMEOUT_ERROR.format(seconds=timeout_seconds)
+        logger.exception("Job %s timed out: %s", job_id, error_msg)
+        if job is not None:
+            job.status = JobStatus.FAILED
+            job.error = error_msg[:ERROR_MAX_LENGTH]
+            job.progress_message = f"Failed: {error_msg[:ERROR_DISPLAY_LENGTH]}"
+            db.update_job(job)
+        reporter.fail(error_msg)
+        return f"Job {job_id} timed out: {error_msg}"
 
     except Exception as e:
         _cleanup_preprocessed(context)

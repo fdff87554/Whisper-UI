@@ -279,6 +279,25 @@ class TestDiarizeStage:
         assert stage._pipeline is None
         mock_gc.assert_called_once()
 
+    def test_rq_timeout_is_not_wrapped_as_diarization_error(self):
+        from rq.timeouts import JobTimeoutException
+
+        stage = DiarizeStage(hf_token="test-token", device="cpu")
+        mock_pipeline_cls = MagicMock()
+        mock_pipeline_instance = MagicMock(
+            side_effect=JobTimeoutException("Task exceeded maximum timeout value (3600 seconds)")
+        )
+        mock_pipeline_cls.return_value = mock_pipeline_instance
+
+        mock_diarize_module = MagicMock()
+        mock_diarize_module.DiarizationPipeline = mock_pipeline_cls
+
+        with (
+            patch.dict("sys.modules", {"whisperx.diarize": mock_diarize_module, "whisperx": MagicMock()}),
+            pytest.raises(JobTimeoutException, match="Task exceeded"),
+        ):
+            stage.execute({"audio_path": "/tmp/test.wav"})
+
 
 class TestAssignSpeakersStage:
     def test_no_diarize_skips(self):
