@@ -95,8 +95,17 @@ def _make_throttled_progress_reporter(
     def report(progress: float, message: str) -> None:
         nonlocal last_progress, last_written_at, last_message
 
+        # Monotonicity guard: drop any in-closure regression unconditionally,
+        # even if the message changed. The only realistic source of one is a
+        # late diarize heartbeat racing the main thread's DIARIZE_DONE flush;
+        # letting it through would visibly rewind the bar from 100% back to
+        # ~94%. Worker retries always spin up a fresh closure, so legitimate
+        # rewinds never reach this point.
+        if last_progress >= 0 and progress < last_progress:
+            return
+
         now = monotonic()
-        force = last_progress < 0 or message != last_message or progress >= 1.0 or progress < last_progress
+        force = last_progress < 0 or message != last_message or progress >= 1.0
         if not force:
             delta = progress - last_progress
             if delta < min_delta and (now - last_written_at) < min_interval_sec:

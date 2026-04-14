@@ -186,11 +186,30 @@ class TestThrottledProgressReporter:
         assert reporter.report.call_count <= 25
         assert reporter.report.call_count < len(range(1000)) // 10
 
-    def test_regression_to_lower_progress_flushes(self):
-        """A stage that legitimately rewinds (e.g. retry) must not be
-        silently dropped by the delta gate."""
+    def test_regression_to_lower_progress_is_dropped(self):
+        """Regression guard: a late diarize heartbeat that arrives after
+        the main thread has emitted DIARIZE_DONE (1.0) must not rewind
+        the bar. Worker retries spin up a fresh closure, so no legitimate
+        in-closure regression exists; any incoming progress < last is a
+        race and should be silently dropped.
+        """
         on_progress, reporter, _db, _job, clock = _make_throttle()
-        on_progress(0.60, "stage")
+        on_progress(1.0, "done")
         clock.advance(0.01)
-        on_progress(0.55, "stage")
+        on_progress(0.94, "done")
+        assert reporter.report.call_count == 1
+        assert reporter.report.call_args.args == (1.0, "done")
+
+    def test_late_heartbeat_with_old_message_is_dropped(self):
+        """Same race as above, but the late update still carries the old
+        running message — the message-change force-flush must not save
+        it from being dropped."""
+        on_progress, reporter, _db, _job, clock = _make_throttle()
+        on_progress(0.85, "running")  # last heartbeat before DONE
+        clock.advance(0.01)
+        on_progress(1.0, "done")  # main thread flushes DONE
         assert reporter.report.call_count == 2
+        clock.advance(0.01)
+        on_progress(0.94, "running")  # late heartbeat from background thread
+        assert reporter.report.call_count == 2  # NOT 3
+        assert reporter.report.call_args.args == (1.0, "done")
