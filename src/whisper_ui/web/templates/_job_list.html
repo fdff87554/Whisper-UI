@@ -1,8 +1,9 @@
-{# htmx fragment: job list with polling — swapped via outerHTML #}
+{# htmx fragment: job list with polling — Idiomorph morphs unchanged DOM in place,
+   preserving collapse state, focus, and scroll between polls. #}
 <div id="job-list-wrapper"
      hx-get="/jobs/list?status={{ status|default('', true) }}&page={{ page }}"
      {% if has_active %}hx-trigger="every 3s, refreshJobList from:body"{% else %}hx-trigger="refreshJobList from:body"{% endif %}
-     hx-swap="outerHTML">
+     hx-swap="morph:{morphStyle:'outerHTML', ignoreActiveValue:true}">
 
 {% if total_count == 0 %}
   <div class="text-center py-12 opacity-60">
@@ -93,14 +94,14 @@
     <button class="btn btn-ghost btn-sm"
             {% if page <= 0 %}disabled{% endif %}
             hx-get="/jobs/list?status={{ status|default('', true) }}&page={{ page - 1 }}"
-            hx-target="#job-list-wrapper" hx-swap="outerHTML">
+            hx-target="#job-list-wrapper" hx-swap="morph:outerHTML">
       {{ labels.JOBS_PAGE_PREV }}
     </button>
     <span class="opacity-60">{{ labels.JOBS_PAGE_INFO.format(current=page + 1, total=total_pages, count=total_count) }}</span>
     <button class="btn btn-ghost btn-sm"
             {% if page >= total_pages - 1 %}disabled{% endif %}
             hx-get="/jobs/list?status={{ status|default('', true) }}&page={{ page + 1 }}"
-            hx-target="#job-list-wrapper" hx-swap="outerHTML">
+            hx-target="#job-list-wrapper" hx-swap="morph:outerHTML">
       {{ labels.JOBS_PAGE_NEXT }}
     </button>
   </div>

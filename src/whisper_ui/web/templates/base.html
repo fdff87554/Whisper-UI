@@ -15,6 +15,9 @@
   <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"
           integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+"
           crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/idiomorph@0.7.3/dist/idiomorph-ext.min.js"
+          integrity="sha384-szktAZju9fwY15dZ6D2FKFN4eZoltuXiHStNDJWK9+FARrxJtquql828JzikODob"
+          crossorigin="anonymous"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/persist@3.14.8/dist/cdn.min.js"
           integrity="sha384-9SDdYTFEfclsO6c7hnOgCm3X3Dh5gvAcXtVcEtfgDv/kQkhcBbqAOdEVMLskiSfZ"
           crossorigin="anonymous"></script>
@@ -40,7 +43,7 @@
   });
   </script>
 </head>
-<body class="min-h-screen bg-base-100 text-base-content leading-relaxed">
+<body class="min-h-screen bg-base-100 text-base-content leading-relaxed" hx-ext="morph">
   {# Page loading bar #}
   <div id="page-loader"></div>
 
