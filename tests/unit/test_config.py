@@ -187,3 +187,54 @@ def test_get_settings_keeps_cuda_when_available(tmp_path):
         assert result.device == "cuda"
         assert result.compute_type == "int8_float16"
     get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("", ""),
+        ("http://ollama:11434", "http://ollama:11434"),
+        ("http://ollama:11434/", "http://ollama:11434"),
+        ("http://ollama:11434/api", "http://ollama:11434"),
+        ("http://ollama:11434/api/", "http://ollama:11434"),
+        ("http://host:11434/v1", "http://host:11434/v1"),  # other paths untouched
+        ("http://api.internal:11434", "http://api.internal:11434"),  # host containing "api" untouched
+    ],
+)
+def test_ollama_base_url_normalization(tmp_path, raw, expected):
+    """Defensive normalization keeps httpx from producing /api/api/chat
+    when users copy a URL that already includes the /api suffix.
+    """
+    s = _make_settings(tmp_path, ollama_base_url=raw)
+    assert s.ollama_base_url == expected
+
+
+@pytest.mark.parametrize(
+    "bad_url",
+    [
+        "http://ollama:bad",  # InvalidURL: bad port
+        "ftp://host:11434",  # wrong scheme
+        "not-a-url",  # httpx.URL parses but host is empty
+        "http://",  # empty host
+    ],
+)
+def test_ollama_base_url_rejected_when_invalid(tmp_path, bad_url):
+    """Malformed URLs must fail at service startup rather than silently
+    crash every opted-in job inside HttpxOllamaClient.__init__."""
+    with pytest.raises(ValidationError):
+        _make_settings(tmp_path, ollama_base_url=bad_url)
+
+
+@pytest.mark.parametrize(
+    "good_url",
+    [
+        "",  # empty disables the feature, must still pass
+        "http://ollama:11434",
+        "https://ollama.example.com",
+        "http://192.168.1.20:11434",
+    ],
+)
+def test_ollama_base_url_accepts_valid_values(tmp_path, good_url):
+    s = _make_settings(tmp_path, ollama_base_url=good_url)
+    # normalization may strip trailing slashes / /api, but the value parses.
+    assert s.ollama_base_url == good_url

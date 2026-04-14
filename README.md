@@ -13,6 +13,7 @@ and Docker deployment (GPU / CPU).
 - Upload audio/video files for transcription
 - Batch upload with automatic filtering of unsupported files
 - Speaker diarization with pyannote speaker-diarization-3.1 (optional)
+- Optional LLM text correction via Ollama (small Gemma model, per-job toggle)
 - Real-time progress tracking via Redis
 - Export to SRT, VTT, TXT, JSON, DOCX
 - Batch download of results as ZIP
@@ -147,6 +148,80 @@ short-audio SLAs.
 > `REDIS_PROCESSING_EXPIRY` so the Redis progress key outlives the longest
 > possible job window. Otherwise the service will fail to start with a
 > `ValidationError` pointing at the violated invariant.
+
+### Optional LLM text correction
+
+Whisper-UI can optionally post-process each transcription through a small
+LLM running on [Ollama](https://ollama.com) to fix obvious typos,
+homophones and punctuation errors — without rewriting wording or touching
+timestamps / speaker labels. The feature is:
+
+- **Per-job** — users tick a checkbox on the upload form. Uninterested
+  users see no change.
+- **Optional at deployment time** — the bundled Ollama server is a
+  separate compose profile. Leaving `OLLAMA_BASE_URL` empty disables the
+  feature globally and greys out the UI toggle.
+- **Fail-safe** — any network, parsing or validation failure falls back
+  to the original segment text. LLM correction can never turn a
+  successful transcription into a failed job.
+
+**Option A — bundled Ollama (easiest):**
+
+```bash
+# .env
+OLLAMA_BASE_URL=http://ollama:11434
+OLLAMA_MODEL=gemma4:e2b
+
+docker compose --profile gpu --profile llm up -d
+```
+
+The `ollama-pull` init sidecar will wait until Ollama is healthy and then
+pull `OLLAMA_MODEL` on first start (~7 GB download for `gemma4:e2b`).
+Check its exit status with `docker compose ps ollama-pull`; the model is
+cached in the `ollama-data` volume so restarts are instant.
+
+**Option B — external Ollama server (no profile needed):**
+
+```bash
+# .env
+OLLAMA_BASE_URL=http://192.168.1.20:11434
+OLLAMA_MODEL=gemma4:e2b
+
+docker compose --profile gpu up -d
+# Make sure the model is pulled on the external server yourself:
+#   ollama pull gemma4:e2b
+```
+
+**Dual-GPU hosts:** the `gpu` profile pins the Whisper worker to
+`WORKER_GPU_DEVICE_ID` (default 0); adding the `llm` profile also pins
+the bundled Ollama container to `OLLAMA_GPU_DEVICE_ID` (default 1).
+Override either variable in `.env` if your topology differs.
+
+> **Operational breaking change (multi-GPU hosts only):** this release
+> switches `worker-gpu`'s GPU reservation from `count: 1` (runtime picks
+> any available GPU) to `device_ids: ["${WORKER_GPU_DEVICE_ID:-0}"]`
+> (pinned to GPU 0 by default). This is required so the `llm` profile can
+> reliably split Whisper and Ollama onto different devices. Impact:
+>
+> - **Single-GPU hosts:** no change.
+> - **Multi-GPU hosts using only the `gpu` profile (no `llm`):** the
+>   worker now always uses GPU 0 unless you set `WORKER_GPU_DEVICE_ID`
+>   explicitly. If you previously relied on the NVIDIA runtime's
+>   automatic selection (e.g. to route workloads away from a GPU already
+>   held by another container), set `WORKER_GPU_DEVICE_ID` in your `.env`
+>   to restore the intended placement.
+
+**Tuning (all optional):**
+
+| Variable                 | Default      | Description                                                                            |
+| ------------------------ | ------------ | -------------------------------------------------------------------------------------- |
+| `OLLAMA_BASE_URL`        | (empty)      | Empty disables the feature globally. Set to reach a bundled or external Ollama server. |
+| `OLLAMA_MODEL`           | `gemma4:e2b` | Any Ollama-compatible chat model. Larger = better accuracy but more VRAM.              |
+| `OLLAMA_KEEP_ALIVE`      | `30m`        | How long Ollama keeps the model loaded in VRAM between requests.                       |
+| `OLLAMA_REQUEST_TIMEOUT` | `120`        | Per-request timeout in seconds.                                                        |
+| `LLM_CHUNK_SIZE`         | `8`          | Segments corrected per Ollama request. Larger reduces HTTP overhead.                   |
+| `LLM_CHUNK_CONTEXT`      | `2`          | Neighbor segments attached as read-only context for disambiguation.                    |
+| `LLM_TEMPERATURE`        | `0.1`        | Sampling temperature. Low values keep corrections deterministic.                       |
 
 ## Local Development
 

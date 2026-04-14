@@ -3,7 +3,8 @@ from __future__ import annotations
 import functools
 from pathlib import Path
 
-from pydantic import Field, model_validator
+import httpx
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -64,6 +65,64 @@ class Settings(BaseSettings):
     # stale-job-recovery and the UI can see the task is still alive.
     diarize_heartbeat_interval: int = 30
 
+    # -- Optional LLM text correction (Ollama) --
+    # Empty string disables the feature entirely — even jobs that opt in via
+    # the UI checkbox will be silently skipped. Set to a reachable Ollama URL
+    # to enable: "http://ollama:11434" for the bundled `llm` compose profile,
+    # or any external Ollama server.
+    ollama_base_url: str = ""
+    ollama_model: str = "gemma4:e2b"
+    # keep_alive format follows Ollama's duration string (e.g. "30m", "1h",
+    # "-1" = forever). Longer values amortize model load cost across chunks.
+    ollama_keep_alive: str = "30m"
+    ollama_request_timeout: int = 120
+    llm_chunk_size: int = 8
+    llm_chunk_context: int = 2
+    llm_temperature: float = 0.1
+
+    @field_validator("ollama_base_url", mode="before")
+    @classmethod
+    def _normalize_ollama_base_url(cls, v: object) -> object:
+        """Strip trailing ``/`` and ``/api`` so that ``POST /api/chat`` built
+        via ``httpx.Client(base_url=...)`` never ends up as ``/api/api/chat``.
+
+        Users sometimes copy the URL from third-party Ollama docs that show
+        the value as ``http://host:11434/api``. httpx concatenates (rather
+        than replaces) the base when the request path also starts with
+        ``/api``, which silently duplicates the prefix and makes every
+        ``/api/chat`` call 404 — the whole LLM stage then fails over to its
+        no-op fallback and the job completes as if LLM correction had never
+        been enabled. Normalize defensively here so the footgun cannot land.
+        """
+        if not isinstance(v, str):
+            return v
+        return v.rstrip("/").removesuffix("/api")
+
+    @field_validator("ollama_base_url", mode="after")
+    @classmethod
+    def _validate_ollama_base_url(cls, v: str) -> str:
+        """Reject malformed Ollama URLs at startup so misconfigurations fail fast.
+
+        Empty string is allowed (disables LLM correction entirely). Non-empty
+        values must parse as an ``http`` / ``https`` URL with a non-empty
+        host — this catches typos like ``http://ollama:bad`` that would
+        otherwise raise ``httpx.InvalidURL`` deep inside
+        ``HttpxOllamaClient.__init__`` and break an opted-in job before the
+        per-chunk fallback has a chance to run. Fail-fast is strictly better
+        than letting every job silently skip with no visible error.
+        """
+        if not v:
+            return v
+        try:
+            parsed = httpx.URL(v)
+        except httpx.InvalidURL as exc:
+            raise ValueError(f"OLLAMA_BASE_URL is not a valid URL: {exc}") from exc
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(f"OLLAMA_BASE_URL must use http or https scheme, got {parsed.scheme!r}")
+        if not parsed.host:
+            raise ValueError(f"OLLAMA_BASE_URL must include a host, got {v!r}")
+        return v
+
     @property
     def stale_job_timeout(self) -> int:
         """Threshold (seconds) after which a PROCESSING job is considered stale.
@@ -109,6 +168,14 @@ class Settings(BaseSettings):
                 f"stale_job_timeout ({self.stale_job_timeout}) = "
                 f"job_timeout_max + stale_job_buffer"
             )
+        if self.llm_chunk_size <= 0:
+            raise ValueError(f"llm_chunk_size must be > 0, got {self.llm_chunk_size}")
+        if self.llm_chunk_context < 0:
+            raise ValueError(f"llm_chunk_context must be >= 0, got {self.llm_chunk_context}")
+        if not 0.0 <= self.llm_temperature <= 2.0:
+            raise ValueError(f"llm_temperature must be within [0.0, 2.0], got {self.llm_temperature}")
+        if self.ollama_request_timeout <= 0:
+            raise ValueError(f"ollama_request_timeout must be > 0, got {self.ollama_request_timeout}")
         return self
 
 

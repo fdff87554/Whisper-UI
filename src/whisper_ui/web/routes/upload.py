@@ -95,6 +95,7 @@ async def upload_submit(
     num_speakers: Annotated[int, Form()] = 0,
     enable_diarization: Annotated[bool, Form()] = False,
     convert_to_traditional: Annotated[bool, Form()] = False,
+    llm_correction_enabled: Annotated[bool, Form()] = False,
 ):
     htmx = _is_htmx(request)
 
@@ -143,6 +144,7 @@ async def upload_submit(
             num_speakers=num_speakers if num_speakers > 0 else None,
             enable_diarization=enable_diarization,
             convert_to_traditional=convert_to_traditional,
+            llm_correction_enabled=llm_correction_enabled,
             batch_id=batch_id,
         )
 
@@ -194,6 +196,7 @@ async def upload_url_submit(
     num_speakers: Annotated[int, Form()] = 0,
     enable_diarization: Annotated[bool, Form()] = False,
     convert_to_traditional: Annotated[bool, Form()] = False,
+    llm_correction_enabled: Annotated[bool, Form()] = False,
 ):
     htmx = _is_htmx(request)
 
@@ -262,6 +265,7 @@ async def upload_url_submit(
             num_speakers=num_speakers if num_speakers > 0 else None,
             enable_diarization=enable_diarization,
             convert_to_traditional=convert_to_traditional,
+            llm_correction_enabled=llm_correction_enabled,
             batch_id=batch_id,
         )
 

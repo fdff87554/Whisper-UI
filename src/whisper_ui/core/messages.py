@@ -37,6 +37,11 @@ POSTPROCESS_RUNNING = "正在後處理結果..."
 POSTPROCESS_DONE = "後處理完成。"
 POSTPROCESS_EMPTY = "無結果可供後處理。"
 
+LLM_CORRECTION_RUNNING = "正在進行 LLM 文字校驗（{done}/{total}）..."
+LLM_CORRECTION_DONE = "LLM 文字校驗完成。"
+LLM_CORRECTION_SKIPPED = "已跳過 LLM 文字校驗。"
+LLM_CORRECTION_DEGRADED = "LLM 文字校驗部分失敗，已保留原文的段落："
+
 PIPELINE_COMPLETE = "完成"
 
 # -- Export --

@@ -67,6 +67,7 @@ class Job:
     num_speakers: int | None = None
     enable_diarization: bool = True
     convert_to_traditional: bool = True
+    llm_correction_enabled: bool = False
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     error: str | None = None
