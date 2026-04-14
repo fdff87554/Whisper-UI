@@ -26,8 +26,6 @@
   {% if is_batch %}
   {# Batch group #}
   {% set bi = batch_info[group_key] %}
-  {# Stable id keeps Idiomorph from drifting collapse state across reorders;
-     see PR #35 review fix R7. #}
   <div id="job-group-{{ group_key }}"
        class="collapse collapse-arrow bg-base-200 border border-base-300" data-job-name="{{ group_jobs[0].filename if group_jobs else '' }}"
        {% if not bi.all_done %}open{% endif %}>
@@ -81,7 +79,7 @@
   </div>
 
   {% else %}
-  {# Single job — stable id for Idiomorph keying, see PR #35 review fix R7. #}
+  {# Single job #}
   {% set job = group_jobs[0] %}
   <div id="job-{{ job.id }}"
        class="card bg-base-200 border border-base-300 border-l-3 border-status-{{ job.status.value }}"

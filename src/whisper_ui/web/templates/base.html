@@ -15,10 +15,9 @@
   <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"
           integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+"
           crossorigin="anonymous"></script>
-  {# Idiomorph is vendored locally rather than loaded from a CDN: htmx 2.0.4
-     falls back to defaultSwapStyle=innerHTML for unrecognised swap styles
-     ("morph:..." included), which would nest /jobs/list responses inside the
-     existing #job-list-wrapper and break polling. See PR #35 review fix R6. #}
+  {# Vendored, not CDN: when the morph extension is missing htmx silently
+     falls back to defaultSwapStyle=innerHTML, which would nest /jobs/list
+     responses inside the existing #job-list-wrapper and break polling. #}
   <script src="{{ url_for('static', path='vendor/idiomorph-ext.min.js') }}"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/persist@3.14.8/dist/cdn.min.js"
           integrity="sha384-9SDdYTFEfclsO6c7hnOgCm3X3Dh5gvAcXtVcEtfgDv/kQkhcBbqAOdEVMLskiSfZ"
@@ -27,12 +26,9 @@
           integrity="sha384-X9kJyAubVxnP0hcA+AMMs21U445qsnqhnUF8EBlEpP3a42Kh/JwWjlv2ZcvGfphb"
           crossorigin="anonymous"></script>
   <script>
-  // Idiomorph callbacks shared across all morph swaps. The default
-  // syncBooleanAttribute logic clobbers user-toggled `checked` state on
-  // morph (ignoreActiveValue only protects `value`, not `checked`), so
-  // any element marked with data-morph-skip-checked opts out of having
-  // its checked attribute morphed back to the server-rendered default.
-  // See PR #35 review fix R5.
+  // Idiomorph's syncBooleanAttribute always re-syncs `checked` (ignoreActiveValue
+  // only protects `value`), so anything that needs to keep the user's local
+  // toggle state across a morph must opt out via data-morph-skip-checked.
   window.__whisperUiMorphCallbacks = {
     beforeAttributeUpdated: function(attributeName, node, mutationType) {
       if (
