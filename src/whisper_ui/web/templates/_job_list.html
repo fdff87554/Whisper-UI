@@ -1,8 +1,11 @@
-{# htmx fragment: job list with polling — swapped via outerHTML #}
+{# htmx fragment: job list with polling — Idiomorph morphs unchanged DOM in place,
+   preserving collapse state, focus, and scroll between polls. The callbacks
+   reference (defined in base.html) makes data-morph-skip-checked elements opt
+   out of `checked` syncing so user-toggled batch collapses are not reset. #}
 <div id="job-list-wrapper"
      hx-get="/jobs/list?status={{ status|default('', true) }}&page={{ page }}"
      {% if has_active %}hx-trigger="every 3s, refreshJobList from:body"{% else %}hx-trigger="refreshJobList from:body"{% endif %}
-     hx-swap="outerHTML">
+     hx-swap="morph:{morphStyle:'outerHTML', ignoreActiveValue:true, callbacks:window.__whisperUiMorphCallbacks}">
 
 {% if total_count == 0 %}
   <div class="text-center py-12 opacity-60">
@@ -23,9 +26,10 @@
   {% if is_batch %}
   {# Batch group #}
   {% set bi = batch_info[group_key] %}
-  <div class="collapse collapse-arrow bg-base-200 border border-base-300" data-job-name="{{ group_jobs[0].filename if group_jobs else '' }}"
+  <div id="job-group-{{ group_key }}"
+       class="collapse collapse-arrow bg-base-200 border border-base-300" data-job-name="{{ group_jobs[0].filename if group_jobs else '' }}"
        {% if not bi.all_done %}open{% endif %}>
-    <input type="checkbox" {% if not bi.all_done %}checked{% endif %}>
+    <input type="checkbox" data-morph-skip-checked {% if not bi.all_done %}checked{% endif %}>
     <div class="collapse-title">
       <div class="flex flex-wrap items-center gap-2 mb-1">
         <span class="font-medium">{{ labels.JOBS_BATCH_LABEL.format(count=bi.total) }}</span>
@@ -66,7 +70,8 @@
         {% endif %}
       </div>
       {% for job in group_jobs %}
-      <div class="border-l-3 pl-3 py-2 mb-2 border-status-{{ job.status.value }}" data-job-name="{{ job.filename }}">
+      <div id="job-{{ job.id }}"
+           class="border-l-3 pl-3 py-2 mb-2 border-status-{{ job.status.value }}" data-job-name="{{ job.filename }}">
         {% include "_job_card.html" %}
       </div>
       {% endfor %}
@@ -76,7 +81,8 @@
   {% else %}
   {# Single job #}
   {% set job = group_jobs[0] %}
-  <div class="card bg-base-200 border border-base-300 border-l-3 border-status-{{ job.status.value }}"
+  <div id="job-{{ job.id }}"
+       class="card bg-base-200 border border-base-300 border-l-3 border-status-{{ job.status.value }}"
        data-job-name="{{ job.filename }}">
     <div class="card-body p-4">
       {% include "_job_card.html" %}
@@ -93,14 +99,14 @@
     <button class="btn btn-ghost btn-sm"
             {% if page <= 0 %}disabled{% endif %}
             hx-get="/jobs/list?status={{ status|default('', true) }}&page={{ page - 1 }}"
-            hx-target="#job-list-wrapper" hx-swap="outerHTML">
+            hx-target="#job-list-wrapper" hx-swap="morph:outerHTML">
       {{ labels.JOBS_PAGE_PREV }}
     </button>
     <span class="opacity-60">{{ labels.JOBS_PAGE_INFO.format(current=page + 1, total=total_pages, count=total_count) }}</span>
     <button class="btn btn-ghost btn-sm"
             {% if page >= total_pages - 1 %}disabled{% endif %}
             hx-get="/jobs/list?status={{ status|default('', true) }}&page={{ page + 1 }}"
-            hx-target="#job-list-wrapper" hx-swap="outerHTML">
+            hx-target="#job-list-wrapper" hx-swap="morph:outerHTML">
       {{ labels.JOBS_PAGE_NEXT }}
     </button>
   </div>
