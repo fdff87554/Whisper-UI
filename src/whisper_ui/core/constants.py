@@ -21,7 +21,8 @@ SQLITE_BUSY_TIMEOUT_MS = 5000
 JOBS_REFRESH_INTERVAL = 3  # seconds
 
 # Stale job recovery
-STALE_JOB_TIMEOUT = 9000  # 2.5 hours (URL job_timeout=2h + 30min buffer)
+# STALE_JOB_TIMEOUT now lives in Settings.stale_job_timeout so it stays
+# consistent with the dynamic job_timeout bounds.
 STALE_JOB_CHECK_INTERVAL = 60  # seconds
 
 # Batch upload limits
@@ -31,6 +32,6 @@ MAX_BATCH_SIZE = 50
 YT_DLP_SOCKET_TIMEOUT = 30
 
 # Redis expiry (seconds)
-REDIS_PROCESSING_EXPIRY = 7200  # 2 hours
+# REDIS_PROCESSING_EXPIRY now lives in Settings.redis_processing_expiry.
 REDIS_COMPLETED_EXPIRY = 86400  # 24 hours
 REDIS_FAILED_EXPIRY = 86400  # 24 hours

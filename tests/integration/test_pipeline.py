@@ -26,7 +26,7 @@ class TestPreprocessIntegration:
         wav_path = tmp_path / "test.wav"
         wav_path.write_bytes(b"RIFF" + b"\x00" * 100)
 
-        with patch("whisper_ui.pipeline.preprocess._get_duration", return_value=10.0):
+        with patch("whisper_ui.pipeline.preprocess.get_audio_duration_seconds", return_value=10.0):
             stage = PreprocessStage()
             context = stage.execute({"input_path": str(wav_path)})
 

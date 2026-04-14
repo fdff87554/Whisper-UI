@@ -2,7 +2,21 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+from pydantic import ValidationError
+
 from whisper_ui.core.config import Settings, get_settings
+
+
+def _make_settings(tmp_path, **overrides):
+    base = {
+        "_env_file": "/dev/null",
+        "database_path": tmp_path / "test.db",
+        "upload_dir": tmp_path / "uploads",
+        "output_dir": tmp_path / "outputs",
+    }
+    base.update(overrides)
+    return Settings(**base)
 
 
 def test_default_settings(tmp_path, monkeypatch):
@@ -19,6 +33,101 @@ def test_default_settings(tmp_path, monkeypatch):
     assert s.device == "auto"
     assert s.language == "zh"
     assert s.batch_size == 4
+
+
+def test_timeout_defaults_are_consistent(tmp_path):
+    s = Settings(
+        _env_file="/dev/null",
+        database_path=tmp_path / "test.db",
+        upload_dir=tmp_path / "uploads",
+        output_dir=tmp_path / "outputs",
+    )
+    assert s.job_timeout_floor < s.job_timeout_default <= s.job_timeout_max
+    assert s.job_timeout_audio_multiplier >= 1.0
+    assert s.stale_job_timeout == s.job_timeout_max + s.stale_job_buffer
+    assert s.redis_processing_expiry >= s.stale_job_timeout - s.stale_job_buffer
+    assert s.diarize_heartbeat_interval > 0
+
+
+def test_stale_job_timeout_tracks_max(tmp_path):
+    s = _make_settings(
+        tmp_path,
+        job_timeout_max=10000,
+        stale_job_buffer=500,
+        redis_processing_expiry=10500,
+    )
+    assert s.stale_job_timeout == 10500
+
+
+class TestTimeoutInvariantValidator:
+    """Settings must reject inconsistent queue-timeout combinations at
+    startup so operators get immediate feedback instead of silently
+    counter-intuitive clamping behavior (see PR #34 Finding 3).
+    """
+
+    def test_accepts_custom_consistent_values(self, tmp_path):
+        s = _make_settings(
+            tmp_path,
+            job_timeout_floor=600,
+            job_timeout_default=3600,
+            job_timeout_max=36000,
+            job_timeout_audio_multiplier=2.5,
+            stale_job_buffer=600,
+            redis_processing_expiry=36600,
+        )
+        assert s.job_timeout_max == 36000
+
+    def test_rejects_floor_above_default(self, tmp_path):
+        with pytest.raises(ValidationError, match="job_timeout_default"):
+            _make_settings(tmp_path, job_timeout_floor=5000, job_timeout_default=3000)
+
+    def test_rejects_default_above_max(self, tmp_path):
+        with pytest.raises(ValidationError, match="job_timeout_max"):
+            _make_settings(
+                tmp_path,
+                job_timeout_default=20000,
+                job_timeout_max=10000,
+                redis_processing_expiry=11800,
+            )
+
+    def test_rejects_zero_floor(self, tmp_path):
+        with pytest.raises(ValidationError, match="job_timeout_floor"):
+            _make_settings(tmp_path, job_timeout_floor=0)
+
+    def test_rejects_negative_floor(self, tmp_path):
+        with pytest.raises(ValidationError, match="job_timeout_floor"):
+            _make_settings(tmp_path, job_timeout_floor=-1)
+
+    def test_rejects_non_positive_multiplier(self, tmp_path):
+        with pytest.raises(ValidationError, match="job_timeout_audio_multiplier"):
+            _make_settings(tmp_path, job_timeout_audio_multiplier=0)
+
+    def test_rejects_negative_stale_buffer(self, tmp_path):
+        with pytest.raises(ValidationError, match="stale_job_buffer"):
+            _make_settings(tmp_path, stale_job_buffer=-60)
+
+    def test_rejects_negative_heartbeat_interval(self, tmp_path):
+        with pytest.raises(ValidationError, match="diarize_heartbeat_interval"):
+            _make_settings(tmp_path, diarize_heartbeat_interval=-1)
+
+    def test_rejects_redis_expiry_below_stale_timeout(self, tmp_path):
+        with pytest.raises(ValidationError, match="redis_processing_expiry"):
+            _make_settings(
+                tmp_path,
+                job_timeout_max=10000,
+                stale_job_buffer=1000,
+                redis_processing_expiry=5000,  # below 10000 + 1000 = 11000
+            )
+
+    def test_reviewer_scenario_now_fails_loudly(self, tmp_path):
+        """Finding 3's reproducer: operator sets only JOB_TIMEOUT_MAX=60.
+
+        Before the validator this silently clamped every computed timeout
+        back up to JOB_TIMEOUT_FLOOR=1800, defeating the operator's intent.
+        After the validator it must fail at startup.
+        """
+        with pytest.raises(ValidationError):
+            _make_settings(tmp_path, job_timeout_max=60)
 
 
 def test_settings_override(tmp_path):

@@ -115,6 +115,39 @@ All settings are configured via environment variables (`.env` file):
 > processing times. GPU deployment with `large-v3` and `int8_float16` gives the
 > best accuracy-to-speed ratio.
 
+### Queue / Timeout tuning (advanced)
+
+The RQ job timeout is derived from the probed audio duration
+(`duration * JOB_TIMEOUT_AUDIO_MULTIPLIER`) and clamped into
+`[JOB_TIMEOUT_FLOOR, JOB_TIMEOUT_MAX]`. All values below have sensible
+defaults for mixed short/long audio on an 8 GB VRAM GPU; override them
+only if you routinely process audio longer than 2 hours or need tighter
+short-audio SLAs.
+
+| Variable                       | Default | Description                                                                                                                           |
+| ------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `JOB_TIMEOUT_DEFAULT`          | `7200`  | Fallback `job_timeout` (seconds) when audio duration is unknown (e.g., YouTube URL before download).                                  |
+| `JOB_TIMEOUT_FLOOR`            | `1800`  | Lower bound on the dynamic timeout so short audio still has room for model loading.                                                   |
+| `JOB_TIMEOUT_AUDIO_MULTIPLIER` | `3.0`   | `estimated_timeout = duration * multiplier`. `3.0` covers large-v3 + alignment + diarization with headroom.                           |
+| `JOB_TIMEOUT_MAX`              | `28800` | Absolute upper cap (8h). Also the basis for stale-job recovery.                                                                       |
+| `STALE_JOB_BUFFER`             | `1800`  | Extra margin (30min) added to `JOB_TIMEOUT_MAX` before the stale-job reaper marks a processing job as dead.                           |
+| `REDIS_PROCESSING_EXPIRY`      | `30600` | TTL (seconds) for Redis progress keys. See invariant below.                                                                           |
+| `DIARIZE_HEARTBEAT_INTERVAL`   | `30`    | How often the diarize stage re-posts progress so the UI and stale-job reaper can tell the task is still alive. Set to `0` to disable. |
+
+> **Invariants** (validated at startup — the service will refuse to start
+> if any of these is violated):
+>
+> - `0 < JOB_TIMEOUT_FLOOR ≤ JOB_TIMEOUT_DEFAULT ≤ JOB_TIMEOUT_MAX`
+> - `JOB_TIMEOUT_AUDIO_MULTIPLIER > 0`
+> - `STALE_JOB_BUFFER ≥ 0`
+> - `DIARIZE_HEARTBEAT_INTERVAL ≥ 0`
+> - `REDIS_PROCESSING_EXPIRY ≥ JOB_TIMEOUT_MAX + STALE_JOB_BUFFER`
+>
+> When raising `JOB_TIMEOUT_MAX`, you **must** also raise
+> `REDIS_PROCESSING_EXPIRY` so the Redis progress key outlives the longest
+> possible job window. Otherwise the service will fail to start with a
+> `ValidationError` pointing at the violated invariant.
+
 ## Local Development
 
 ```bash

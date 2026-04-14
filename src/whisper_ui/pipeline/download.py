@@ -4,6 +4,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from rq.timeouts import BaseTimeoutException
+
 from whisper_ui.core.constants import YT_DLP_SOCKET_TIMEOUT
 from whisper_ui.core.exceptions import DownloadError
 from whisper_ui.core.messages import DOWNLOAD_DONE, DOWNLOAD_EXTRACTING_INFO, DOWNLOAD_IN_PROGRESS
@@ -75,6 +77,10 @@ class DownloadStage:
                 if info is None:
                     raise DownloadError("Download returned no information.")
         except DownloadError:
+            raise
+        except BaseTimeoutException:
+            # Let RQ's death penalty propagate so the worker task classifies
+            # it as a timeout instead of a download failure.
             raise
         except Exception as e:
             raise DownloadError(f"Failed to download video: {e}") from e
