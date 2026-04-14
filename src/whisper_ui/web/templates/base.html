@@ -15,9 +15,11 @@
   <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"
           integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+"
           crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/idiomorph@0.7.3/dist/idiomorph-ext.min.js"
-          integrity="sha384-szktAZju9fwY15dZ6D2FKFN4eZoltuXiHStNDJWK9+FARrxJtquql828JzikODob"
-          crossorigin="anonymous"></script>
+  {# Idiomorph is vendored locally rather than loaded from a CDN: htmx 2.0.4
+     falls back to defaultSwapStyle=innerHTML for unrecognised swap styles
+     ("morph:..." included), which would nest /jobs/list responses inside the
+     existing #job-list-wrapper and break polling. See PR #35 review fix R6. #}
+  <script src="{{ url_for('static', path='vendor/idiomorph-ext.min.js') }}"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/persist@3.14.8/dist/cdn.min.js"
           integrity="sha384-9SDdYTFEfclsO6c7hnOgCm3X3Dh5gvAcXtVcEtfgDv/kQkhcBbqAOdEVMLskiSfZ"
           crossorigin="anonymous"></script>
