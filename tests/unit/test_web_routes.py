@@ -193,6 +193,36 @@ class TestJobsRoutes:
         # URL jobs cannot be re-probed locally, so they fall back to default.
         assert mock_queue.enqueue.call_args[1]["job_timeout"] == settings.job_timeout_default
 
+    def test_retry_probe_exception_falls_back_to_default(self, client, db, settings):
+        job = _create_failed_job(db)
+        mock_queue = MagicMock()
+        with (
+            patch("rq.Queue", return_value=mock_queue),
+            patch(
+                "whisper_ui.web.routes.jobs.get_audio_duration_seconds",
+                side_effect=OSError("file vanished"),
+            ),
+        ):
+            resp = client.post(f"/jobs/{job.id}/retry")
+        assert resp.status_code == 204
+        mock_queue.enqueue.assert_called_once()
+        assert mock_queue.enqueue.call_args[1]["job_timeout"] == settings.job_timeout_default
+
+    def test_retry_enqueue_failure_uses_generic_error(self, client, db):
+        job = _create_failed_job(db)
+        mock_queue = MagicMock()
+        mock_queue.enqueue.side_effect = Exception("Redis internal: secret/key/path leak")
+        with (
+            patch("rq.Queue", return_value=mock_queue),
+            patch("whisper_ui.web.routes.jobs.get_audio_duration_seconds", return_value=60.0),
+        ):
+            client.post(f"/jobs/{job.id}/retry")
+        refreshed = db.get_job(job.id)
+        assert refreshed is not None
+        assert refreshed.status == JobStatus.FAILED
+        assert "Redis internal" not in (refreshed.error or "")
+        assert "secret" not in (refreshed.error or "")
+
 
 class TestViewerRoutes:
     def test_viewer_redirects_to_jobs(self, client):
