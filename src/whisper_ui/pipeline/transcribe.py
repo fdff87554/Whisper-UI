@@ -4,6 +4,8 @@ import gc
 import logging
 from typing import TYPE_CHECKING, Any
 
+from rq.timeouts import BaseTimeoutException
+
 from whisper_ui.core.device import release_gpu_memory
 from whisper_ui.core.exceptions import TranscriptionError
 from whisper_ui.core.messages import TRANSCRIBE_DONE, TRANSCRIBE_LOADING, TRANSCRIBE_RUNNING
@@ -58,6 +60,10 @@ class TranscribeStage:
 
         except ImportError as err:
             raise TranscriptionError("whisperx is not installed. Install it with: pip install whisperx") from err
+        except BaseTimeoutException:
+            # Let RQ's death penalty propagate so the worker task classifies
+            # it as a timeout instead of a stage-level transcription failure.
+            raise
         except Exception as e:
             raise TranscriptionError(f"Transcription failed: {e}") from e
 

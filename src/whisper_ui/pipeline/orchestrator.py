@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from rq.timeouts import BaseTimeoutException
+
 from whisper_ui.core.exceptions import PipelineError
 
 if TYPE_CHECKING:
@@ -56,6 +58,11 @@ class PipelineOrchestrator:
 
             try:
                 context = stage.execute(context, on_progress=stage_progress)
+            except BaseTimeoutException:
+                # RQ's death penalty must propagate unchanged so the worker
+                # task layer can classify it as a timeout rather than a
+                # stage-specific failure.
+                raise
             except PipelineError:
                 raise
             except Exception as e:
