@@ -5,9 +5,10 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from whisper_ui.core.constants import FFMPEG_CONVERT_TIMEOUT, FFPROBE_TIMEOUT, STDERR_MAX_LENGTH
+from whisper_ui.core.constants import FFMPEG_CONVERT_TIMEOUT, STDERR_MAX_LENGTH
 from whisper_ui.core.exceptions import PreprocessError
 from whisper_ui.core.messages import PREPROCESS_CONVERTING, PREPROCESS_DONE
+from whisper_ui.pipeline.audio_probe import get_audio_duration_seconds
 
 if TYPE_CHECKING:
     from whisper_ui.pipeline.base import ProgressCallback
@@ -54,7 +55,7 @@ class PreprocessStage:
         except subprocess.TimeoutExpired as err:
             raise PreprocessError("Audio conversion timed out (>5min).") from err
 
-        duration = _get_duration(output_path)
+        duration = get_audio_duration_seconds(output_path) or 0.0
 
         if on_progress:
             on_progress(1.0, PREPROCESS_DONE)
@@ -65,26 +66,3 @@ class PreprocessStage:
 
     def cleanup(self) -> None:
         pass
-
-
-def _get_duration(path: Path) -> float:
-    try:
-        result = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                str(path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=FFPROBE_TIMEOUT,
-        )
-        return float(result.stdout.strip())
-    except (ValueError, subprocess.TimeoutExpired, FileNotFoundError):
-        logger.warning("Could not determine audio duration for %s", path)
-        return 0.0
