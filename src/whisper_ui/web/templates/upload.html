@@ -22,7 +22,7 @@
   {% elif error == 'invalid_model' %}
   {{ labels.UPLOAD_INVALID_MODEL.format(value=request.query_params.get('value', '?')) }}
   {% elif error == 'queue' %}
-  {{ labels.UPLOAD_QUEUE_ERROR.format(error='Redis') }}
+  {{ labels.UPLOAD_QUEUE_ERROR }}
   {% elif error == 'invalid_url' %}
   {{ labels.UPLOAD_INVALID_URL }}
   {% elif error == 'playlist' %}
