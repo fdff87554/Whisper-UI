@@ -59,8 +59,10 @@ def test_custom_multiplier_applies(tmp_path):
         upload_dir=tmp_path / "uploads",
         output_dir=tmp_path / "outputs",
         job_timeout_floor=600,
+        job_timeout_default=7200,
         job_timeout_max=36000,
         job_timeout_audio_multiplier=2.0,
+        redis_processing_expiry=37800,  # >= job_timeout_max + stale_job_buffer
     )
     assert calculate_job_timeout(3600, s) == 7200
 
