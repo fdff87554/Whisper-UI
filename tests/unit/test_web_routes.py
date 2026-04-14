@@ -87,6 +87,34 @@ class TestJobsRoutes:
         assert resp.status_code == 200
         assert "job-list-wrapper" in resp.text
 
+    def test_jobs_list_fragment_emits_stable_id_for_single_job(self, client, db, filestore):
+        """Regression for PR #35 R7: without a stable wrapper id, Idiomorph
+        falls back to positional matching and a new job inserted at the
+        front of the list can morph an old wrapper into a different job,
+        dragging preserved state (collapse, Alpine) onto the wrong entity.
+        """
+        job = _create_completed_job(db, filestore)
+        resp = client.get("/jobs/list")
+        assert resp.status_code == 200
+        assert f'id="job-{job.id}"' in resp.text
+
+    def test_jobs_list_fragment_emits_stable_ids_for_batch(self, client, db):
+        """Same regression as above but for batch wrappers and the inner
+        per-job rows. Both must carry stable ids so Idiomorph keys them
+        through reorders.
+        """
+        batch_id = "deadbeef" * 4  # 32-char hex, valid uuid hex shape
+        job_a = Job(filename="a.mp3", status=JobStatus.PROCESSING, batch_id=batch_id)
+        job_b = Job(filename="b.mp3", status=JobStatus.PROCESSING, batch_id=batch_id)
+        db.insert_job(job_a)
+        db.insert_job(job_b)
+
+        resp = client.get("/jobs/list")
+        assert resp.status_code == 200
+        assert f'id="job-group-{batch_id}"' in resp.text
+        assert f'id="job-{job_a.id}"' in resp.text
+        assert f'id="job-{job_b.id}"' in resp.text
+
     def test_jobs_page_with_job(self, client, db, filestore):
         _create_completed_job(db, filestore)
         resp = client.get("/jobs")
