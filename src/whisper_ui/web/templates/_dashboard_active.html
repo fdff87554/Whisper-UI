@@ -3,7 +3,10 @@
 <section class="mb-8">
   <h2 class="text-lg font-medium mb-3">{{ labels.DASHBOARD_ACTIVE_SECTION }}</h2>
   {% for job in active_jobs %}
-  <div class="card bg-base-200 border border-base-300 mb-2">
+  {# Stable id so Idiomorph keys cards by job id rather than position;
+     prevents Alpine state drift when a new active job appears. See R7. #}
+  <div id="dashboard-active-{{ job.id }}"
+       class="card bg-base-200 border border-base-300 mb-2">
     <div class="card-body p-4">
       <div class="flex items-center justify-between gap-4 mb-2">
         <span class="font-medium truncate flex-1 min-w-0">{{ job.filename }}</span>

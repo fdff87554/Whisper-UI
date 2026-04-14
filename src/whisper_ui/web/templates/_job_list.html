@@ -26,7 +26,10 @@
   {% if is_batch %}
   {# Batch group #}
   {% set bi = batch_info[group_key] %}
-  <div class="collapse collapse-arrow bg-base-200 border border-base-300" data-job-name="{{ group_jobs[0].filename if group_jobs else '' }}"
+  {# Stable id keeps Idiomorph from drifting collapse state across reorders;
+     see PR #35 review fix R7. #}
+  <div id="job-group-{{ group_key }}"
+       class="collapse collapse-arrow bg-base-200 border border-base-300" data-job-name="{{ group_jobs[0].filename if group_jobs else '' }}"
        {% if not bi.all_done %}open{% endif %}>
     <input type="checkbox" data-morph-skip-checked {% if not bi.all_done %}checked{% endif %}>
     <div class="collapse-title">
@@ -69,7 +72,8 @@
         {% endif %}
       </div>
       {% for job in group_jobs %}
-      <div class="border-l-3 pl-3 py-2 mb-2 border-status-{{ job.status.value }}" data-job-name="{{ job.filename }}">
+      <div id="job-{{ job.id }}"
+           class="border-l-3 pl-3 py-2 mb-2 border-status-{{ job.status.value }}" data-job-name="{{ job.filename }}">
         {% include "_job_card.html" %}
       </div>
       {% endfor %}
@@ -77,9 +81,10 @@
   </div>
 
   {% else %}
-  {# Single job #}
+  {# Single job — stable id for Idiomorph keying, see PR #35 review fix R7. #}
   {% set job = group_jobs[0] %}
-  <div class="card bg-base-200 border border-base-300 border-l-3 border-status-{{ job.status.value }}"
+  <div id="job-{{ job.id }}"
+       class="card bg-base-200 border border-base-300 border-l-3 border-status-{{ job.status.value }}"
        data-job-name="{{ job.filename }}">
     <div class="card-body p-4">
       {% include "_job_card.html" %}
