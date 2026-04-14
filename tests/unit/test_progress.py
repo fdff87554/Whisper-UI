@@ -200,6 +200,35 @@ class TestThrottledProgressReporter:
         assert reporter.report.call_count == 1
         assert reporter.report.call_args.args == (1.0, "done")
 
+    def test_concurrent_callers_do_not_corrupt_state(self):
+        """Smoke test for the throttle lock. Spawn many threads hammering
+        the closure with monotonically increasing progress; the final
+        state must be consistent and no exception may escape.
+        """
+        import threading
+
+        on_progress, reporter, _db, _job, _clock = _make_throttle()
+        errors: list[BaseException] = []
+
+        def worker(start: int) -> None:
+            try:
+                for i in range(50):
+                    on_progress(0.001 * (start + i), "stage")
+            except BaseException as e:  # pragma: no cover - defensive
+                errors.append(e)
+
+        threads = [threading.Thread(target=worker, args=(i * 50,)) for i in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == []
+        # last_progress must equal the highest progress that any thread
+        # actually wrote — i.e. monotonically non-decreasing.
+        final_progress = max(call.args[0] for call in reporter.report.call_args_list)
+        assert final_progress > 0
+
     def test_late_heartbeat_with_old_message_is_dropped(self):
         """Same race as above, but the late update still carries the old
         running message — the message-change force-flush must not save

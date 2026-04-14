@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -91,34 +92,42 @@ def _make_throttled_progress_reporter(
     last_progress = -1.0
     last_written_at = 0.0
     last_message = ""
+    # The diarize heartbeat invokes ``report`` from a background thread while
+    # the main thread is blocked inside the C++ inference call, so in normal
+    # operation only one thread mutates the closure state at a time. The lock
+    # is cheap defence-in-depth: it guarantees the read-decide-write sequence
+    # below is atomic even if some future stage spawns a worker thread that
+    # also calls on_progress.
+    lock = threading.Lock()
 
     def report(progress: float, message: str) -> None:
         nonlocal last_progress, last_written_at, last_message
 
-        # Monotonicity guard: drop any in-closure regression unconditionally,
-        # even if the message changed. The only realistic source of one is a
-        # late diarize heartbeat racing the main thread's DIARIZE_DONE flush;
-        # letting it through would visibly rewind the bar from 100% back to
-        # ~94%. Worker retries always spin up a fresh closure, so legitimate
-        # rewinds never reach this point.
-        if last_progress >= 0 and progress < last_progress:
-            return
-
-        now = monotonic()
-        force = last_progress < 0 or message != last_message or progress >= 1.0
-        if not force:
-            delta = progress - last_progress
-            if delta < min_delta and (now - last_written_at) < min_interval_sec:
+        with lock:
+            # Monotonicity guard: drop any in-closure regression unconditionally,
+            # even if the message changed. The only realistic source of one is a
+            # late diarize heartbeat racing the main thread's DIARIZE_DONE flush;
+            # letting it through would visibly rewind the bar from 100% back to
+            # ~94%. Worker retries always spin up a fresh closure, so legitimate
+            # rewinds never reach this point.
+            if last_progress >= 0 and progress < last_progress:
                 return
 
-        reporter.report(progress, message)
-        job.progress = progress
-        job.progress_message = message
-        db.update_job(job)
+            now = monotonic()
+            force = last_progress < 0 or message != last_message or progress >= 1.0
+            if not force:
+                delta = progress - last_progress
+                if delta < min_delta and (now - last_written_at) < min_interval_sec:
+                    return
 
-        last_progress = progress
-        last_written_at = now
-        last_message = message
+            reporter.report(progress, message)
+            job.progress = progress
+            job.progress_message = message
+            db.update_job(job)
+
+            last_progress = progress
+            last_written_at = now
+            last_message = message
 
     return report
 
