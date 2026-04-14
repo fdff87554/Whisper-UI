@@ -3,7 +3,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
+from rq.timeouts import JobTimeoutException
+
 from whisper_ui.core.models import Job
+from whisper_ui.worker.tasks import _extract_rq_timeout_seconds
 
 if TYPE_CHECKING:
     from whisper_ui.storage.database import JobDatabase
@@ -52,6 +55,35 @@ class TestWorkerTaskSetup:
             assert "db read failed" in result
             mock_db_instance.update_job.assert_not_called()
 
+    def test_extract_rq_timeout_prefers_get_current_job(self):
+        """When running inside a real RQ worker, get_current_job().timeout is
+        the authoritative source regardless of what the exception message says.
+        """
+        fake_job = MagicMock()
+        fake_job.timeout = 7200
+        with patch("rq.get_current_job", return_value=fake_job):
+            exc = JobTimeoutException("Task exceeded maximum timeout value (999 seconds)")
+            assert _extract_rq_timeout_seconds(exc) == 7200
+
+    def test_extract_rq_timeout_falls_back_to_message_regex(self):
+        """Outside a worker context, get_current_job() returns None and the
+        helper must parse the RQ-formatted message instead.
+        """
+        with patch("rq.get_current_job", return_value=None):
+            exc = JobTimeoutException("Task exceeded maximum timeout value (3600 seconds)")
+            assert _extract_rq_timeout_seconds(exc) == 3600
+
+    def test_extract_rq_timeout_returns_placeholder_on_total_failure(self):
+        with patch("rq.get_current_job", return_value=None):
+            exc = JobTimeoutException("something totally unexpected")
+            assert _extract_rq_timeout_seconds(exc) == "?"
+
+    def test_extract_rq_timeout_swallows_get_current_job_errors(self):
+        """get_current_job() raising must not crash the error-handling path."""
+        with patch("rq.get_current_job", side_effect=RuntimeError("no context")):
+            exc = JobTimeoutException("Task exceeded maximum timeout value (1800 seconds)")
+            assert _extract_rq_timeout_seconds(exc) == 1800
+
     def test_process_transcription_classifies_rq_timeout(self, db: JobDatabase, settings):
         """A JobTimeoutException raised mid-pipeline must surface as the
         Chinese timeout label, not "Diarization failed: ...", so users can
@@ -65,8 +97,10 @@ class TestWorkerTaskSetup:
         job = Job(filename="long.mp3", status=JobStatus.QUEUED, filepath="/tmp/long.mp3")
         db.insert_job(job)
 
+        # Intentionally do NOT set timeout_exc._timeout — RQ's real death
+        # penalty does not set it either; worker/tasks.py extracts the
+        # timeout via rq.get_current_job() or by parsing the message.
         timeout_exc = JobTimeoutException("Task exceeded maximum timeout value (3600 seconds)")
-        timeout_exc._timeout = 3600  # type: ignore[attr-defined]
 
         mock_redis = MagicMock()
         mock_orchestrator = MagicMock()
@@ -186,13 +220,13 @@ class TestWorkerTaskSetup:
         assert reloaded.status == JobStatus.FAILED
         assert reloaded.error is not None
         # The real orchestrator used to produce "Stage 'diarize' failed: ..."
-        # before the Phase 2 fix; assert explicitly that those wrappings
-        # are gone and the Chinese timeout label is used instead. The actual
-        # timeout-seconds value is asserted separately once Finding 2's
-        # get_current_job()/regex extraction lands.
+        # before the Phase 2 fix; assert explicitly that those wrappings are
+        # gone and the Chinese timeout label with the actual seconds value
+        # (extracted via the RQ message regex fallback) is used instead.
         assert "Diarization failed" not in reloaded.error
         assert "Stage 'diarize' failed" not in reloaded.error
         assert "超出上限" in reloaded.error
+        assert "3600" in reloaded.error
 
     def test_job_model_has_diarization_fields(self):
         job = Job(enable_diarization=False, convert_to_traditional=False)

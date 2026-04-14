@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 from redis import Redis
@@ -23,6 +24,38 @@ from whisper_ui.ui.labels import JOBS_TIMEOUT_ERROR
 from whisper_ui.worker.progress import RedisProgressReporter
 
 logger = logging.getLogger(__name__)
+
+_RQ_TIMEOUT_MESSAGE_PATTERN = re.compile(r"\((\d+)\s*seconds?\)")
+
+
+def _extract_rq_timeout_seconds(exc: BaseException) -> int | str:
+    """Return the configured RQ ``job_timeout`` for the running job.
+
+    RQ's death-penalty handler formats the timeout into the exception
+    *message* but does not attach it as an attribute on the exception
+    instance (see ``rq.timeouts.UnixSignalDeathPenalty.handle_death_penalty``
+    in RQ 2.7.0). So:
+
+    1. In a real worker context, ``rq.get_current_job().timeout`` holds the
+       actual configured value from enqueue time.
+    2. Outside a worker context (unit tests that call
+       ``process_transcription`` directly), fall back to parsing the
+       formatted message.
+    3. If both fail, return ``"?"`` so the error label still renders.
+    """
+    try:
+        from rq import get_current_job
+
+        current = get_current_job()
+        if current is not None and current.timeout:
+            return current.timeout
+    except Exception:
+        logger.debug("rq.get_current_job() unavailable while extracting timeout", exc_info=True)
+
+    match = _RQ_TIMEOUT_MESSAGE_PATTERN.search(str(exc))
+    if match:
+        return int(match.group(1))
+    return "?"
 
 
 def _cleanup_preprocessed(context: dict) -> None:
@@ -120,7 +153,7 @@ def process_transcription(job_id: str) -> str:
 
     except BaseTimeoutException as e:
         _cleanup_preprocessed(context)
-        timeout_seconds = getattr(e, "_timeout", None) or "?"
+        timeout_seconds = _extract_rq_timeout_seconds(e)
         error_msg = JOBS_TIMEOUT_ERROR.format(seconds=timeout_seconds)
         logger.exception("Job %s timed out: %s", job_id, error_msg)
         if job is not None:
