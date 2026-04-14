@@ -22,7 +22,13 @@ from whisper_ui.pipeline.align import AlignStage
 from whisper_ui.pipeline.assign_speakers import AssignSpeakersStage
 from whisper_ui.pipeline.diarize import DiarizeStage
 from whisper_ui.pipeline.download import DownloadStage
-from whisper_ui.pipeline.orchestrator import STAGE_WEIGHTS_WITH_DOWNLOAD, PipelineOrchestrator
+from whisper_ui.pipeline.llm_correction import LLMCorrectionStage
+from whisper_ui.pipeline.orchestrator import (
+    STAGE_WEIGHTS_WITH_DOWNLOAD,
+    STAGE_WEIGHTS_WITH_DOWNLOAD_AND_LLM,
+    STAGE_WEIGHTS_WITH_LLM,
+    PipelineOrchestrator,
+)
 from whisper_ui.pipeline.postprocess import PostprocessStage
 from whisper_ui.pipeline.preprocess import PreprocessStage
 from whisper_ui.pipeline.transcribe import TranscribeStage
@@ -181,6 +187,25 @@ def process_transcription(job_id: str) -> str:
             PostprocessStage(convert_to_traditional=job.convert_to_traditional),
         ]
 
+        # The LLM correction stage is only appended when the user opted in
+        # *and* an Ollama endpoint is configured at the deployment level.
+        # Empty base URL acts as a kill-switch — even opted-in jobs just
+        # skip it silently, so operators can disable the feature globally
+        # without redeploying the web tier.
+        llm_enabled = job.llm_correction_enabled and bool(settings.ollama_base_url)
+        if llm_enabled:
+            common_stages.append(
+                LLMCorrectionStage(
+                    base_url=settings.ollama_base_url,
+                    model=settings.ollama_model,
+                    keep_alive=settings.ollama_keep_alive,
+                    chunk_size=settings.llm_chunk_size,
+                    chunk_context=settings.llm_chunk_context,
+                    temperature=settings.llm_temperature,
+                    request_timeout=float(settings.ollama_request_timeout),
+                )
+            )
+
         context = {
             "language": job.language,
             "batch_size": settings.batch_size,
@@ -190,13 +215,13 @@ def process_transcription(job_id: str) -> str:
         if job.source_url:
             download_dir = str(filestore.prepare_upload_path(job.id, "_").parent)
             stages = [DownloadStage(max_duration=settings.youtube_max_duration), *common_stages]
-            stage_weights = STAGE_WEIGHTS_WITH_DOWNLOAD
+            stage_weights = STAGE_WEIGHTS_WITH_DOWNLOAD_AND_LLM if llm_enabled else STAGE_WEIGHTS_WITH_DOWNLOAD
             context["source_url"] = job.source_url
             context["download_dir"] = download_dir
             context["input_path"] = ""
         else:
             stages = common_stages
-            stage_weights = None
+            stage_weights = STAGE_WEIGHTS_WITH_LLM if llm_enabled else None
             context["input_path"] = job.filepath
 
         on_progress = _make_throttled_progress_reporter(reporter, db, job)
