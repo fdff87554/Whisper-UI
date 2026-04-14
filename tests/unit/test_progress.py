@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from whisper_ui.core.models import Job
 from whisper_ui.worker.progress import RedisProgressReporter
+from whisper_ui.worker.tasks import _make_throttled_progress_reporter
 
 
 def _make_reporter(processing_ttl: int = 7200) -> tuple[MagicMock, RedisProgressReporter]:
@@ -87,3 +89,108 @@ def test_get_progress_decodes_bytes():
     assert result["progress"] == "0.75"
     assert result["message"] == "running"
     assert result["status"] == "processing"
+
+
+class _FakeClock:
+    """Monotonic clock stub so throttle tests are not flaky under CI load."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def _make_throttle(min_delta: float = 0.005, min_interval_sec: float = 0.5):
+    reporter = MagicMock(spec=RedisProgressReporter)
+    db = MagicMock()
+    job = Job(filename="t.wav")
+    clock = _FakeClock()
+    on_progress = _make_throttled_progress_reporter(
+        reporter,
+        db,
+        job,
+        min_delta=min_delta,
+        min_interval_sec=min_interval_sec,
+        monotonic=clock,
+    )
+    return on_progress, reporter, db, job, clock
+
+
+class TestThrottledProgressReporter:
+    def test_first_call_always_writes(self):
+        on_progress, reporter, db, _job, _clock = _make_throttle()
+        on_progress(0.0, "starting")
+        reporter.report.assert_called_once_with(0.0, "starting")
+        db.update_job.assert_called_once()
+
+    def test_drops_tiny_delta_inside_interval(self):
+        on_progress, reporter, db, _job, clock = _make_throttle()
+        on_progress(0.10, "stage")
+        # 0.001 delta at 100 ms — both below thresholds → must be dropped.
+        clock.advance(0.1)
+        on_progress(0.101, "stage")
+        assert reporter.report.call_count == 1
+        assert db.update_job.call_count == 1
+
+    def test_writes_after_enough_delta(self):
+        on_progress, reporter, _db, _job, clock = _make_throttle()
+        on_progress(0.10, "stage")
+        clock.advance(0.1)
+        on_progress(0.106, "stage")  # 0.6 pp > 0.5 pp threshold
+        assert reporter.report.call_count == 2
+
+    def test_writes_after_enough_time(self):
+        on_progress, reporter, _db, _job, clock = _make_throttle()
+        on_progress(0.10, "stage")
+        # Same progress value but interval exceeded — still a write because
+        # we treat "stale heartbeat" as worth flushing so Redis TTL resets.
+        clock.advance(0.6)
+        on_progress(0.101, "stage")
+        assert reporter.report.call_count == 2
+
+    def test_message_change_always_flushes(self):
+        on_progress, reporter, _db, _job, clock = _make_throttle()
+        on_progress(0.10, "stage-a")
+        clock.advance(0.01)
+        # Below both delta and interval thresholds, but the message flipped
+        # (stage transition) — must flush so the UI shows the new label.
+        on_progress(0.101, "stage-b")
+        assert reporter.report.call_count == 2
+        assert reporter.report.call_args_list[-1].args == (0.101, "stage-b")
+
+    def test_completion_always_flushes(self):
+        on_progress, reporter, _db, _job, clock = _make_throttle()
+        on_progress(0.95, "finishing")
+        clock.advance(0.01)
+        # Tiny delta and tiny interval — but progress reaching 1.0 must
+        # never be swallowed or the bar would freeze just short of done.
+        on_progress(1.0, "finishing")
+        assert reporter.report.call_count == 2
+        assert reporter.report.call_args_list[-1].args == (1.0, "finishing")
+
+    def test_rapid_burst_is_bounded(self):
+        """1000 tiny updates in the same message must collapse to far fewer
+        writes than input calls — matching the anti-thrash invariant the
+        throttle is meant to enforce."""
+        on_progress, reporter, _db, _job, clock = _make_throttle()
+        for i in range(1000):
+            on_progress(0.10 + i * 0.0001, "stage")
+            clock.advance(0.001)  # 1 ms apart
+        # 1000 calls over ~1 s with 0.5 pp / 500 ms thresholds. Delta crosses
+        # every ~50 calls so we expect ~20 writes — two orders of magnitude
+        # below the input rate, which is the whole point of the throttle.
+        assert reporter.report.call_count <= 25
+        assert reporter.report.call_count < len(range(1000)) // 10
+
+    def test_regression_to_lower_progress_flushes(self):
+        """A stage that legitimately rewinds (e.g. retry) must not be
+        silently dropped by the delta gate."""
+        on_progress, reporter, _db, _job, clock = _make_throttle()
+        on_progress(0.60, "stage")
+        clock.advance(0.01)
+        on_progress(0.55, "stage")
+        assert reporter.report.call_count == 2
