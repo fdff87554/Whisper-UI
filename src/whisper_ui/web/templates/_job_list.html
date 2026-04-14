@@ -1,9 +1,11 @@
 {# htmx fragment: job list with polling — Idiomorph morphs unchanged DOM in place,
-   preserving collapse state, focus, and scroll between polls. #}
+   preserving collapse state, focus, and scroll between polls. The callbacks
+   reference (defined in base.html) makes data-morph-skip-checked elements opt
+   out of `checked` syncing so user-toggled batch collapses are not reset. #}
 <div id="job-list-wrapper"
      hx-get="/jobs/list?status={{ status|default('', true) }}&page={{ page }}"
      {% if has_active %}hx-trigger="every 3s, refreshJobList from:body"{% else %}hx-trigger="refreshJobList from:body"{% endif %}
-     hx-swap="morph:{morphStyle:'outerHTML', ignoreActiveValue:true}">
+     hx-swap="morph:{morphStyle:'outerHTML', ignoreActiveValue:true, callbacks:window.__whisperUiMorphCallbacks}">
 
 {% if total_count == 0 %}
   <div class="text-center py-12 opacity-60">
@@ -26,7 +28,7 @@
   {% set bi = batch_info[group_key] %}
   <div class="collapse collapse-arrow bg-base-200 border border-base-300" data-job-name="{{ group_jobs[0].filename if group_jobs else '' }}"
        {% if not bi.all_done %}open{% endif %}>
-    <input type="checkbox" {% if not bi.all_done %}checked{% endif %}>
+    <input type="checkbox" data-morph-skip-checked {% if not bi.all_done %}checked{% endif %}>
     <div class="collapse-title">
       <div class="flex flex-wrap items-center gap-2 mb-1">
         <span class="font-medium">{{ labels.JOBS_BATCH_LABEL.format(count=bi.total) }}</span>

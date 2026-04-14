@@ -27,6 +27,26 @@
           integrity="sha384-X9kJyAubVxnP0hcA+AMMs21U445qsnqhnUF8EBlEpP3a42Kh/JwWjlv2ZcvGfphb"
           crossorigin="anonymous"></script>
   <script>
+  // Idiomorph callbacks shared across all morph swaps. The default
+  // syncBooleanAttribute logic clobbers user-toggled `checked` state on
+  // morph (ignoreActiveValue only protects `value`, not `checked`), so
+  // any element marked with data-morph-skip-checked opts out of having
+  // its checked attribute morphed back to the server-rendered default.
+  // See PR #35 review fix R5.
+  window.__whisperUiMorphCallbacks = {
+    beforeAttributeUpdated: function(attributeName, node, mutationType) {
+      if (
+        attributeName === 'checked' &&
+        node &&
+        typeof node.matches === 'function' &&
+        node.matches('[data-morph-skip-checked]')
+      ) {
+        return false;
+      }
+    }
+  };
+  </script>
+  <script>
   document.addEventListener('alpine:init', () => {
     Alpine.store('nav', { activePage: '{{ active_page }}' });
 
