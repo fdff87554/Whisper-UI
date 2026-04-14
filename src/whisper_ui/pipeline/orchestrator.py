@@ -32,6 +32,31 @@ STAGE_WEIGHTS_WITH_DOWNLOAD: dict[str, tuple[float, float]] = {
     "postprocess": (0.95, 1.00),
 }
 
+# Weight bands used when LLMCorrectionStage is appended. Kept separate from
+# the default dicts so production jobs enqueued before an upgrade keep using
+# the layout they started with — changing the existing dicts would cause
+# their progress bars to jump when the worker is redeployed.
+STAGE_WEIGHTS_WITH_LLM: dict[str, tuple[float, float]] = {
+    "preprocess": (0.00, 0.05),
+    "transcribe": (0.05, 0.50),
+    "align": (0.50, 0.60),
+    "diarize": (0.60, 0.85),
+    "assign_speakers": (0.85, 0.90),
+    "postprocess": (0.90, 0.92),
+    "llm_correction": (0.92, 1.00),
+}
+
+STAGE_WEIGHTS_WITH_DOWNLOAD_AND_LLM: dict[str, tuple[float, float]] = {
+    "download": (0.00, 0.12),
+    "preprocess": (0.12, 0.17),
+    "transcribe": (0.17, 0.55),
+    "align": (0.55, 0.65),
+    "diarize": (0.65, 0.85),
+    "assign_speakers": (0.85, 0.90),
+    "postprocess": (0.90, 0.92),
+    "llm_correction": (0.92, 1.00),
+}
+
 
 class PipelineOrchestrator:
     def __init__(
