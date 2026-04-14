@@ -41,11 +41,11 @@
   </div>
 </div>
 
-{# Active Jobs — polling area (always rendered so new jobs appear without reload) #}
+{# Active Jobs — polling area; morph keeps progress bars from flashing on each poll. #}
 <div id="dashboard-active"
      hx-get="/dashboard/active"
      hx-trigger="every 5s"
-     hx-swap="innerHTML">
+     hx-swap="morph:innerHTML">
   {% include "_dashboard_active.html" %}
 </div>
 
