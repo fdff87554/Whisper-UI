@@ -37,6 +37,9 @@ dev = [
   "whisper-ui[frontend,worker-llm]",
   "pytest>=9.0,<10",
   "pytest-cov>=7.0,<8",
+  # In-process Redis stand-in for the end-to-end integration test. Avoids
+  # spinning up a real Redis or a Docker testcontainer in CI.
+  "fakeredis>=2.30,<3",
 ]
 
 [build-system]
@@ -84,3 +87,10 @@ indent-style = "space"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+# Integration tests require ffmpeg on PATH and are excluded from the
+# default run so unit tests stay fast. Run them explicitly with
+# `pytest -m integration` (in CI's integration stage, for example).
+markers = [
+  "integration: end-to-end tests that exercise real I/O boundaries (ffmpeg, sqlite, filestore, fakeredis)",
+]
+addopts = "-m 'not integration'"
