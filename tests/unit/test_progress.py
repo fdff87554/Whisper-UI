@@ -5,9 +5,9 @@ from unittest.mock import MagicMock
 from whisper_ui.worker.progress import RedisProgressReporter
 
 
-def _make_reporter() -> tuple[MagicMock, RedisProgressReporter]:
+def _make_reporter(processing_ttl: int = 7200) -> tuple[MagicMock, RedisProgressReporter]:
     mock_redis = MagicMock()
-    reporter = RedisProgressReporter(mock_redis, "test-job-id")
+    reporter = RedisProgressReporter(mock_redis, "test-job-id", processing_ttl=processing_ttl)
     return mock_redis, reporter
 
 
@@ -22,6 +22,20 @@ def test_report_sets_progress():
     assert mapping["message"] == "halfway"
     assert mapping["status"] == "processing"
     mock_redis.expire.assert_called_once_with("job:test-job-id", 7200)
+
+
+def test_report_uses_injected_processing_ttl():
+    mock_redis, reporter = _make_reporter(processing_ttl=12345)
+    reporter.report(0.1, "starting")
+    mock_redis.expire.assert_called_once_with("job:test-job-id", 12345)
+
+
+def test_report_falls_back_to_default_ttl_when_omitted():
+    mock_redis = MagicMock()
+    reporter = RedisProgressReporter(mock_redis, "default-ttl-job")
+    reporter.report(0.2, "running")
+    args, _ = mock_redis.expire.call_args
+    assert args[1] > 0
 
 
 def test_complete_sets_done():

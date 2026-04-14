@@ -22,7 +22,7 @@ async def lifespan(app: FastAPI):
     from redis.exceptions import RedisError
 
     from whisper_ui.core.config import get_settings
-    from whisper_ui.core.constants import STALE_JOB_CHECK_INTERVAL, STALE_JOB_TIMEOUT
+    from whisper_ui.core.constants import STALE_JOB_CHECK_INTERVAL
     from whisper_ui.storage.database import JobDatabase
     from whisper_ui.storage.filestore import FileStore
     from whisper_ui.ui.labels import JOBS_STALE_ERROR
@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(STALE_JOB_CHECK_INTERVAL)
             try:
-                recovered = app.state.db.recover_stale_jobs(STALE_JOB_TIMEOUT, JOBS_STALE_ERROR)
+                recovered = app.state.db.recover_stale_jobs(settings.stale_job_timeout, JOBS_STALE_ERROR)
                 if recovered > 0:
                     logger.warning("Recovered %d stale job(s)", recovered)
             except Exception:

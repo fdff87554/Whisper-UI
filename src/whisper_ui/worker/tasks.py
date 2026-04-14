@@ -38,7 +38,7 @@ def _cleanup_preprocessed(context: dict) -> None:
 def process_transcription(job_id: str) -> str:
     settings = get_settings()
     redis = Redis.from_url(settings.redis_url)
-    reporter = RedisProgressReporter(redis, job_id)
+    reporter = RedisProgressReporter(redis, job_id, processing_ttl=settings.redis_processing_expiry)
     db = JobDatabase(settings.database_path)
     filestore = FileStore(settings.upload_dir, settings.output_dir)
 
