@@ -206,6 +206,41 @@ class TestViewerRoutes:
         assert resp.status_code == 200
         assert "test.mp3" in resp.text
 
+    def test_viewer_disables_search_for_huge_transcript(self, client, db, filestore):
+        from whisper_ui.core.constants import VIEWER_SEARCH_SEGMENT_LIMIT
+
+        big_segments = [
+            Segment(start=float(i), end=float(i + 1), text=f"seg{i}") for i in range(VIEWER_SEARCH_SEGMENT_LIMIT + 1)
+        ]
+        result = TranscriptResult(segments=big_segments, language="zh", duration=float(len(big_segments)))
+        job = Job(filename="huge.mp3", status=JobStatus.COMPLETED, language="zh")
+        result_path = filestore.save_result(job.id, result)
+        job.result_path = str(result_path)
+        db.insert_job(job)
+
+        resp = client.get(f"/viewer/{job.id}")
+        assert resp.status_code == 200
+        assert "已停用即時搜尋" in resp.text
+        assert 'placeholder="輸入關鍵字篩選' not in resp.text
+
+    def test_viewer_keeps_search_under_limit(self, client, db, filestore):
+        from whisper_ui.core.constants import VIEWER_SEARCH_SEGMENT_LIMIT
+
+        small_segments = [
+            Segment(start=float(i), end=float(i + 1), text=f"seg{i}")
+            for i in range(min(10, VIEWER_SEARCH_SEGMENT_LIMIT))
+        ]
+        result = TranscriptResult(segments=small_segments, language="zh", duration=10.0)
+        job = Job(filename="small.mp3", status=JobStatus.COMPLETED, language="zh")
+        result_path = filestore.save_result(job.id, result)
+        job.result_path = str(result_path)
+        db.insert_job(job)
+
+        resp = client.get(f"/viewer/{job.id}")
+        assert resp.status_code == 200
+        assert 'placeholder="輸入關鍵字篩選' in resp.text
+        assert "已停用即時搜尋" not in resp.text
+
     def test_viewer_not_found(self, client):
         resp = client.get("/viewer/00000000000000000000000000000000")
         assert resp.status_code == 200

@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 
+from whisper_ui.core.constants import VIEWER_SEARCH_SEGMENT_LIMIT
 from whisper_ui.core.models import JobStatus
 from whisper_ui.export.factory import get_exporter
 from whisper_ui.web.deps import DbDep, FileStoreDep, make_content_disposition, templates
@@ -71,6 +72,8 @@ async def viewer_page(request: Request, db: DbDep, filestore: FileStoreDep, job_
         else:
             speaker_colors = _build_speaker_colors(result.segments)
 
+    search_disabled = result is not None and len(result.segments) > VIEWER_SEARCH_SEGMENT_LIMIT
+
     return templates.TemplateResponse(
         request=request,
         name="viewer.html",
@@ -80,6 +83,7 @@ async def viewer_page(request: Request, db: DbDep, filestore: FileStoreDep, job_
             "result": result,
             "error": error,
             "speaker_colors": speaker_colors,
+            "search_disabled": search_disabled,
         },
     )
 
