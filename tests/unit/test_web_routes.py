@@ -63,6 +63,17 @@ class TestDashboardRoutes:
         resp = client.get("/dashboard/active")
         assert resp.status_code == 200
 
+    def test_dashboard_polls_slowly_when_idle(self, client, db):
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert 'hx-trigger="every 30s"' in resp.text
+
+    def test_dashboard_polls_fast_when_active(self, client, db):
+        db.insert_job(Job(filename="active.mp3", status=JobStatus.PROCESSING, language="zh"))
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert 'hx-trigger="every 5s"' in resp.text
+
 
 class TestUploadRoutes:
     def test_upload_page(self, client):

@@ -41,10 +41,14 @@
   </div>
 </div>
 
-{# Active Jobs — polling area; morph keeps progress bars from flashing on each poll. #}
+{# Active Jobs — polling area; morph keeps progress bars from flashing on each poll.
+   The poll interval is chosen at initial render: a 5s tick is only worth paying
+   when there is at least one active job to watch. With nothing in flight we still
+   poll, but on a 30s cadence so the dashboard eventually picks up jobs submitted
+   from another tab without burning Redis/SQLite reads every five seconds. #}
 <div id="dashboard-active"
      hx-get="/dashboard/active"
-     hx-trigger="every 5s"
+     hx-trigger="every {% if active_count > 0 %}5s{% else %}30s{% endif %}"
      hx-swap="morph:innerHTML">
   {% include "_dashboard_active.html" %}
 </div>
