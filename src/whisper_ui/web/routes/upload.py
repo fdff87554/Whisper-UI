@@ -13,10 +13,12 @@ from markupsafe import escape
 from whisper_ui.core.constants import ERROR_MAX_LENGTH, MAX_BATCH_SIZE
 from whisper_ui.core.languages import SUPPORTED_LANGUAGES, WHISPER_MODELS
 from whisper_ui.core.models import Job, JobStatus
+from whisper_ui.pipeline.audio_probe import get_audio_duration_seconds
 from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
 from whisper_ui.ui import labels as ui_labels
 from whisper_ui.web.deps import DbDep, FileStoreDep, RedisDep, SettingsDep, templates
 from whisper_ui.web.url_validation import PlaylistURLError, YouTubeURLError, validate_youtube_url
+from whisper_ui.worker.timeout import calculate_job_timeout
 
 _READ_CHUNK_SIZE = 1024 * 1024  # 1 MB
 
@@ -157,6 +159,7 @@ async def upload_submit(
             )
 
         job.filepath = str(dest)
+        job.duration = get_audio_duration_seconds(dest)
         job.status = JobStatus.QUEUED
         db.insert_job(job)
 
@@ -164,7 +167,7 @@ async def upload_submit(
             q.enqueue(
                 "whisper_ui.worker.tasks.process_transcription",
                 job.id,
-                job_timeout="1h",
+                job_timeout=calculate_job_timeout(job.duration, settings),
             )
             submitted_count += 1
         except Exception as e:
@@ -271,7 +274,7 @@ async def upload_url_submit(
             q.enqueue(
                 "whisper_ui.worker.tasks.process_transcription",
                 job.id,
-                job_timeout="2h",
+                job_timeout=calculate_job_timeout(None, settings),
             )
             submitted_count += 1
         except Exception as e:

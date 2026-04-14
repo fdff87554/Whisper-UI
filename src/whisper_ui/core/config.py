@@ -3,7 +3,7 @@ from __future__ import annotations
 import functools
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -41,6 +41,75 @@ class Settings(BaseSettings):
 
     # YouTube
     youtube_max_duration: int = 14400  # seconds (4 hours)
+
+    # Queue / job timeouts (seconds)
+    # Fallback when audio duration is unknown (e.g., YouTube URL before download).
+    job_timeout_default: int = 7200  # 2h
+    # Lower bound applied to dynamically calculated timeouts so short audio still
+    # gets enough headroom for model loading and overhead.
+    job_timeout_floor: int = 1800  # 30min
+    # Dynamic timeout = audio_duration_seconds * multiplier, then clamped into
+    # [job_timeout_floor, job_timeout_max]. 3x gives comfortable headroom on GPU
+    # for large-v3 + alignment + diarization across the pipeline.
+    job_timeout_audio_multiplier: float = 3.0
+    # Hard upper cap to prevent runaway jobs; also the basis for stale recovery.
+    job_timeout_max: int = 28800  # 8h
+    # Extra buffer added on top of job_timeout_max when reclaiming stale jobs
+    # whose worker died without updating the DB.
+    stale_job_buffer: int = 1800  # 30min
+    # Redis TTL for progress keys of running jobs. Should exceed the longest
+    # possible job timeout so the UI does not lose progress state mid-run.
+    redis_processing_expiry: int = 30600  # job_timeout_max + stale_job_buffer
+    # How often DiarizeStage's background heartbeat refreshes progress so
+    # stale-job-recovery and the UI can see the task is still alive.
+    diarize_heartbeat_interval: int = 30
+
+    @property
+    def stale_job_timeout(self) -> int:
+        """Threshold (seconds) after which a PROCESSING job is considered stale.
+
+        Derived from ``job_timeout_max`` plus ``stale_job_buffer`` so it always
+        stays consistent when the cap is tuned.
+        """
+        return self.job_timeout_max + self.stale_job_buffer
+
+    @model_validator(mode="after")
+    def _validate_timeout_invariants(self) -> Settings:
+        """Fail-fast at startup if queue-timeout settings are inconsistent.
+
+        Without these checks operators can set values that silently produce
+        counter-intuitive behavior — e.g. ``JOB_TIMEOUT_MAX=60`` with the
+        default ``JOB_TIMEOUT_FLOOR=1800`` would clamp every computed timeout
+        back up to 1800 rather than the intended 60. The constraints below
+        mirror what ``calculate_job_timeout`` already assumes and what
+        ``stale_job_timeout`` depends on.
+        """
+        if self.job_timeout_floor <= 0:
+            raise ValueError(f"job_timeout_floor must be > 0, got {self.job_timeout_floor}")
+        if self.job_timeout_default < self.job_timeout_floor:
+            raise ValueError(
+                f"job_timeout_default ({self.job_timeout_default}) must be >= "
+                f"job_timeout_floor ({self.job_timeout_floor})"
+            )
+        if self.job_timeout_max < self.job_timeout_default:
+            raise ValueError(
+                f"job_timeout_max ({self.job_timeout_max}) must be >= job_timeout_default ({self.job_timeout_default})"
+            )
+        if self.job_timeout_audio_multiplier <= 0:
+            raise ValueError(f"job_timeout_audio_multiplier must be > 0, got {self.job_timeout_audio_multiplier}")
+        if self.stale_job_buffer < 0:
+            raise ValueError(f"stale_job_buffer must be >= 0, got {self.stale_job_buffer}")
+        if self.diarize_heartbeat_interval < 0:
+            raise ValueError(f"diarize_heartbeat_interval must be >= 0, got {self.diarize_heartbeat_interval}")
+        # Redis progress keys must outlive the longest possible job run,
+        # otherwise the UI loses progress state mid-pipeline on long jobs.
+        if self.redis_processing_expiry < self.stale_job_timeout:
+            raise ValueError(
+                f"redis_processing_expiry ({self.redis_processing_expiry}) must be >= "
+                f"stale_job_timeout ({self.stale_job_timeout}) = "
+                f"job_timeout_max + stale_job_buffer"
+            )
+        return self
 
 
 @functools.lru_cache(maxsize=1)

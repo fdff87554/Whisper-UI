@@ -100,6 +100,7 @@ JOBS_PAGE_INFO = "第 {current} / {total} 頁（共 {count} 個任務）"
 JOBS_PAGE_PREV = "上一頁"
 JOBS_PAGE_NEXT = "下一頁"
 JOBS_STALE_ERROR = "任務逾時或 Worker 異常終止"
+JOBS_TIMEOUT_ERROR = "任務總執行時間超出上限（{seconds} 秒），音檔可能過長或裝置繁忙，請調整 JOB_TIMEOUT_MAX 後重試"
 JOBS_SEARCH_PLACEHOLDER = "搜尋檔案名稱..."
 JOBS_INLINE_EXPORT = "匯出"
 

@@ -10,10 +10,12 @@ from fastapi.responses import HTMLResponse, Response
 
 from whisper_ui.core.constants import DEFAULT_JOBS_PER_PAGE, ERROR_MAX_LENGTH
 from whisper_ui.core.models import Job, JobStatus
+from whisper_ui.pipeline.audio_probe import get_audio_duration_seconds
 from whisper_ui.web.batch_zip import create_batch_zip
-from whisper_ui.web.deps import DbDep, FileStoreDep, RedisDep, make_content_disposition, templates
+from whisper_ui.web.deps import DbDep, FileStoreDep, RedisDep, SettingsDep, make_content_disposition, templates
 from whisper_ui.web.validation import validate_hex_id
 from whisper_ui.worker.progress import RedisProgressReporter
+from whisper_ui.worker.timeout import calculate_job_timeout
 
 if TYPE_CHECKING:
     from whisper_ui.storage.database import JobDatabase
@@ -98,8 +100,25 @@ async def jobs_list_fragment(request: Request, db: DbDep, redis: RedisDep, statu
     return templates.TemplateResponse(request=request, name="_job_list.html", context=ctx)
 
 
+def _probe_retry_duration(job: Job) -> float | None:
+    """Return the audio duration to use when sizing a retry job_timeout.
+
+    For direct uploads the filepath still points at the original file on
+    disk, so re-probing is cheap and avoids depending on the previous run
+    having populated Job.duration. For URL jobs the original file has
+    been cleaned up, so fall back to None → job_timeout_default.
+    """
+    if job.source_url:
+        return None
+    try:
+        return get_audio_duration_seconds(job.filepath)
+    except Exception:  # pragma: no cover - defensive, ffprobe helper already swallows
+        logger.exception("Failed to probe duration for retry of job %s", job.id)
+        return None
+
+
 @router.post("/jobs/{job_id}/retry")
-async def retry_job(job_id: str, db: DbDep, redis: RedisDep):
+async def retry_job(job_id: str, db: DbDep, redis: RedisDep, settings: SettingsDep):
     validate_hex_id(job_id, "job_id")
     job = db.get_job(job_id)
     if job is None or job.status != JobStatus.FAILED:
@@ -108,12 +127,13 @@ async def retry_job(job_id: str, db: DbDep, redis: RedisDep):
     try:
         from rq import Queue
 
+        retry_duration = _probe_retry_duration(job)
         job.status = JobStatus.QUEUED
         job.error = None
         job.progress = 0.0
         job.progress_message = ""
         job.result_path = None
-        job.duration = None
+        job.duration = retry_duration
         db.update_job(job)
         redis.delete(f"job:{job.id}")
 
@@ -121,7 +141,7 @@ async def retry_job(job_id: str, db: DbDep, redis: RedisDep):
         q.enqueue(
             "whisper_ui.worker.tasks.process_transcription",
             job.id,
-            job_timeout="2h" if job.source_url else "1h",
+            job_timeout=calculate_job_timeout(retry_duration, settings),
         )
     except Exception as e:
         job.status = JobStatus.FAILED
@@ -147,7 +167,7 @@ async def delete_job(job_id: str, db: DbDep, filestore: FileStoreDep, redis: Red
 
 
 @router.post("/jobs/batch/{batch_id}/retry")
-async def retry_batch(batch_id: str, db: DbDep, redis: RedisDep):
+async def retry_batch(batch_id: str, db: DbDep, redis: RedisDep, settings: SettingsDep):
     validate_hex_id(batch_id, "batch_id")
     all_jobs = db.list_jobs_by_batch(batch_id)
     if not all_jobs:
@@ -160,18 +180,19 @@ async def retry_batch(batch_id: str, db: DbDep, redis: RedisDep):
         if job.status != JobStatus.FAILED:
             continue
         try:
+            retry_duration = _probe_retry_duration(job)
             job.status = JobStatus.QUEUED
             job.error = None
             job.progress = 0.0
             job.progress_message = ""
             job.result_path = None
-            job.duration = None
+            job.duration = retry_duration
             db.update_job(job)
             redis.delete(f"job:{job.id}")
             q.enqueue(
                 "whisper_ui.worker.tasks.process_transcription",
                 job.id,
-                job_timeout="2h" if job.source_url else "1h",
+                job_timeout=calculate_job_timeout(retry_duration, settings),
             )
         except Exception:
             logger.exception("Failed to retry job %s", job.id)

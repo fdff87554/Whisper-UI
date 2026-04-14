@@ -14,9 +14,10 @@ build/
 .coverage
 htmlcov/
 
-# IDE
+# IDE / agent tooling (local-only per-machine config)
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 

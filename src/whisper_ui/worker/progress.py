@@ -8,7 +8,6 @@ from whisper_ui.core.constants import (
     MESSAGE_MAX_LENGTH,
     REDIS_COMPLETED_EXPIRY,
     REDIS_FAILED_EXPIRY,
-    REDIS_PROCESSING_EXPIRY,
 )
 from whisper_ui.core.messages import PIPELINE_COMPLETE
 
@@ -18,11 +17,24 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# Fallback TTL used when callers do not pass a processing expiry. Long enough
+# to survive the default job timeout but short enough that crashed workers do
+# not leave orphaned progress keys around for the whole completed-job window.
+_DEFAULT_PROCESSING_TTL = 7200
+
+
 class RedisProgressReporter:
-    def __init__(self, redis: Redis, job_id: str) -> None:
+    def __init__(
+        self,
+        redis: Redis,
+        job_id: str,
+        *,
+        processing_ttl: int = _DEFAULT_PROCESSING_TTL,
+    ) -> None:
         self._redis = redis
         self._job_id = job_id
         self._key = f"job:{job_id}"
+        self._processing_ttl = processing_ttl
 
     def report(self, progress: float, message: str) -> None:
         self._redis.hset(
@@ -33,7 +45,7 @@ class RedisProgressReporter:
                 "status": "processing",
             },
         )
-        self._redis.expire(self._key, REDIS_PROCESSING_EXPIRY)
+        self._redis.expire(self._key, self._processing_ttl)
 
     def complete(self, result_path: str) -> None:
         self._redis.hset(

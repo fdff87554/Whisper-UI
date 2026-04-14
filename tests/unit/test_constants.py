@@ -10,7 +10,6 @@ from whisper_ui.core.constants import (
     MESSAGE_MAX_LENGTH,
     REDIS_COMPLETED_EXPIRY,
     REDIS_FAILED_EXPIRY,
-    REDIS_PROCESSING_EXPIRY,
     SQLITE_BUSY_TIMEOUT_MS,
     STDERR_MAX_LENGTH,
     TIMESTAMP_DISPLAY_LENGTH,
@@ -38,7 +37,6 @@ def test_timeouts_positive():
 
 
 def test_redis_expiry_values_reasonable():
-    assert REDIS_PROCESSING_EXPIRY >= 3600  # at least 1 hour
     assert REDIS_COMPLETED_EXPIRY >= 3600
     assert REDIS_FAILED_EXPIRY >= 3600
 
