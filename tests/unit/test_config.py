@@ -187,3 +187,23 @@ def test_get_settings_keeps_cuda_when_available(tmp_path):
         assert result.device == "cuda"
         assert result.compute_type == "int8_float16"
     get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("", ""),
+        ("http://ollama:11434", "http://ollama:11434"),
+        ("http://ollama:11434/", "http://ollama:11434"),
+        ("http://ollama:11434/api", "http://ollama:11434"),
+        ("http://ollama:11434/api/", "http://ollama:11434"),
+        ("http://host:11434/v1", "http://host:11434/v1"),  # other paths untouched
+        ("http://api.internal:11434", "http://api.internal:11434"),  # host containing "api" untouched
+    ],
+)
+def test_ollama_base_url_normalization(tmp_path, raw, expected):
+    """Defensive normalization keeps httpx from producing /api/api/chat
+    when users copy a URL that already includes the /api suffix.
+    """
+    s = _make_settings(tmp_path, ollama_base_url=raw)
+    assert s.ollama_base_url == expected
