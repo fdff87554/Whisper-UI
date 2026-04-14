@@ -131,23 +131,39 @@ class TestJobsRoutes:
         assert resp.status_code == 409
         assert db.get_job(job.id) is not None
 
-    def test_retry_file_job_uses_1h_timeout(self, client, db):
+    def test_retry_file_job_uses_dynamic_timeout(self, client, db, settings):
         job = _create_failed_job(db)
         mock_queue = MagicMock()
-        with patch("rq.Queue", return_value=mock_queue):
+        with (
+            patch("rq.Queue", return_value=mock_queue),
+            patch("whisper_ui.web.routes.jobs.get_audio_duration_seconds", return_value=3600.0),
+        ):
             resp = client.post(f"/jobs/{job.id}/retry")
         assert resp.status_code == 204
         mock_queue.enqueue.assert_called_once()
-        assert mock_queue.enqueue.call_args[1]["job_timeout"] == "1h"
+        # 3600s audio * 3.0 multiplier = 10800, within [floor, max]
+        assert mock_queue.enqueue.call_args[1]["job_timeout"] == int(3600 * settings.job_timeout_audio_multiplier)
 
-    def test_retry_url_job_uses_2h_timeout(self, client, db):
+    def test_retry_file_job_with_unknown_duration_uses_default(self, client, db, settings):
+        job = _create_failed_job(db)
+        mock_queue = MagicMock()
+        with (
+            patch("rq.Queue", return_value=mock_queue),
+            patch("whisper_ui.web.routes.jobs.get_audio_duration_seconds", return_value=None),
+        ):
+            resp = client.post(f"/jobs/{job.id}/retry")
+        assert resp.status_code == 204
+        assert mock_queue.enqueue.call_args[1]["job_timeout"] == settings.job_timeout_default
+
+    def test_retry_url_job_uses_default_timeout(self, client, db, settings):
         job = _create_failed_job(db, source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ")
         mock_queue = MagicMock()
         with patch("rq.Queue", return_value=mock_queue):
             resp = client.post(f"/jobs/{job.id}/retry")
         assert resp.status_code == 204
         mock_queue.enqueue.assert_called_once()
-        assert mock_queue.enqueue.call_args[1]["job_timeout"] == "2h"
+        # URL jobs cannot be re-probed locally, so they fall back to default.
+        assert mock_queue.enqueue.call_args[1]["job_timeout"] == settings.job_timeout_default
 
 
 class TestViewerRoutes:
@@ -355,13 +371,13 @@ class TestUploadURLPost:
         assert resp.status_code == 204
         assert resp.headers.get("HX-Redirect") == "/jobs?submitted=1"
 
-    def test_upload_url_uses_2h_timeout(self, client, app, db):
+    def test_upload_url_uses_default_timeout(self, client, app, db, settings):
         mock_queue = MagicMock()
         with patch("rq.Queue", return_value=mock_queue):
             self._post_url(client)
         mock_queue.enqueue.assert_called_once()
-        call_kwargs = mock_queue.enqueue.call_args
-        assert call_kwargs[1]["job_timeout"] == "2h"
+        # URL uploads cannot be probed until after download; fall back to default.
+        assert mock_queue.enqueue.call_args[1]["job_timeout"] == settings.job_timeout_default
 
     def test_upload_url_enqueue_failure_returns_error(self, client, app, db):
         mock_queue = MagicMock()
@@ -440,7 +456,7 @@ class TestBatchRoutes:
             resp = client.post(f"/jobs/batch/{batch_id}/retry")
         assert resp.status_code == 204
 
-    def test_retry_batch_url_job_uses_2h_timeout(self, client, db, app):
+    def test_retry_batch_url_job_uses_default_timeout(self, client, db, app, settings):
         batch_id = "d" * 32
         job = Job(
             filename="url.mp3",
@@ -455,7 +471,7 @@ class TestBatchRoutes:
             resp = client.post(f"/jobs/batch/{batch_id}/retry")
         assert resp.status_code == 204
         mock_queue.enqueue.assert_called_once()
-        assert mock_queue.enqueue.call_args[1]["job_timeout"] == "2h"
+        assert mock_queue.enqueue.call_args[1]["job_timeout"] == settings.job_timeout_default
 
     def test_delete_batch(self, client, db, filestore):
         batch_id = "c" * 32
