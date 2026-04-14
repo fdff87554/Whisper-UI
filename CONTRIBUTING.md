@@ -87,7 +87,7 @@ docker compose --profile gpu up -d
 docker compose --profile cpu up -d
 
 # Development (live reload)
-docker compose --profile gpu -f compose.yaml -f compose.dev.yaml up -d
+docker compose --profile gpu -f compose.yml -f compose.dev.yml up -d
 ```
 
 ## Reporting Issues
