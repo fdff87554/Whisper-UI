@@ -264,6 +264,56 @@ def test_fallback_on_http_error_never_raises():
     assert progress[-1] == (1.0, LLM_CORRECTION_SKIPPED)
 
 
+def test_fallback_on_ollama_5xx_response():
+    """A 500 from Ollama (raised by raise_for_status in the real client)
+    must not poison the transcript — the chunk falls back to original text.
+    """
+    stage, client = _make_stage(chunk_size=10, chunk_context=0)
+    transcript = _make_transcript(["甲", "乙"])
+    fake_response = httpx.Response(500, request=httpx.Request("POST", "http://ollama/api/chat"))
+    client.responses = [httpx.HTTPStatusError("server error", request=fake_response.request, response=fake_response)]
+
+    progress, on_progress = _capture_progress()
+    stage.execute({"transcript_result": transcript, "language": "zh"}, on_progress)
+
+    assert [s.text for s in transcript.segments] == ["甲", "乙"]
+    assert progress[-1] == (1.0, LLM_CORRECTION_SKIPPED)
+
+
+def test_fallback_on_network_timeout():
+    """A network-level read timeout (distinct from RQ's death penalty) must
+    fall back per chunk rather than failing the whole job.
+    """
+    stage, client = _make_stage(chunk_size=10, chunk_context=0)
+    transcript = _make_transcript(["甲", "乙"])
+    client.responses = [httpx.ReadTimeout("read timeout")]
+
+    progress, on_progress = _capture_progress()
+    stage.execute({"transcript_result": transcript, "language": "zh"}, on_progress)
+
+    assert [s.text for s in transcript.segments] == ["甲", "乙"]
+    assert progress[-1] == (1.0, LLM_CORRECTION_SKIPPED)
+
+
+def test_partial_5xx_keeps_succeeded_chunks_and_reports_degraded():
+    """When some chunks 500 and others succeed, succeeded chunks stay
+    corrected and the final progress message reflects degraded mode.
+    """
+    stage, client = _make_stage(chunk_size=2, chunk_context=0)
+    transcript = _make_transcript(["甲", "乙", "丙", "丁"])
+    fake_response = httpx.Response(500, request=httpx.Request("POST", "http://ollama/api/chat"))
+    client.responses = [
+        httpx.HTTPStatusError("upstream down", request=fake_response.request, response=fake_response),
+        _valid_response_for([2, 3], ["丙校", "丁校"]),
+    ]
+
+    progress, on_progress = _capture_progress()
+    stage.execute({"transcript_result": transcript, "language": "zh"}, on_progress)
+
+    assert [s.text for s in transcript.segments] == ["甲", "乙", "丙校", "丁校"]
+    assert progress[-1][1].startswith(LLM_CORRECTION_DEGRADED)
+
+
 def test_progress_monotonic_and_ends_at_one():
     stage, client = _make_stage(chunk_size=2, chunk_context=0)
     transcript = _make_transcript(["a", "b", "c", "d", "e"])
