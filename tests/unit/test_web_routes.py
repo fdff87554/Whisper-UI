@@ -500,18 +500,28 @@ class TestUploadURLPost:
         # URL uploads cannot be probed until after download; fall back to default.
         assert mock_queue.enqueue.call_args[1]["job_timeout"] == settings.job_timeout_default
 
-    def test_upload_url_enqueue_failure_returns_error(self, client, app, db):
+    def test_upload_url_enqueue_failure_redirects_to_jobs_with_failed_count(self, client, app, db):
+        """When enqueue fails the jobs are already persisted as FAILED; the
+        redirect must land on /jobs so the user can see them, matching how
+        /upload (file route) handles partial/total enqueue failures.
+        """
         mock_queue = MagicMock()
         mock_queue.enqueue.side_effect = Exception("Redis connection lost")
         with patch("rq.Queue", return_value=mock_queue):
             resp = self._post_url(client)
         assert resp.status_code == 303
-        assert "error=queue" in resp.headers["location"]
+        location = resp.headers["location"]
+        assert "/jobs?submitted=0" in location
+        assert "failed=1" in location
+        assert "error=queue" not in location
         jobs = db.list_jobs()
         assert len(jobs) == 1
         assert jobs[0].status == JobStatus.FAILED
 
-    def test_upload_url_enqueue_failure_htmx_returns_error_fragment(self, client, app, db):
+    def test_upload_url_enqueue_failure_htmx_returns_hx_redirect_to_jobs(self, client, app, db):
+        """htmx variant: same behaviour, delivered via HX-Redirect so the
+        fragment swap does not swallow the FAILED-job visibility.
+        """
         mock_queue = MagicMock()
         mock_queue.enqueue.side_effect = Exception("Redis connection lost")
         with patch("rq.Queue", return_value=mock_queue):
@@ -526,8 +536,13 @@ class TestUploadURLPost:
                 headers={"HX-Request": "true"},
                 follow_redirects=False,
             )
-        assert resp.status_code == 200
-        assert "alert-error" in resp.text
+        assert resp.status_code == 204
+        hx_redirect = resp.headers.get("HX-Redirect", "")
+        assert "/jobs?submitted=0" in hx_redirect
+        assert "failed=1" in hx_redirect
+        jobs = db.list_jobs()
+        assert len(jobs) == 1
+        assert jobs[0].status == JobStatus.FAILED
 
 
 class TestBatchRoutes:

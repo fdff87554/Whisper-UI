@@ -296,9 +296,11 @@ async def upload_url_submit(
             db.update_job(job)
             failed_count += 1
 
-    # All enqueue attempts failed — treat as queue error (likely Redis issue)
-    if submitted_count == 0:
-        return _error_redirect_or_fragment(request, "/upload?error=queue", ui_labels.UPLOAD_QUEUE_ERROR)
+    # Even when every enqueue failed we fall through to the /jobs redirect so
+    # the per-URL FAILED rows we just inserted are visible to the user. The
+    # "/upload?error=queue" fragment is reserved for the case above where the
+    # Queue itself could not be constructed — that happens before any job is
+    # persisted, so there is nothing to show on /jobs.
 
     # Build redirect URL with toast info
     parts = [f"/jobs?submitted={submitted_count}"]
