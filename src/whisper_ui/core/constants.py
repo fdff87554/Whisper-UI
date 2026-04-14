@@ -20,6 +20,14 @@ SQLITE_BUSY_TIMEOUT_MS = 5000
 # Jobs page auto-refresh
 JOBS_REFRESH_INTERVAL = 3  # seconds
 
+# Worker progress-write throttling. A callback that neither changes the
+# message nor crosses these thresholds is dropped so the SQLite/Redis
+# write rate stays bounded even when a stage (e.g. whisperx transcribe)
+# emits fine-grained per-chunk updates. Stage transitions and the final
+# progress=1.0 always flush regardless of these limits.
+PROGRESS_WRITE_MIN_DELTA = 0.005  # fraction, i.e. 0.5 percentage points
+PROGRESS_WRITE_MIN_INTERVAL_SEC = 0.5
+
 # Stale job recovery
 # STALE_JOB_TIMEOUT now lives in Settings.stale_job_timeout so it stays
 # consistent with the dynamic job_timeout bounds.

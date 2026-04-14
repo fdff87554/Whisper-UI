@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from itertools import pairwise
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,10 +20,20 @@ from whisper_ui.core.messages import (
     DIARIZE_SKIPPED_DISABLED,
     TRANSCRIBE_DONE,
     TRANSCRIBE_LOADING,
+    TRANSCRIBE_RUNNING,
 )
 from whisper_ui.pipeline.align import AlignStage
 from whisper_ui.pipeline.assign_speakers import AssignSpeakersStage
-from whisper_ui.pipeline.diarize import DiarizeStage
+from whisper_ui.pipeline.diarize import (
+    _HEARTBEAT_PROGRESS_CAP,
+    _HEARTBEAT_PROGRESS_START,
+    _HEARTBEAT_TAU_FALLBACK_SEC,
+    _HEARTBEAT_TAU_MAX_SEC,
+    _HEARTBEAT_TAU_MIN_SEC,
+    DiarizeStage,
+    _compute_heartbeat_tau,
+    _heartbeat_progress,
+)
 from whisper_ui.pipeline.transcribe import TranscribeStage
 
 
@@ -55,6 +66,108 @@ class TestTranscribeStage:
 
         assert progress_calls[0] == (0.0, TRANSCRIBE_LOADING)
         assert progress_calls[-1] == (1.0, TRANSCRIBE_DONE)
+
+    def test_passes_progress_callback_when_whisperx_supports_it(self):
+        """Modern whisperx (>=3.4) exposes progress_callback. Wire it through
+        so the bar moves continuously instead of jumping from 10% to 100%.
+        """
+        stage = TranscribeStage(device="cpu")
+        captured: dict = {}
+
+        def fake_transcribe(audio, *, batch_size, language, progress_callback=None):
+            captured["progress_callback"] = progress_callback
+            if progress_callback is not None:
+                progress_callback(0.0)
+                progress_callback(50.0)
+                progress_callback(100.0)
+            return {"segments": []}
+
+        fake_model = MagicMock()
+        fake_model.transcribe = fake_transcribe
+        mock_whisperx = MagicMock()
+        mock_whisperx.load_model.return_value = fake_model
+        mock_whisperx.load_audio.return_value = "audio"
+
+        progress_calls: list[tuple[float, str]] = []
+        with patch.dict("sys.modules", {"whisperx": mock_whisperx}):
+            stage.execute(
+                {"audio_path": "/tmp/test.wav"},
+                on_progress=lambda p, m: progress_calls.append((p, m)),
+            )
+
+        assert callable(captured["progress_callback"])
+
+        # Stage band is 0.1 → 0.95; whisperx 0/50/100 should map there.
+        running_calls = [(p, m) for p, m in progress_calls if m == TRANSCRIBE_RUNNING]
+        # First entry comes from the manual on_progress(0.1, TRANSCRIBE_RUNNING)
+        # before model.transcribe is invoked; the next three are from the
+        # forwarded whisperx percent values.
+        assert running_calls[0] == (pytest.approx(0.1), TRANSCRIBE_RUNNING)
+        assert running_calls[1] == (pytest.approx(0.1), TRANSCRIBE_RUNNING)
+        assert running_calls[2] == (pytest.approx(0.525), TRANSCRIBE_RUNNING)
+        assert running_calls[3] == (pytest.approx(0.95), TRANSCRIBE_RUNNING)
+        # And the final settle to 1.0 still fires after transcribe returns.
+        assert progress_calls[-1] == (1.0, TRANSCRIBE_DONE)
+
+    def test_skips_progress_callback_on_legacy_whisperx_signature(self):
+        """If a future / older whisperx drops progress_callback, fall back
+        cleanly to the coarse 3-point progress instead of crashing the worker
+        with TypeError: unexpected keyword argument.
+        """
+        stage = TranscribeStage(device="cpu")
+
+        def legacy_transcribe(audio, *, batch_size, language):
+            return {"segments": []}
+
+        fake_model = MagicMock()
+        fake_model.transcribe = legacy_transcribe
+        mock_whisperx = MagicMock()
+        mock_whisperx.load_model.return_value = fake_model
+        mock_whisperx.load_audio.return_value = "audio"
+
+        progress_calls: list[tuple[float, str]] = []
+        with patch.dict("sys.modules", {"whisperx": mock_whisperx}):
+            stage.execute(
+                {"audio_path": "/tmp/test.wav"},
+                on_progress=lambda p, m: progress_calls.append((p, m)),
+            )
+
+        # Only the 3 manual progress points; nothing from whisperx percent.
+        assert progress_calls == [
+            (0.0, TRANSCRIBE_LOADING),
+            (0.1, TRANSCRIBE_RUNNING),
+            (1.0, TRANSCRIBE_DONE),
+        ]
+
+    def test_progress_callback_clamps_out_of_range_percent(self):
+        """whisperx has previously emitted slightly-over-100 percent values
+        in edge cases; the adapter must clamp instead of overflowing past
+        the stage band end and confusing the orchestrator weight maths.
+        """
+        stage = TranscribeStage(device="cpu")
+
+        def fake_transcribe(audio, *, batch_size, language, progress_callback=None):
+            progress_callback(-5.0)
+            progress_callback(150.0)
+            return {"segments": []}
+
+        fake_model = MagicMock()
+        fake_model.transcribe = fake_transcribe
+        mock_whisperx = MagicMock()
+        mock_whisperx.load_model.return_value = fake_model
+        mock_whisperx.load_audio.return_value = "audio"
+
+        progress_calls: list[tuple[float, str]] = []
+        with patch.dict("sys.modules", {"whisperx": mock_whisperx}):
+            stage.execute(
+                {"audio_path": "/tmp/test.wav"},
+                on_progress=lambda p, m: progress_calls.append((p, m)),
+            )
+
+        running = [p for p, m in progress_calls if m == TRANSCRIBE_RUNNING]
+        # -5 clamps to 0.1, 150 clamps to 0.95
+        assert pytest.approx(0.1) == running[1]
+        assert pytest.approx(0.95) == running[2]
 
     def test_cleanup_guard_no_model(self):
         stage = TranscribeStage(device="cpu")
@@ -330,6 +443,74 @@ class TestDiarizeStage:
         heartbeat_messages = [m for _, m in progress_calls if "已執行" in m]
         assert len(heartbeat_messages) >= 1
         assert progress_calls[-1] == (1.0, DIARIZE_DONE)
+
+    def test_heartbeat_progress_is_monotonic_and_bounded(self):
+        """Elapsed time must map to a non-decreasing curve that never
+        reaches 1.0 — DIARIZE_DONE (which reports 1.0) is the only thing
+        that should complete the stage.
+        """
+        samples = [_heartbeat_progress(t, tau=60.0) for t in (0, 5, 30, 60, 120, 600, 3600)]
+        assert samples[0] == pytest.approx(_HEARTBEAT_PROGRESS_START)
+        # Early samples strictly grow; far-out samples may saturate at the
+        # cap due to float precision, so allow equality there.
+        for earlier, later in pairwise(samples[:5]):
+            assert later > earlier
+        assert samples[-1] <= _HEARTBEAT_PROGRESS_CAP
+        assert samples[-1] < 1.0
+
+    def test_heartbeat_progress_handles_degenerate_tau(self):
+        """A zero-or-negative tau must not NaN/explode the bar; it should
+        pin to the band start so the worker still emits a clean value."""
+        assert _heartbeat_progress(10.0, tau=0.0) == pytest.approx(_HEARTBEAT_PROGRESS_START)
+        assert _heartbeat_progress(-5.0, tau=60.0) == pytest.approx(_HEARTBEAT_PROGRESS_START)
+
+    def test_compute_tau_falls_back_when_duration_unknown(self):
+        assert _compute_heartbeat_tau(None) == pytest.approx(_HEARTBEAT_TAU_FALLBACK_SEC)
+        assert _compute_heartbeat_tau(0.0) == pytest.approx(_HEARTBEAT_TAU_FALLBACK_SEC)
+
+    def test_compute_tau_clamps_to_bounds(self):
+        # 10-second clip: raw 2.5 → clamps up to min.
+        assert _compute_heartbeat_tau(10.0) == pytest.approx(_HEARTBEAT_TAU_MIN_SEC)
+        # 10-hour clip: raw 9000 → clamps down to max.
+        assert _compute_heartbeat_tau(36000.0) == pytest.approx(_HEARTBEAT_TAU_MAX_SEC)
+
+    def test_compute_tau_scales_within_band(self):
+        # 20-minute clip, ratio 0.25 → 300 s, inside the [30, 600] band.
+        assert _compute_heartbeat_tau(1200.0) == pytest.approx(300.0)
+
+    def test_heartbeat_progress_varies_across_ticks(self):
+        """Regression: the previous implementation pegged the bar at 0.2
+        for the whole diarize stage. Confirm consecutive heartbeat ticks
+        produce distinct progress values so users see visible motion.
+        """
+        import time as time_module
+
+        stage = DiarizeStage(hf_token="test-token", device="cpu", heartbeat_interval=1)
+
+        def _slow_diarize(**_kwargs):
+            time_module.sleep(2.5)
+            return "diarize_segments"
+
+        mock_pipeline_cls = MagicMock()
+        mock_pipeline_cls.return_value = MagicMock(side_effect=_slow_diarize)
+        mock_diarize_module = MagicMock()
+        mock_diarize_module.DiarizationPipeline = mock_pipeline_cls
+
+        progress_calls: list[tuple[float, str]] = []
+        with patch.dict("sys.modules", {"whisperx.diarize": mock_diarize_module, "whisperx": MagicMock()}):
+            stage.execute(
+                {"audio_path": "/tmp/test.wav", "duration": 600.0},
+                on_progress=lambda p, m: progress_calls.append((p, m)),
+            )
+
+        heartbeat_progress = [p for p, m in progress_calls if "已執行" in m]
+        assert len(heartbeat_progress) >= 1
+        # Progress is strictly greater than the stage-start value (0.2), and
+        # if there are multiple ticks they are monotonically non-decreasing.
+        assert all(p > _HEARTBEAT_PROGRESS_START for p in heartbeat_progress)
+        assert all(p < _HEARTBEAT_PROGRESS_CAP for p in heartbeat_progress)
+        for earlier, later in pairwise(heartbeat_progress):
+            assert later >= earlier
 
     def test_heartbeat_disabled_when_interval_zero(self):
         stage = DiarizeStage(hf_token="test-token", device="cpu", heartbeat_interval=0)

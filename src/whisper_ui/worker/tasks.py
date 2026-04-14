@@ -2,12 +2,20 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
+import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from redis import Redis
 
 from whisper_ui.core.config import get_settings
-from whisper_ui.core.constants import ERROR_DISPLAY_LENGTH, ERROR_MAX_LENGTH
+from whisper_ui.core.constants import (
+    ERROR_DISPLAY_LENGTH,
+    ERROR_MAX_LENGTH,
+    PROGRESS_WRITE_MIN_DELTA,
+    PROGRESS_WRITE_MIN_INTERVAL_SEC,
+)
 from whisper_ui.core.messages import PIPELINE_COMPLETE
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.pipeline.align import AlignStage
@@ -22,6 +30,9 @@ from whisper_ui.storage.database import JobDatabase
 from whisper_ui.storage.filestore import FileStore
 from whisper_ui.ui.labels import JOBS_TIMEOUT_ERROR
 from whisper_ui.worker.progress import RedisProgressReporter
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +67,69 @@ def _extract_rq_timeout_seconds(exc: BaseException) -> int | str:
     if match:
         return int(match.group(1))
     return "?"
+
+
+def _make_throttled_progress_reporter(
+    reporter: RedisProgressReporter,
+    db: JobDatabase,
+    job: Job,
+    *,
+    min_delta: float = PROGRESS_WRITE_MIN_DELTA,
+    min_interval_sec: float = PROGRESS_WRITE_MIN_INTERVAL_SEC,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> Callable[[float, str], None]:
+    """Wrap progress callbacks so high-frequency sub-stage updates do not
+    thrash SQLite and Redis.
+
+    The throttle drops a report when both of these hold:
+    - progress moved less than ``min_delta`` from the last written value,
+    - less than ``min_interval_sec`` has elapsed since the last write.
+
+    It always flushes when the message changes (stage transition, state
+    flip), on the very first call, and whenever progress reaches 1.0, so
+    no user-visible milestone is ever swallowed.
+    """
+    last_progress = -1.0
+    last_written_at = 0.0
+    last_message = ""
+    # The diarize heartbeat invokes ``report`` from a background thread while
+    # the main thread is blocked inside the C++ inference call, so in normal
+    # operation only one thread mutates the closure state at a time. The lock
+    # is cheap defence-in-depth: it guarantees the read-decide-write sequence
+    # below is atomic even if some future stage spawns a worker thread that
+    # also calls on_progress.
+    lock = threading.Lock()
+
+    def report(progress: float, message: str) -> None:
+        nonlocal last_progress, last_written_at, last_message
+
+        with lock:
+            # Monotonicity guard: drop any in-closure regression unconditionally,
+            # even if the message changed. The only realistic source of one is a
+            # late diarize heartbeat racing the main thread's DIARIZE_DONE flush;
+            # letting it through would visibly rewind the bar from 100% back to
+            # ~94%. Worker retries always spin up a fresh closure, so legitimate
+            # rewinds never reach this point.
+            if last_progress >= 0 and progress < last_progress:
+                return
+
+            now = monotonic()
+            force = last_progress < 0 or message != last_message or progress >= 1.0
+            if not force:
+                delta = progress - last_progress
+                if delta < min_delta and (now - last_written_at) < min_interval_sec:
+                    return
+
+            reporter.report(progress, message)
+            job.progress = progress
+            job.progress_message = message
+            db.update_job(job)
+
+            last_progress = progress
+            last_written_at = now
+            last_message = message
+
+    return report
 
 
 def _cleanup_preprocessed(context: dict) -> None:
@@ -125,11 +199,7 @@ def process_transcription(job_id: str) -> str:
             stage_weights = None
             context["input_path"] = job.filepath
 
-        def on_progress(progress: float, message: str) -> None:
-            reporter.report(progress, message)
-            job.progress = progress
-            job.progress_message = message
-            db.update_job(job)
+        on_progress = _make_throttled_progress_reporter(reporter, db, job)
 
         orchestrator = PipelineOrchestrator(stages, on_progress=on_progress, stage_weights=stage_weights)
 
