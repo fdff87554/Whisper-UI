@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from pathlib import Path, PurePosixPath
 from typing import Annotated
@@ -10,7 +11,7 @@ from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from markupsafe import escape
 
-from whisper_ui.core.constants import ERROR_MAX_LENGTH, MAX_BATCH_SIZE
+from whisper_ui.core.constants import MAX_BATCH_SIZE
 from whisper_ui.core.languages import SUPPORTED_LANGUAGES, WHISPER_MODELS
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.pipeline.audio_probe import get_audio_duration_seconds
@@ -22,6 +23,7 @@ from whisper_ui.worker.timeout import calculate_job_timeout
 
 _READ_CHUNK_SIZE = 1024 * 1024  # 1 MB
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -124,14 +126,15 @@ async def upload_submit(
 
     batch_id = uuid.uuid4().hex if len(valid_files) > 1 else None
     submitted_count = 0
+    failed_count = 0
 
     try:
         from rq import Queue
 
         q = Queue(connection=redis)
     except Exception:
-        msg = ui_labels.UPLOAD_QUEUE_ERROR.format(error="Redis")
-        return _error_redirect_or_fragment(request, "/upload?error=queue", msg)
+        logger.exception("Failed to construct RQ queue from Redis connection")
+        return _error_redirect_or_fragment(request, "/upload?error=queue", ui_labels.UPLOAD_QUEUE_ERROR)
 
     max_size = settings.max_upload_size
     for uploaded_file in valid_files:
@@ -172,12 +175,16 @@ async def upload_submit(
                 job_timeout=calculate_job_timeout(job.duration, settings),
             )
             submitted_count += 1
-        except Exception as e:
+        except Exception:
+            logger.exception("Failed to enqueue job %s", job.id)
             job.status = JobStatus.FAILED
-            job.error = str(e)[:ERROR_MAX_LENGTH]
+            job.error = ui_labels.UPLOAD_ENQUEUE_FAILED
             db.update_job(job)
+            failed_count += 1
 
     redirect_url = f"/jobs?submitted={submitted_count}"
+    if failed_count:
+        redirect_url += f"&failed={failed_count}"
     if htmx:
         return Response(status_code=204, headers={"HX-Redirect": redirect_url})
     return RedirectResponse(redirect_url, status_code=303)
@@ -251,11 +258,12 @@ async def upload_url_submit(
         from rq import Queue
 
         q = Queue(connection=redis)
-    except Exception as e:
-        msg = ui_labels.UPLOAD_QUEUE_ERROR.format(error=str(e))
-        return _error_redirect_or_fragment(request, "/upload?error=queue", msg)
+    except Exception:
+        logger.exception("Failed to construct RQ queue from Redis connection")
+        return _error_redirect_or_fragment(request, "/upload?error=queue", ui_labels.UPLOAD_QUEUE_ERROR)
 
     submitted_count = 0
+    failed_count = 0
     for clean_url in unique_urls:
         job = Job(
             filename=clean_url,
@@ -281,18 +289,23 @@ async def upload_url_submit(
                 job_timeout=calculate_job_timeout(None, settings),
             )
             submitted_count += 1
-        except Exception as e:
+        except Exception:
+            logger.exception("Failed to enqueue URL job %s", job.id)
             job.status = JobStatus.FAILED
-            job.error = str(e)[:ERROR_MAX_LENGTH]
+            job.error = ui_labels.UPLOAD_ENQUEUE_FAILED
             db.update_job(job)
+            failed_count += 1
 
-    # All enqueue attempts failed — treat as queue error (likely Redis issue)
-    if submitted_count == 0:
-        msg = ui_labels.UPLOAD_QUEUE_ERROR.format(error="Redis")
-        return _error_redirect_or_fragment(request, "/upload?error=queue", msg)
+    # Even when every enqueue failed we fall through to the /jobs redirect so
+    # the per-URL FAILED rows we just inserted are visible to the user. The
+    # "/upload?error=queue" fragment is reserved for the case above where the
+    # Queue itself could not be constructed — that happens before any job is
+    # persisted, so there is nothing to show on /jobs.
 
     # Build redirect URL with toast info
     parts = [f"/jobs?submitted={submitted_count}"]
+    if failed_count:
+        parts.append(f"failed={failed_count}")
     if invalid_line_nums:
         parts.append(f"skipped={len(invalid_line_nums)}")
     if duplicates_removed > 0:

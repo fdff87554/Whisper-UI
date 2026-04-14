@@ -114,6 +114,20 @@ class JobDatabase:
         return [_row_to_job(r) for r in rows]
 
     def recover_stale_jobs(self, timeout_seconds: int, error_message: str) -> int:
+        """Mark PROCESSING jobs whose updated_at is older than the timeout as FAILED.
+
+        Concurrency contract: this is a single UPDATE statement with a WHERE
+        clause gated on ``updated_at < threshold``. SQLite WAL mode allows
+        many concurrent readers but serializes writers, and the configured
+        busy_timeout (SQLITE_BUSY_TIMEOUT_MS) makes the second writer block
+        instead of failing. Once the first writer commits, every recovered
+        row's ``updated_at`` has been bumped to ``datetime.now(UTC)``, so
+        the second writer's WHERE clause no longer matches those rows and
+        its UPDATE is a no-op for them. Two workers calling this method at
+        the same instant therefore cannot double-recover the same job; the
+        sum of their rowcounts equals the number of distinct stale jobs.
+        See ``test_recover_stale_jobs_concurrent_workers_dont_double_recover``.
+        """
         threshold = (datetime.now(UTC) - timedelta(seconds=timeout_seconds)).isoformat()
         cursor = self._conn.execute(
             "UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE status = ? AND updated_at < ?",

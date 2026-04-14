@@ -26,13 +26,5 @@ class DownloadError(PipelineError):
     pass
 
 
-class LLMCorrectionError(PipelineError):
-    pass
-
-
-class StorageError(WhisperUIError):
-    pass
-
-
 class ExportError(WhisperUIError):
     pass

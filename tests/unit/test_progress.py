@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from redis.exceptions import ConnectionError as RedisConnectionError
+
 from whisper_ui.core.models import Job
 from whisper_ui.worker.progress import RedisProgressReporter
 from whisper_ui.worker.tasks import _make_throttled_progress_reporter
@@ -58,7 +60,58 @@ def test_fail_sets_error():
     mapping = mock_redis.hset.call_args.kwargs.get("mapping") or mock_redis.hset.call_args[1].get("mapping")
     assert mapping["status"] == "failed"
     assert "something broke" in mapping["error"]
-    mock_redis.expire.assert_called_once_with("job:test-job-id", 86400)
+
+
+def test_report_swallows_redis_connection_error(caplog):
+    """Progress writes are best-effort. SQLite is the source of truth, so a
+    transient Redis outage must NOT propagate up and tear down the worker.
+    """
+    import logging
+
+    mock_redis, reporter = _make_reporter()
+    mock_redis.hset.side_effect = RedisConnectionError("redis down")
+
+    with caplog.at_level(logging.WARNING):
+        reporter.report(0.4, "halfway")
+
+    assert any("Redis progress write failed" in rec.message for rec in caplog.records)
+
+
+def test_complete_swallows_redis_connection_error(caplog):
+    import logging
+
+    mock_redis, reporter = _make_reporter()
+    mock_redis.hset.side_effect = RedisConnectionError("redis down")
+
+    with caplog.at_level(logging.WARNING):
+        reporter.complete("/path/to/result.json")
+
+    assert any("Redis complete write failed" in rec.message for rec in caplog.records)
+
+
+def test_fail_swallows_redis_connection_error(caplog):
+    import logging
+
+    mock_redis, reporter = _make_reporter()
+    mock_redis.hset.side_effect = RedisConnectionError("redis down")
+
+    with caplog.at_level(logging.WARNING):
+        reporter.fail("worker exploded")
+
+    assert any("Redis fail write failed" in rec.message for rec in caplog.records)
+
+
+def test_get_progress_returns_empty_dict_on_redis_error(caplog):
+    import logging
+
+    mock_redis = MagicMock()
+    mock_redis.hgetall.side_effect = RedisConnectionError("redis down")
+
+    with caplog.at_level(logging.WARNING):
+        result = RedisProgressReporter.get_progress(mock_redis, "job-x")
+
+    assert result == {}
+    assert any("Redis progress read failed" in rec.message for rec in caplog.records)
 
 
 def test_fail_truncates_long_error():

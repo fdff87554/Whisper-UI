@@ -63,6 +63,36 @@ class TestDashboardRoutes:
         resp = client.get("/dashboard/active")
         assert resp.status_code == 200
 
+    def test_dashboard_polls_slowly_when_idle(self, client, db):
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert 'hx-trigger="every 30s"' in resp.text
+
+    def test_dashboard_polls_fast_when_active(self, client, db):
+        db.insert_job(Job(filename="active.mp3", status=JobStatus.PROCESSING, language="zh"))
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert 'hx-trigger="every 5s"' in resp.text
+
+    def test_dashboard_active_fragment_carries_idle_trigger(self, client, db):
+        """Regression: the fragment must include its own wrapper + hx-trigger
+        so the interval gets recomputed on every poll. Previously the trigger
+        was pinned to whatever dashboard.html chose on initial render."""
+        resp = client.get("/dashboard/active")
+        assert resp.status_code == 200
+        assert 'id="dashboard-active"' in resp.text
+        assert 'hx-trigger="every 30s"' in resp.text
+        assert 'hx-swap="morph:outerHTML"' in resp.text
+
+    def test_dashboard_active_fragment_switches_to_fast_trigger(self, client, db):
+        """Fragment requested while a job is active must return the fast
+        trigger, proving the swap path picks up state transitions."""
+        db.insert_job(Job(filename="active.mp3", status=JobStatus.PROCESSING, language="zh"))
+        resp = client.get("/dashboard/active")
+        assert resp.status_code == 200
+        assert 'id="dashboard-active"' in resp.text
+        assert 'hx-trigger="every 5s"' in resp.text
+
 
 class TestUploadRoutes:
     def test_upload_page(self, client):
@@ -193,6 +223,36 @@ class TestJobsRoutes:
         # URL jobs cannot be re-probed locally, so they fall back to default.
         assert mock_queue.enqueue.call_args[1]["job_timeout"] == settings.job_timeout_default
 
+    def test_retry_probe_exception_falls_back_to_default(self, client, db, settings):
+        job = _create_failed_job(db)
+        mock_queue = MagicMock()
+        with (
+            patch("rq.Queue", return_value=mock_queue),
+            patch(
+                "whisper_ui.web.routes.jobs.get_audio_duration_seconds",
+                side_effect=OSError("file vanished"),
+            ),
+        ):
+            resp = client.post(f"/jobs/{job.id}/retry")
+        assert resp.status_code == 204
+        mock_queue.enqueue.assert_called_once()
+        assert mock_queue.enqueue.call_args[1]["job_timeout"] == settings.job_timeout_default
+
+    def test_retry_enqueue_failure_uses_generic_error(self, client, db):
+        job = _create_failed_job(db)
+        mock_queue = MagicMock()
+        mock_queue.enqueue.side_effect = Exception("Redis internal: secret/key/path leak")
+        with (
+            patch("rq.Queue", return_value=mock_queue),
+            patch("whisper_ui.web.routes.jobs.get_audio_duration_seconds", return_value=60.0),
+        ):
+            client.post(f"/jobs/{job.id}/retry")
+        refreshed = db.get_job(job.id)
+        assert refreshed is not None
+        assert refreshed.status == JobStatus.FAILED
+        assert "Redis internal" not in (refreshed.error or "")
+        assert "secret" not in (refreshed.error or "")
+
 
 class TestViewerRoutes:
     def test_viewer_redirects_to_jobs(self, client):
@@ -205,6 +265,41 @@ class TestViewerRoutes:
         resp = client.get(f"/viewer/{job.id}")
         assert resp.status_code == 200
         assert "test.mp3" in resp.text
+
+    def test_viewer_disables_search_for_huge_transcript(self, client, db, filestore):
+        from whisper_ui.core.constants import VIEWER_SEARCH_SEGMENT_LIMIT
+
+        big_segments = [
+            Segment(start=float(i), end=float(i + 1), text=f"seg{i}") for i in range(VIEWER_SEARCH_SEGMENT_LIMIT + 1)
+        ]
+        result = TranscriptResult(segments=big_segments, language="zh", duration=float(len(big_segments)))
+        job = Job(filename="huge.mp3", status=JobStatus.COMPLETED, language="zh")
+        result_path = filestore.save_result(job.id, result)
+        job.result_path = str(result_path)
+        db.insert_job(job)
+
+        resp = client.get(f"/viewer/{job.id}")
+        assert resp.status_code == 200
+        assert "已停用即時搜尋" in resp.text
+        assert 'placeholder="輸入關鍵字篩選' not in resp.text
+
+    def test_viewer_keeps_search_under_limit(self, client, db, filestore):
+        from whisper_ui.core.constants import VIEWER_SEARCH_SEGMENT_LIMIT
+
+        small_segments = [
+            Segment(start=float(i), end=float(i + 1), text=f"seg{i}")
+            for i in range(min(10, VIEWER_SEARCH_SEGMENT_LIMIT))
+        ]
+        result = TranscriptResult(segments=small_segments, language="zh", duration=10.0)
+        job = Job(filename="small.mp3", status=JobStatus.COMPLETED, language="zh")
+        result_path = filestore.save_result(job.id, result)
+        job.result_path = str(result_path)
+        db.insert_job(job)
+
+        resp = client.get(f"/viewer/{job.id}")
+        assert resp.status_code == 200
+        assert 'placeholder="輸入關鍵字篩選' in resp.text
+        assert "已停用即時搜尋" not in resp.text
 
     def test_viewer_not_found(self, client):
         resp = client.get("/viewer/00000000000000000000000000000000")
@@ -324,6 +419,23 @@ class TestUploadPost:
         assert resp.status_code == 303
         assert "error=no_files" in resp.headers["location"]
 
+    def test_upload_partial_enqueue_failure_reports_failed_count(self, client, app, db):
+        mock_queue = MagicMock()
+        # First file succeeds, second raises — simulate a transient Redis error.
+        mock_queue.enqueue.side_effect = [None, Exception("Redis hiccup")]
+        files = [
+            ("files", ("a.mp3", b"data1", "audio/mpeg")),
+            ("files", ("b.mp3", b"data2", "audio/mpeg")),
+        ]
+        with patch("rq.Queue", return_value=mock_queue):
+            resp = self._upload(client, files=files)
+        assert resp.status_code == 303
+        location = resp.headers["location"]
+        assert "submitted=1" in location
+        assert "failed=1" in location
+        statuses = sorted(j.status for j in db.list_jobs())
+        assert statuses == sorted([JobStatus.QUEUED, JobStatus.FAILED])
+
     def test_upload_htmx_error_escapes_html(self, client, app):
         """Verify htmx error responses escape user input to prevent XSS."""
         files = [("files", ("test.mp3", b"fake", "audio/mpeg"))]
@@ -407,18 +519,28 @@ class TestUploadURLPost:
         # URL uploads cannot be probed until after download; fall back to default.
         assert mock_queue.enqueue.call_args[1]["job_timeout"] == settings.job_timeout_default
 
-    def test_upload_url_enqueue_failure_returns_error(self, client, app, db):
+    def test_upload_url_enqueue_failure_redirects_to_jobs_with_failed_count(self, client, app, db):
+        """When enqueue fails the jobs are already persisted as FAILED; the
+        redirect must land on /jobs so the user can see them, matching how
+        /upload (file route) handles partial/total enqueue failures.
+        """
         mock_queue = MagicMock()
         mock_queue.enqueue.side_effect = Exception("Redis connection lost")
         with patch("rq.Queue", return_value=mock_queue):
             resp = self._post_url(client)
         assert resp.status_code == 303
-        assert "error=queue" in resp.headers["location"]
+        location = resp.headers["location"]
+        assert "/jobs?submitted=0" in location
+        assert "failed=1" in location
+        assert "error=queue" not in location
         jobs = db.list_jobs()
         assert len(jobs) == 1
         assert jobs[0].status == JobStatus.FAILED
 
-    def test_upload_url_enqueue_failure_htmx_returns_error_fragment(self, client, app, db):
+    def test_upload_url_enqueue_failure_htmx_returns_hx_redirect_to_jobs(self, client, app, db):
+        """htmx variant: same behaviour, delivered via HX-Redirect so the
+        fragment swap does not swallow the FAILED-job visibility.
+        """
         mock_queue = MagicMock()
         mock_queue.enqueue.side_effect = Exception("Redis connection lost")
         with patch("rq.Queue", return_value=mock_queue):
@@ -433,8 +555,13 @@ class TestUploadURLPost:
                 headers={"HX-Request": "true"},
                 follow_redirects=False,
             )
-        assert resp.status_code == 200
-        assert "alert-error" in resp.text
+        assert resp.status_code == 204
+        hx_redirect = resp.headers.get("HX-Redirect", "")
+        assert "/jobs?submitted=0" in hx_redirect
+        assert "failed=1" in hx_redirect
+        jobs = db.list_jobs()
+        assert len(jobs) == 1
+        assert jobs[0].status == JobStatus.FAILED
 
 
 class TestBatchRoutes:

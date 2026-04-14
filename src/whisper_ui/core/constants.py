@@ -36,6 +36,12 @@ STALE_JOB_CHECK_INTERVAL = 60  # seconds
 # Batch upload limits
 MAX_BATCH_SIZE = 50
 
+# Viewer client-side search becomes O(n) per keystroke; very large transcripts
+# (multi-hour multi-speaker recordings) will lock up the browser tab. Above
+# this segment count the viewer disables the live filter and tells the user to
+# export TXT instead.
+VIEWER_SEARCH_SEGMENT_LIMIT = 2000
+
 # yt-dlp
 YT_DLP_SOCKET_TIMEOUT = 30
 

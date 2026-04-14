@@ -41,13 +41,9 @@
   </div>
 </div>
 
-{# Active Jobs — polling area; morph keeps progress bars from flashing on each poll. #}
-<div id="dashboard-active"
-     hx-get="/dashboard/active"
-     hx-trigger="every 5s"
-     hx-swap="morph:innerHTML">
-  {% include "_dashboard_active.html" %}
-</div>
+{# Active Jobs polling area. The fragment owns its own wrapper and hx-trigger
+   so the poll interval is recomputed after every swap (see _dashboard_active.html). #}
+{% include "_dashboard_active.html" %}
 
 {# Recent Completed #}
 {% if recent_completed %}

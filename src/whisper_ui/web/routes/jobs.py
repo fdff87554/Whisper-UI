@@ -8,9 +8,10 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 
-from whisper_ui.core.constants import DEFAULT_JOBS_PER_PAGE, ERROR_MAX_LENGTH
+from whisper_ui.core.constants import DEFAULT_JOBS_PER_PAGE
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.pipeline.audio_probe import get_audio_duration_seconds
+from whisper_ui.ui import labels as ui_labels
 from whisper_ui.web.batch_zip import create_batch_zip
 from whisper_ui.web.deps import DbDep, FileStoreDep, RedisDep, SettingsDep, make_content_disposition, templates
 from whisper_ui.web.validation import validate_hex_id
@@ -107,6 +108,10 @@ def _probe_retry_duration(job: Job) -> float | None:
     disk, so re-probing is cheap and avoids depending on the previous run
     having populated Job.duration. For URL jobs the original file has
     been cleaned up, so fall back to None → job_timeout_default.
+
+    Returning None here is the contract that lets calculate_job_timeout
+    fall back to settings.job_timeout_default; callers must not treat
+    None as an error.
     """
     if job.source_url:
         return None
@@ -143,9 +148,10 @@ async def retry_job(job_id: str, db: DbDep, redis: RedisDep, settings: SettingsD
             job.id,
             job_timeout=calculate_job_timeout(retry_duration, settings),
         )
-    except Exception as e:
+    except Exception:
+        logger.exception("Failed to enqueue retry for job %s", job.id)
         job.status = JobStatus.FAILED
-        job.error = str(e)[:ERROR_MAX_LENGTH]
+        job.error = ui_labels.UPLOAD_ENQUEUE_FAILED
         db.update_job(job)
 
     return Response(status_code=204, headers={"HX-Trigger": "refreshJobList"})

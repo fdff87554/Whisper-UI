@@ -19,9 +19,11 @@ ENV PIP_INDEX_URL=${PIP_INDEX_URL}
 # torch/torchaudio are pre-installed by the base image (2.10.0+cu128).
 # Install whisperx without deps first to avoid its torch~=2.8.0 constraint
 # triggering a downgrade; torch 2.10.0 is backward-compatible.
-# Then install the remaining worker dependencies normally.
+# Then install the remaining worker dependencies normally. The worker-llm
+# extra adds httpx for the optional Ollama-backed correction stage; the
+# stage is still gated by OLLAMA_BASE_URL at runtime.
 RUN pip install --no-cache-dir --break-system-packages --no-deps "whisperx>=3.8,<3.9" && \
-    pip install --no-cache-dir --break-system-packages ".[worker]"
+    pip install --no-cache-dir --break-system-packages ".[worker,worker-llm]"
 
 RUN useradd --uid 1000 --create-home appuser 2>/dev/null || true \
     && mkdir -p /app/data/db /app/data/uploads /app/data/outputs /cache/huggingface \
