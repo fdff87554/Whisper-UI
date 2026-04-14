@@ -126,6 +126,7 @@ VIEWER_DOWNLOAD_MEDIA = "下載影片"
 TOAST_UPLOAD_SUCCESS = "已提交 {count} 個任務"
 TOAST_URL_SKIPPED = "，略過 {count} 個無效網址"
 TOAST_URL_DEDUPED = "，移除 {count} 個重複網址"
+TOAST_UPLOAD_FAILED = "，{count} 個任務提交失敗"
 TOAST_NETWORK_ERROR = "網路連線錯誤，請稍後再試"
 
 # -- Theme --

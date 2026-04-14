@@ -126,6 +126,7 @@ async def upload_submit(
 
     batch_id = uuid.uuid4().hex if len(valid_files) > 1 else None
     submitted_count = 0
+    failed_count = 0
 
     try:
         from rq import Queue
@@ -179,8 +180,11 @@ async def upload_submit(
             job.status = JobStatus.FAILED
             job.error = ui_labels.UPLOAD_ENQUEUE_FAILED
             db.update_job(job)
+            failed_count += 1
 
     redirect_url = f"/jobs?submitted={submitted_count}"
+    if failed_count:
+        redirect_url += f"&failed={failed_count}"
     if htmx:
         return Response(status_code=204, headers={"HX-Redirect": redirect_url})
     return RedirectResponse(redirect_url, status_code=303)
@@ -259,6 +263,7 @@ async def upload_url_submit(
         return _error_redirect_or_fragment(request, "/upload?error=queue", ui_labels.UPLOAD_QUEUE_ERROR)
 
     submitted_count = 0
+    failed_count = 0
     for clean_url in unique_urls:
         job = Job(
             filename=clean_url,
@@ -289,6 +294,7 @@ async def upload_url_submit(
             job.status = JobStatus.FAILED
             job.error = ui_labels.UPLOAD_ENQUEUE_FAILED
             db.update_job(job)
+            failed_count += 1
 
     # All enqueue attempts failed — treat as queue error (likely Redis issue)
     if submitted_count == 0:
@@ -296,6 +302,8 @@ async def upload_url_submit(
 
     # Build redirect URL with toast info
     parts = [f"/jobs?submitted={submitted_count}"]
+    if failed_count:
+        parts.append(f"failed={failed_count}")
     if invalid_line_nums:
         parts.append(f"skipped={len(invalid_line_nums)}")
     if duplicates_removed > 0:

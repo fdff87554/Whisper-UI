@@ -359,6 +359,23 @@ class TestUploadPost:
         assert resp.status_code == 303
         assert "error=no_files" in resp.headers["location"]
 
+    def test_upload_partial_enqueue_failure_reports_failed_count(self, client, app, db):
+        mock_queue = MagicMock()
+        # First file succeeds, second raises — simulate a transient Redis error.
+        mock_queue.enqueue.side_effect = [None, Exception("Redis hiccup")]
+        files = [
+            ("files", ("a.mp3", b"data1", "audio/mpeg")),
+            ("files", ("b.mp3", b"data2", "audio/mpeg")),
+        ]
+        with patch("rq.Queue", return_value=mock_queue):
+            resp = self._upload(client, files=files)
+        assert resp.status_code == 303
+        location = resp.headers["location"]
+        assert "submitted=1" in location
+        assert "failed=1" in location
+        statuses = sorted(j.status for j in db.list_jobs())
+        assert statuses == sorted([JobStatus.QUEUED, JobStatus.FAILED])
+
     def test_upload_htmx_error_escapes_html(self, client, app):
         """Verify htmx error responses escape user input to prevent XSS."""
         files = [("files", ("test.mp3", b"fake", "audio/mpeg"))]
