@@ -14,6 +14,7 @@ from whisper_ui.core.constants import (
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.worker.context_store import PipelineContextStore
 from whisper_ui.worker.pipeline_dispatcher import (
+    _current_generation,
     _load_subjob_ids,
     enqueue_pipeline,
 )
@@ -55,8 +56,15 @@ def _build_filestore(tmp_path) -> MagicMock:
     return fs
 
 
-def _load_subjobs(redis, parent_id) -> list[RQJob]:
-    return [RQJob.fetch(sub_id, connection=redis) for sub_id in _load_subjob_ids(redis, parent_id)]
+def _load_subjobs(redis, parent_id, generation: int | None = None) -> list[RQJob]:
+    """Fetch every sub-job enqueued under ``parent_id``. When ``generation``
+    is None, auto-resolve to the current generation counter so test call
+    sites that predate the per-generation set layout keep working.
+    """
+    if generation is None:
+        generation = _current_generation(redis, parent_id)
+        assert generation is not None, f"no generation counter found for {parent_id}"
+    return [RQJob.fetch(sub_id, connection=redis) for sub_id in _load_subjob_ids(redis, parent_id, generation)]
 
 
 def _stage_func(sub: RQJob) -> str:
@@ -371,7 +379,10 @@ def test_finalize_failure_marks_job_failed_and_cancels_siblings(monkeypatch, tmp
 
     monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
 
-    failing.meta = {"parent_job_id": job.id}
+    # The sub-job meta already carries parent_job_id + generation from the
+    # enqueue_pipeline call above; leave it alone so the callback sees the
+    # same generation that the dispatcher wrote, otherwise the generation
+    # check short-circuits the test against its own setup.
     pd.finalize_failure(failing, redis, RuntimeError, RuntimeError("kaboom"), None)
 
     assert job.status == JobStatus.FAILED
@@ -421,7 +432,9 @@ def test_finalize_failure_uses_chinese_timeout_label_for_rq_timeout(monkeypatch,
 
     monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
 
-    failing.meta = {"parent_job_id": job.id}
+    # Meta is already set by enqueue_pipeline with parent_job_id + generation;
+    # do not strip it or the generation short-circuit will hide this test's
+    # own assertion setup.
     # Simulate an RQ death-penalty outside the timing-out worker: current
     # job lookup returns None, so extract_rq_timeout_seconds must parse
     # the formatted exception message.
@@ -531,7 +544,8 @@ def test_cancel_remaining_subjobs_sends_stop_command_to_running_siblings(monkeyp
     )
     enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
 
-    sub_ids = set(pd._load_subjob_ids(redis, job.id))
+    gen = _current_generation(redis, job.id)
+    sub_ids = set(pd._load_subjob_ids(redis, job.id, gen))
     assert len(sub_ids) >= 3  # preprocess + transcribe_align + diarize at minimum
 
     failing = next(s for s in _load_subjobs(redis, job.id) if _stage_func(s) == "run_transcribe_align")
@@ -551,7 +565,9 @@ def test_cancel_remaining_subjobs_sends_stop_command_to_running_siblings(monkeyp
     monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
 
     with patch.object(pd, "send_stop_job_command") as mock_stop:
-        failing.meta = {"parent_job_id": job.id}
+        # Leave failing.meta alone — enqueue_pipeline already set the
+        # parent_job_id + generation that the callback needs to pass the
+        # staleness check for this test's own attempt.
         pd.finalize_failure(failing, redis, RuntimeError, RuntimeError("kaboom"), None)
 
     called_sub_ids = {call.args[1] for call in mock_stop.call_args_list}
@@ -562,6 +578,150 @@ def test_cancel_remaining_subjobs_sends_stop_command_to_running_siblings(monkeyp
     # The failing sub-job itself must not receive a stop command (RQ would
     # reject it anyway, but asserting no-op keeps the boundary clean).
     assert failing.id not in called_sub_ids
+
+
+def test_stale_finalize_failure_short_circuits_after_retry(monkeypatch, tmp_path):
+    """Regression for PR #39 Round 2 R2-1. An attempt-1 sub-job that failed
+    and fires its ``finalize_failure`` callback AFTER the user retried the
+    job must NOT touch any attempt-2 state: the parent Job row stays at
+    PROCESSING and none of attempt 2's live sub-jobs get cancelled.
+
+    Before the fix, ``_clear_subjob_set`` at attempt 2 enqueue time
+    replaced the parent-scoped tracking set with attempt 2's ids, so the
+    stale attempt-1 callback would read attempt 2's sub-jobs out of it
+    and cancel all of them while also flipping the Job row to FAILED.
+    """
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(
+        id="job-stale-fail",
+        filename="m.mp3",
+        filepath=str(tmp_path / "m.mp3"),
+        status=JobStatus.QUEUED,
+        enable_diarization=True,
+    )
+
+    # Attempt 1 — bumps generation to 1, creates its own subjobs set.
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    attempt1_subs = _load_subjobs(redis, job.id, generation=1)
+    attempt1_failing = next(s for s in attempt1_subs if _stage_func(s) == "run_transcribe_align")
+    assert attempt1_failing.meta.get("generation") == 1
+
+    # Attempt 2 — simulates the user retrying. Dispatcher bumps generation
+    # to 2 and allocates a fresh subjobs set under gen=2. Attempt 2's Job
+    # row transitions back to PROCESSING as the first stage would have done.
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    job.status = JobStatus.PROCESSING
+    attempt2_subs = _load_subjobs(redis, job.id, generation=2)
+    attempt2_sub_ids = {s.id for s in attempt2_subs}
+
+    runtime = MagicMock()
+    runtime.redis = redis
+    runtime.db.get_job.return_value = job
+    runtime.reporter = MagicMock()
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _fake_builder(job_id):
+        yield runtime
+
+    monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
+
+    # The stale attempt-1 callback fires AFTER attempt 2 is already running.
+    pd.finalize_failure(attempt1_failing, redis, RuntimeError, RuntimeError("attempt1-boom"), None)
+
+    # Parent Job row must still be in attempt 2's state.
+    assert job.status == JobStatus.PROCESSING, (
+        f"stale attempt-1 finalize_failure must not flip the job to FAILED; got {job.status}"
+    )
+    runtime.reporter.fail.assert_not_called()
+    runtime.db.update_job.assert_not_called()
+
+    # None of attempt 2's sub-jobs may be cancelled by the stale callback.
+    for sub_id in attempt2_sub_ids:
+        refreshed = RQJob.fetch(sub_id, connection=redis)
+        assert not refreshed.is_canceled, f"attempt-2 sub-job {sub_id} was cancelled by a stale attempt-1 callback"
+
+
+def test_stale_finalize_success_short_circuits_after_retry(monkeypatch, tmp_path):
+    """Symmetric regression for R2-1: a stale attempt-1 success callback
+    must not flip attempt 2's Job row to COMPLETED or persist a stale
+    transcript file.
+    """
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(
+        id="job-stale-success",
+        filename="m.mp3",
+        filepath=str(tmp_path / "m.mp3"),
+        status=JobStatus.PROCESSING,
+    )
+
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    attempt1_tail = next(s for s in _load_subjobs(redis, job.id, generation=1) if _stage_func(s) == "run_postprocess")
+    assert attempt1_tail.meta.get("generation") == 1
+
+    # Retry bumps the generation.
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+
+    runtime = MagicMock()
+    runtime.redis = redis
+    runtime.db.get_job.return_value = job
+    runtime.reporter = MagicMock()
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _fake_builder(job_id):
+        yield runtime
+
+    monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
+
+    pd.finalize_success(attempt1_tail, redis, None)
+
+    # Parent must not be marked COMPLETED by the stale callback.
+    assert job.status != JobStatus.COMPLETED, (
+        f"stale attempt-1 finalize_success must not flip the job to COMPLETED; got {job.status}"
+    )
+    runtime.reporter.complete.assert_not_called()
+    runtime.filestore.save_result.assert_not_called()
+
+
+def test_subjobs_set_is_scoped_per_generation(tmp_path):
+    """Core invariant for Round 2 R2-1 defense-in-depth: each attempt's
+    sub-jobs live under their own ``whisper:pipeline:{parent}:subjobs:{gen}``
+    key, so a callback looking up sub-jobs under its own generation never
+    accidentally sees another attempt's ids.
+    """
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(
+        id="job-per-gen-set",
+        filename="m.mp3",
+        filepath=str(tmp_path / "m.mp3"),
+        status=JobStatus.QUEUED,
+        enable_diarization=True,
+    )
+
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    gen1_ids = set(pd._load_subjob_ids(redis, job.id, 1))
+
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    gen2_ids = set(pd._load_subjob_ids(redis, job.id, 2))
+
+    assert gen1_ids, "attempt 1 should have recorded sub-jobs under its own generation"
+    assert gen2_ids, "attempt 2 should have recorded sub-jobs under its own generation"
+    assert gen1_ids.isdisjoint(gen2_ids), "attempt 1 and attempt 2 sub-job sets must not overlap"
 
 
 def test_finalize_failure_generic_exception_still_uses_str(monkeypatch, tmp_path):
@@ -594,7 +754,8 @@ def test_finalize_failure_generic_exception_still_uses_str(monkeypatch, tmp_path
 
     monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
 
-    failing.meta = {"parent_job_id": job.id}
+    # Preserve enqueue_pipeline's meta (parent_job_id + generation) so the
+    # callback's staleness check passes for this attempt.
     pd.finalize_failure(failing, redis, RuntimeError, RuntimeError("whisper model oom"), None)
 
     assert job.status == JobStatus.FAILED

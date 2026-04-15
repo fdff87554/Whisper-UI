@@ -281,10 +281,12 @@ def test_stage_failure_cancels_downstream_and_marks_job_failed(monkeypatch, fake
     assert "kaboom" in job.error
 
     # Every non-failing sub-job should end up either cancelled or never run.
-    for sub_id in pipeline_dispatcher._load_subjob_ids(fake_redis, job.id):
-        with contextlib.suppress(Exception):
-            sub = RQJob.fetch(sub_id, connection=fake_redis)
-            assert not sub.is_finished, f"sub-job {sub.func_name} should not have finished after transcribe failure"
+    gen = pipeline_dispatcher._current_generation(fake_redis, job.id)
+    if gen is not None:
+        for sub_id in pipeline_dispatcher._load_subjob_ids(fake_redis, job.id, gen):
+            with contextlib.suppress(Exception):
+                sub = RQJob.fetch(sub_id, connection=fake_redis)
+                assert not sub.is_finished, f"sub-job {sub.func_name} should not have finished after transcribe failure"
 
 
 def test_retry_isolates_new_attempt_from_stale_sibling_writes(monkeypatch, fake_redis, fake_settings, tmp_path):

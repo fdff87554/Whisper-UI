@@ -78,20 +78,25 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Redis set key used to track the RQ ids of sub-jobs belonging to one parent.
-# The failure callback reads this set so it can cancel any dependents that
-# have not yet started.
-def _subjobs_key(parent_job_id: str) -> str:
-    return f"whisper:pipeline:{parent_job_id}:subjobs"
+# Redis keys for tracking sub-jobs and the generation counter. The
+# subjobs set is scoped per-generation so a stale callback from a
+# superseded attempt cannot accidentally enumerate the new attempt's
+# sub-jobs. See Commit 18 / PR #39 Round 2 review for the full rationale:
+# an earlier version of this module stored all sub-jobs under a single
+# parent-scoped key and cleared it on retry, which made attempt 2's ids
+# visible to attempt 1's late finalize callback.
+def _subjobs_key(parent_job_id: str, generation: int) -> str:
+    return f"whisper:pipeline:{parent_job_id}:subjobs:{generation}"
 
 
 def _generation_key(parent_job_id: str) -> str:
     return f"whisper:pipeline:{parent_job_id}:generation"
 
 
-# TTL applied to the generation counter so an abandoned job eventually
-# frees the key. Must outlive the longest plausible stage execution so a
-# late writer can still see the bumped value and drop its update.
+# TTL applied to the generation counter and subjobs sets so an abandoned
+# job eventually frees its keys. Must outlive the longest plausible stage
+# execution so a late writer can still see the bumped generation value
+# (and drop its update) after the finalizer has cleaned up the context.
 _GENERATION_TTL_SECONDS = 86_400
 
 
@@ -108,18 +113,29 @@ def _bump_generation(redis: Redis, parent_job_id: str) -> int:
     return int(new_gen)
 
 
-def _record_subjob(redis: Redis, parent_job_id: str, sub_job_id: str) -> None:
-    redis.sadd(_subjobs_key(parent_job_id), sub_job_id)
-    redis.expire(_subjobs_key(parent_job_id), 86_400)
+def _current_generation(redis: Redis, parent_job_id: str) -> int | None:
+    """Return the generation counter for ``parent_job_id``, or None when
+    no attempt has ever been enqueued (or the counter has expired).
+    """
+    raw = redis.get(_generation_key(parent_job_id))
+    if raw is None:
+        return None
+    return int(raw)
 
 
-def _load_subjob_ids(redis: Redis, parent_job_id: str) -> list[str]:
-    raw = redis.smembers(_subjobs_key(parent_job_id))
+def _record_subjob(redis: Redis, parent_job_id: str, generation: int, sub_job_id: str) -> None:
+    key = _subjobs_key(parent_job_id, generation)
+    redis.sadd(key, sub_job_id)
+    redis.expire(key, _GENERATION_TTL_SECONDS)
+
+
+def _load_subjob_ids(redis: Redis, parent_job_id: str, generation: int) -> list[str]:
+    raw = redis.smembers(_subjobs_key(parent_job_id, generation))
     return [item.decode() if isinstance(item, bytes) else item for item in raw]
 
 
-def _clear_subjob_set(redis: Redis, parent_job_id: str) -> None:
-    redis.delete(_subjobs_key(parent_job_id))
+def _clear_subjob_set(redis: Redis, parent_job_id: str, generation: int) -> None:
+    redis.delete(_subjobs_key(parent_job_id, generation))
 
 
 def enqueue_pipeline(
@@ -165,7 +181,12 @@ def enqueue_pipeline(
 
     ctx_store = PipelineContextStore(redis, job.id)
     ctx_store.initialize(initial_context)
-    _clear_subjob_set(redis, job.id)
+    # The subjobs set is now per-generation, so we do NOT clear previous
+    # attempts' sets here. An attempt 1 sub-job set will be cleaned up by
+    # its own finalize callback (or expire naturally via _GENERATION_TTL_SECONDS),
+    # and attempt 2's callback only ever looks at its own generation's set.
+    # This is what keeps a stale attempt 1 callback from cancelling attempt
+    # 2's live sub-jobs — the mechanism that broke in Round 2 review.
 
     timeout = calculate_job_timeout(job.duration, settings)
     success_cb = Callback("whisper_ui.worker.pipeline_dispatcher.finalize_success")
@@ -192,7 +213,7 @@ def enqueue_pipeline(
             kwargs["on_success"] = success_cb
         sub = queues[queue_name].enqueue(func, job.id, **kwargs)
         enqueued.append(sub)
-        _record_subjob(redis, job.id, sub.id)
+        _record_subjob(redis, job.id, generation, sub.id)
         return sub
 
     # Build the DAG. Note the "is_final" flag is only true on the very last
@@ -261,14 +282,32 @@ def finalize_success(rq_job, connection, _result) -> None:
 
     Converts the accumulated context into a persisted transcript file,
     updates the parent Job row to COMPLETED, and clears the Redis context
-    hash + sub-job tracking set.
+    hash + sub-job tracking set for this attempt's generation.
+
+    Callback staleness: if the parent's generation counter has moved on
+    since this sub-job was enqueued (e.g. the user retried mid-pipeline),
+    the callback short-circuits without touching any state. Without this
+    guard, a stale attempt-1 success callback could mark an in-progress
+    attempt 2 as COMPLETED with attempt 1's transcript file — see PR #39
+    Round 2 review R2-1.
     """
     parent_job_id = rq_job.meta.get("parent_job_id") if rq_job.meta else None
     if not parent_job_id:
         logger.error("finalize_success invoked without parent_job_id in meta")
         return
 
+    meta_generation = _extract_meta_generation(rq_job)
+
     with build_worker_runtime(parent_job_id) as runtime:
+        if _is_stale_callback(runtime.redis, parent_job_id, meta_generation):
+            logger.warning(
+                "finalize_success dropped for job %s: stale callback from generation %s "
+                "(current generation has moved on)",
+                parent_job_id,
+                meta_generation,
+            )
+            return
+
         job = runtime.db.get_job(parent_job_id)
         if job is None:
             logger.error("finalize_success could not find parent job %s", parent_job_id)
@@ -282,7 +321,8 @@ def finalize_success(rq_job, connection, _result) -> None:
             logger.error("finalize_success for job %s: no transcript_result in context", parent_job_id)
             _mark_failed(job, runtime.db, runtime.reporter, "transcript_result missing")
             ctx_store.delete()
-            _clear_subjob_set(runtime.redis, parent_job_id)
+            if meta_generation is not None:
+                _clear_subjob_set(runtime.redis, parent_job_id, meta_generation)
             return
 
         try:
@@ -301,7 +341,46 @@ def finalize_success(rq_job, connection, _result) -> None:
         finally:
             _cleanup_preprocessed_audio(context)
             ctx_store.delete()
-            _clear_subjob_set(runtime.redis, parent_job_id)
+            if meta_generation is not None:
+                _clear_subjob_set(runtime.redis, parent_job_id, meta_generation)
+
+
+def _extract_meta_generation(rq_job) -> int | None:
+    """Pull the generation id a sub-job was enqueued under out of its RQ meta.
+
+    Sub-jobs from the legacy monolithic path (or tests that fabricate a
+    MagicMock RQ job) may not carry this field at all — treat that as
+    "no generation tracked" so the finalize callbacks fall through to
+    their original behaviour and we do not regress the legacy path.
+    """
+    if rq_job is None or not getattr(rq_job, "meta", None):
+        return None
+    raw = rq_job.meta.get("generation")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_stale_callback(redis: Redis, parent_job_id: str, meta_generation: int | None) -> bool:
+    """Return True when a finalize callback's meta generation has been
+    superseded by a retry that bumped the parent generation counter.
+
+    Degrades gracefully when either generation is unknown: if the meta
+    has no generation (legacy / fabricated job) or the Redis counter is
+    missing, we treat the callback as still valid so legacy code paths
+    and tests that don't set up the full retry machinery keep working.
+    Only a strictly-older meta generation than the current counter
+    triggers the stale short-circuit.
+    """
+    if meta_generation is None:
+        return False
+    current = _current_generation(redis, parent_job_id)
+    if current is None:
+        return False
+    return meta_generation < current
 
 
 def _format_failure_message(exc_type, exc_value) -> str:
@@ -330,18 +409,37 @@ def _format_failure_message(exc_type, exc_value) -> str:
 def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> None:
     """RQ ``on_failure`` callback attached to every sub-job.
 
-    Called once per failing sub-job. The first invocation marks the parent
-    FAILED and cancels the other sub-jobs; subsequent invocations become
-    no-ops because the parent is already in a terminal state.
+    Called once per failing sub-job. The first invocation (for the
+    current generation) marks the parent FAILED and cancels the other
+    sub-jobs in the same generation; subsequent invocations from the
+    same generation are no-ops because the parent is already terminal.
+
+    Callback staleness: when the parent's generation counter has moved
+    on since this sub-job was enqueued (e.g. the user retried mid-run),
+    the callback short-circuits without cancelling or marking anything.
+    Without this guard an attempt 1 failure could mark an in-flight
+    attempt 2 as FAILED and cancel all of attempt 2's sub-jobs — the
+    exact bug from PR #39 Round 2 review R2-1 that the reproduction
+    test below covers.
     """
     parent_job_id = rq_job.meta.get("parent_job_id") if rq_job.meta else None
     if not parent_job_id:
         logger.error("finalize_failure invoked without parent_job_id in meta")
         return
 
+    meta_generation = _extract_meta_generation(rq_job)
     error_msg = _format_failure_message(_exc_type, exc_value)
 
     with build_worker_runtime(parent_job_id) as runtime:
+        if _is_stale_callback(runtime.redis, parent_job_id, meta_generation):
+            logger.warning(
+                "finalize_failure dropped for job %s: stale callback from generation %s "
+                "(current generation has moved on)",
+                parent_job_id,
+                meta_generation,
+            )
+            return
+
         job = runtime.db.get_job(parent_job_id)
         if job is None:
             logger.error("finalize_failure could not find parent job %s", parent_job_id)
@@ -358,12 +456,19 @@ def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> No
         context = ctx_store.load()
 
         try:
-            _cancel_remaining_subjobs(runtime.redis, parent_job_id, exclude=rq_job.id)
+            if meta_generation is not None:
+                _cancel_remaining_subjobs(
+                    runtime.redis,
+                    parent_job_id,
+                    generation=meta_generation,
+                    exclude=rq_job.id,
+                )
             _mark_failed(job, runtime.db, runtime.reporter, error_msg)
         finally:
             _cleanup_preprocessed_audio(context)
             ctx_store.delete()
-            _clear_subjob_set(runtime.redis, parent_job_id)
+            if meta_generation is not None:
+                _clear_subjob_set(runtime.redis, parent_job_id, meta_generation)
 
 
 def _mark_failed(
@@ -379,9 +484,21 @@ def _mark_failed(
     reporter.fail(error_msg)
 
 
-def _cancel_remaining_subjobs(redis: Redis, parent_job_id: str, *, exclude: str) -> None:
-    """Stop every sub-job belonging to the same parent, except the one that
-    just failed (``exclude``).
+def _cancel_remaining_subjobs(
+    redis: Redis,
+    parent_job_id: str,
+    *,
+    generation: int,
+    exclude: str,
+) -> None:
+    """Stop every sub-job belonging to the same parent *and same
+    generation*, except the one that just failed (``exclude``).
+
+    Scoping by generation is what prevents a stale attempt-1 callback
+    from cancelling attempt 2's live sub-jobs. ``_load_subjob_ids`` only
+    returns sub-jobs that were enqueued under this exact generation; a
+    retry opens a fresh set under a new generation that stale callbacks
+    cannot see.
 
     This has to handle two distinct states for each sibling:
 
@@ -411,7 +528,7 @@ def _cancel_remaining_subjobs(redis: Redis, parent_job_id: str, *, exclude: str)
     """
     from rq.job import Job as RQJob
 
-    for sub_id in _load_subjob_ids(redis, parent_job_id):
+    for sub_id in _load_subjob_ids(redis, parent_job_id, generation):
         if sub_id == exclude:
             continue
         # Layer 1a: stop if currently running. Fire-and-forget — the stop
