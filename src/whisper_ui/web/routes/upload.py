@@ -19,7 +19,7 @@ from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
 from whisper_ui.ui import labels as ui_labels
 from whisper_ui.web.deps import DbDep, FileStoreDep, RedisDep, SettingsDep, templates
 from whisper_ui.web.url_validation import PlaylistURLError, YouTubeURLError, validate_youtube_url
-from whisper_ui.worker.timeout import calculate_job_timeout
+from whisper_ui.worker.pipeline_dispatcher import enqueue_pipeline
 
 _READ_CHUNK_SIZE = 1024 * 1024  # 1 MB
 
@@ -128,14 +128,6 @@ async def upload_submit(
     submitted_count = 0
     failed_count = 0
 
-    try:
-        from rq import Queue
-
-        q = Queue(connection=redis)
-    except Exception:
-        logger.exception("Failed to construct RQ queue from Redis connection")
-        return _error_redirect_or_fragment(request, "/upload?error=queue", ui_labels.UPLOAD_QUEUE_ERROR)
-
     max_size = settings.max_upload_size
     for uploaded_file in valid_files:
         display_name = PurePosixPath(uploaded_file.filename or "unknown").name
@@ -169,11 +161,7 @@ async def upload_submit(
         db.insert_job(job)
 
         try:
-            q.enqueue(
-                "whisper_ui.worker.tasks.process_transcription",
-                job.id,
-                job_timeout=calculate_job_timeout(job.duration, settings),
-            )
+            enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
             submitted_count += 1
         except Exception:
             logger.exception("Failed to enqueue job %s", job.id)
@@ -254,14 +242,6 @@ async def upload_url_submit(
     # Batch ID only when multiple URLs
     batch_id = uuid.uuid4().hex if len(unique_urls) > 1 else None
 
-    try:
-        from rq import Queue
-
-        q = Queue(connection=redis)
-    except Exception:
-        logger.exception("Failed to construct RQ queue from Redis connection")
-        return _error_redirect_or_fragment(request, "/upload?error=queue", ui_labels.UPLOAD_QUEUE_ERROR)
-
     submitted_count = 0
     failed_count = 0
     for clean_url in unique_urls:
@@ -283,11 +263,7 @@ async def upload_url_submit(
         db.insert_job(job)
 
         try:
-            q.enqueue(
-                "whisper_ui.worker.tasks.process_transcription",
-                job.id,
-                job_timeout=calculate_job_timeout(None, settings),
-            )
+            enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
             submitted_count += 1
         except Exception:
             logger.exception("Failed to enqueue URL job %s", job.id)
