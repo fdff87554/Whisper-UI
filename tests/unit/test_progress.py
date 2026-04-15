@@ -59,6 +59,50 @@ def test_report_falls_back_to_default_ttl_when_omitted():
     assert fake.ttl("job:default-ttl-job") > 0
 
 
+def test_report_progress_never_regresses_on_second_writer():
+    """Direct Lua-max semantics test: two reporters bound to the same
+    job_id write interleaved values and the stored progress must always
+    be the highest one any writer has observed. Message always follows
+    the latest write so the UI can switch stage labels even when
+    progress happens to stall.
+    """
+    fake = fakeredis.FakeRedis()
+    r1 = RedisProgressReporter(fake, "same-job")
+    r2 = RedisProgressReporter(fake, "same-job")
+
+    r1.report(0.30, "transcribe running")
+    assert _stored(fake, "same-job")["progress"] == "0.3"
+
+    r2.report(0.72, "diarize running")
+    assert _stored(fake, "same-job")["progress"] == "0.72"
+
+    # Regression attempt — must be dropped. Message still advances.
+    r1.report(0.35, "transcribe chunk 2")
+    stored = _stored(fake, "same-job")
+    assert float(stored["progress"]) == 0.72
+    assert stored["message"] == "transcribe chunk 2"
+
+    # A strictly larger write still wins.
+    r1.report(0.90, "transcribe chunk 3")
+    assert float(_stored(fake, "same-job")["progress"]) == 0.90
+
+
+def test_report_progress_updates_message_when_equal():
+    """Equal progress values must still update the message so the user
+    sees the current stage label when a branch reports a status change
+    without moving the percentage (e.g. "diarize loading" → "diarize
+    running" at 0.65).
+    """
+    fake = fakeredis.FakeRedis()
+    reporter = RedisProgressReporter(fake, "stall-job")
+    reporter.report(0.65, "diarize loading")
+    reporter.report(0.65, "diarize running")
+
+    stored = _stored(fake, "stall-job")
+    assert float(stored["progress"]) == 0.65
+    assert stored["message"] == "diarize running"
+
+
 def test_complete_sets_done():
     mock_redis, reporter = _make_reporter()
     reporter.complete("/path/to/result.json")

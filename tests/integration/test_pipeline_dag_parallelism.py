@@ -287,65 +287,88 @@ def test_stage_failure_cancels_downstream_and_marks_job_failed(monkeypatch, fake
             assert not sub.is_finished, f"sub-job {sub.func_name} should not have finished after transcribe failure"
 
 
-def test_progress_reporter_never_regresses_across_parallel_branches(monkeypatch, fake_redis, fake_settings, tmp_path):
-    """The throttled reporter must never hand a smaller progress value to
-    the Redis hash than its previous call, even when transcribe_align and
-    diarize are writing concurrently. Monotonicity is what the htmx
-    progress bar depends on — a regression here would manifest as the bar
-    visibly jumping backwards mid-job.
+def test_parallel_branch_progress_never_regresses_in_redis(monkeypatch, fake_redis, fake_settings, tmp_path):
+    """End-to-end monotonicity check for the DAG path. Two real
+    ``RedisProgressReporter`` instances (one per parallel branch) pound
+    the same parent job_id from different threads with interleaved
+    progress values; the final stored progress must equal the highest
+    value any branch ever reported, and the full write history — read
+    back via ``RedisProgressReporter.get_progress`` after each call —
+    must never show a regression.
+
+    This is the PR #39 review fix for R2 (Gemini + user): the previous
+    version of this test was named "never_regresses" but its assertion
+    only checked ``0.0 <= v <= 1.0``, which passed even while the bar
+    was visibly jumping backwards under parallel worker writes.
     """
-    db = MagicMock()
-    job = Job(
-        id="job-progress",
-        filename="m.mp3",
-        filepath=str(tmp_path / "m.mp3"),
-        status=JobStatus.QUEUED,
-        duration=30.0,
-        enable_diarization=True,
-    )
-    db.get_job.return_value = job
+    from whisper_ui.worker.progress import RedisProgressReporter
 
-    filestore = MagicMock()
-    filestore.prepare_upload_path.return_value = tmp_path / "subdir" / "m.mp3"
-    filestore.save_result.return_value = tmp_path / "result.json"
+    parent_id = "job-parallel-mono"
+    transcribe_reporter = RedisProgressReporter(fake_redis, parent_id)
+    diarize_reporter = RedisProgressReporter(fake_redis, parent_id)
 
-    reported: list[float] = []
-    reporter_lock = threading.Lock()
+    # Interleave writes so the server-side Lua max is the only thing
+    # keeping progress monotonic. If it were a plain HSET the "0.20"
+    # write from transcribe would clobber the "0.72" diarize write.
+    writes = [
+        (transcribe_reporter, 0.10, "transcribe starting"),
+        (diarize_reporter, 0.72, "diarize running"),
+        (transcribe_reporter, 0.20, "transcribe chunk 2"),
+        (transcribe_reporter, 0.55, "transcribe chunk 3"),
+        (diarize_reporter, 0.85, "diarize running"),
+        (transcribe_reporter, 0.60, "align starting"),
+    ]
 
-    class _RecordingReporter:
-        def report(self, progress: float, message: str) -> None:
-            with reporter_lock:
-                reported.append(progress)
+    history: list[float] = []
+    for reporter, progress, message in writes:
+        reporter.report(progress, message)
+        after = RedisProgressReporter.get_progress(fake_redis, parent_id)
+        history.append(float(after["progress"]))
 
-        def complete(self, _path: str) -> None: ...
+    # Core invariant: every consecutive pair is non-decreasing.
+    for i in range(1, len(history)):
+        assert history[i] >= history[i - 1], (
+            f"progress regressed between step {i - 1} ({history[i - 1]}) and step {i} ({history[i]}); "
+            f"full history: {history}"
+        )
 
-        def fail(self, _msg: str) -> None: ...
+    # And the final value is the max of all writes, which is diarize's 0.85.
+    assert history[-1] == 0.85
 
-    runtime = WorkerRuntime(
-        settings=fake_settings,
-        redis=fake_redis,
-        reporter=_RecordingReporter(),
-        db=db,
-        filestore=filestore,
-    )
+    # Message must reflect the latest write even when progress did not
+    # advance (the 0.20 transcribe write that was rejected still updated
+    # its message). This is what lets the UI show the current stage name.
+    final = RedisProgressReporter.get_progress(fake_redis, parent_id)
+    assert final["message"] == "align starting"
 
-    @contextlib.contextmanager
-    def _builder(_job_id):
-        yield runtime
 
-    timeline: list = []
-    with _stub_stages(monkeypatch, timeline):
-        _install_runtime(monkeypatch, _builder)
-        enqueue_pipeline(job, redis=fake_redis, settings=fake_settings, filestore=filestore)
-        _drain_queues(fake_redis)
+def test_parallel_reporters_from_threads_never_regress(fake_redis):
+    """Same invariant as above but driven from real threads writing
+    concurrently. Catches races the sequential-interleave test cannot
+    see — if the Lua EVAL were somehow non-atomic, the thread version
+    would surface it as a regression under load.
+    """
+    from whisper_ui.worker.progress import RedisProgressReporter
 
-    assert reported, "reporter should have been called at least once"
-    # Within a single throttled closure the monotonicity guard enforces
-    # non-decreasing values. Across stages, each task creates its own
-    # closure, so a later stage starting lower than the previous stage's
-    # final value is acceptable and expected (bands overlap slightly).
-    # What must never happen is an individual stage emitting a regression.
-    for i in range(1, len(reported)):
-        # Allow at most the transition between stage bands (which can drop).
-        # We only assert strictly that no value is wildly out of [0, 1].
-        assert 0.0 <= reported[i] <= 1.0
+    parent_id = "job-parallel-mono-threaded"
+    n_writes = 200
+
+    def writer(start: float, step: float, label: str) -> None:
+        reporter = RedisProgressReporter(fake_redis, parent_id)
+        for i in range(n_writes):
+            reporter.report(start + i * step, f"{label}-{i}")
+
+    threads = [
+        threading.Thread(target=writer, args=(0.00, 0.003, "transcribe")),
+        threading.Thread(target=writer, args=(0.20, 0.003, "diarize")),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    final = RedisProgressReporter.get_progress(fake_redis, parent_id)
+    final_progress = float(final["progress"])
+    # The highest value any writer produced is 0.20 + 199 * 0.003 ≈ 0.797
+    expected_max = max(0.00 + (n_writes - 1) * 0.003, 0.20 + (n_writes - 1) * 0.003)
+    assert final_progress == pytest.approx(expected_max, abs=1e-6)
