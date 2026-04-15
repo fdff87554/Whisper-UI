@@ -152,10 +152,34 @@ def _execute_stage(
     return updated
 
 
+def _current_generation() -> int | None:
+    """Return the generation id the currently-running RQ job was enqueued
+    under, or None outside an RQ worker context (e.g. unit tests that
+    invoke stage tasks directly).
+
+    Stage tasks use this to tell the context store which attempt they
+    belong to, so a stale write from a previous retry attempt can be
+    rejected even after ``send_stop_job_command`` has fired.
+    """
+    try:
+        from rq import get_current_job
+
+        current = get_current_job()
+        if current is None or not current.meta:
+            return None
+        gen = current.meta.get("generation")
+        return int(gen) if gen is not None else None
+    except Exception:
+        logger.debug("rq.get_current_job() unavailable while reading generation", exc_info=True)
+        return None
+
+
 def _persist_outputs(
     ctx_store: PipelineContextStore,
     updated: dict[str, Any],
     output_keys: tuple[str, ...],
+    *,
+    stage_name: str,
 ) -> None:
     """Write only the declared outputs back to the context store.
 
@@ -163,9 +187,25 @@ def _persist_outputs(
     fan-in safe: two concurrent branches writing to disjoint keys never stomp
     each other, and large intermediates that should not leave the producing
     process (e.g. ``whisperx_audio``) are automatically excluded.
+
+    When the current RQ job meta carries a ``generation``, the write goes
+    through the context store's generation-gated path so a retry that has
+    already incremented the generation counter causes this stale stage's
+    output to be silently dropped. If the generation cannot be determined
+    (e.g. running outside a worker in unit tests), fall back to the
+    unconditional update so tests keep working.
     """
     updates = {key: updated[key] for key in output_keys if key in updated}
-    ctx_store.update(updates)
+    generation = _current_generation()
+    if generation is None:
+        ctx_store.update(updates)
+        return
+    committed = ctx_store.update_if_generation_matches(updates, generation)
+    if not committed:
+        logger.warning(
+            "Stage %s output dropped: parent job was retried under a new generation",
+            stage_name,
+        )
 
 
 def _run_single_stage(
@@ -198,7 +238,7 @@ def _run_single_stage(
         on_progress = _banded_progress(throttled, band)
 
         updated = _execute_stage(stage, context.copy(), on_progress, stage_name=stage_name)
-        _persist_outputs(ctx_store, updated, output_keys)
+        _persist_outputs(ctx_store, updated, output_keys, stage_name=stage_name)
 
         logger.info("Stage %s finished for job %s", stage_name, parent_job_id)
         return f"{stage_name}:{parent_job_id}"
@@ -287,6 +327,7 @@ def run_transcribe_align(parent_job_id: str) -> str:
             ctx_store,
             after_align,
             output_keys=("transcription_result", "aligned_result"),
+            stage_name="transcribe_align",
         )
 
         logger.info("Stage transcribe_align finished for job %s", parent_job_id)

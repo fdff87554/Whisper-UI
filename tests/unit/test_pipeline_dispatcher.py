@@ -442,6 +442,73 @@ def test_finalize_failure_uses_chinese_timeout_label_for_rq_timeout(monkeypatch,
     assert "Task exceeded" not in job.error
 
 
+def test_enqueue_pipeline_increments_generation_counter(tmp_path):
+    """Each enqueue_pipeline call (original submit and every retry) must
+    bump the per-parent generation counter so stale writers from previous
+    attempts can detect their attempt has been superseded.
+    """
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(
+        id="job-gen",
+        filename="m.mp3",
+        filepath=str(tmp_path / "m.mp3"),
+        status=JobStatus.QUEUED,
+    )
+
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    gen_after_first = int(redis.get(pd._generation_key(job.id)))
+
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    gen_after_second = int(redis.get(pd._generation_key(job.id)))
+
+    assert gen_after_first == 1
+    assert gen_after_second == 2
+
+
+def test_subjobs_carry_current_generation_in_meta(tmp_path):
+    """Every sub-job enqueued for a given attempt must carry the
+    generation matching the counter at enqueue time, so its write-back
+    path can reject stale late writes atomically.
+    """
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(
+        id="job-gen-meta",
+        filename="m.mp3",
+        filepath=str(tmp_path / "m.mp3"),
+        status=JobStatus.QUEUED,
+        enable_diarization=True,
+    )
+
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    subs = _load_subjobs(redis, job.id)
+    expected_gen = int(redis.get(pd._generation_key(job.id)))
+
+    assert subs, "enqueue_pipeline should have produced at least one sub-job"
+    for sub in subs:
+        assert sub.meta.get("generation") == expected_gen
+
+    # After a retry, the old sub-job metadata must be distinct from the new
+    # ones. The old subs still sit in the tracking set because finalize_*
+    # has not yet cleared it, but any late writer reading a fresh meta
+    # will see the incremented generation.
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    new_subs = _load_subjobs(redis, job.id)
+    new_gen = int(redis.get(pd._generation_key(job.id)))
+    assert new_gen == expected_gen + 1
+    # Every sub-job currently tracked should carry either the old or new
+    # generation (the set may still contain the previous attempt's ids).
+    for sub in new_subs:
+        assert sub.meta.get("generation") in {expected_gen, new_gen}
+
+
 def test_cancel_remaining_subjobs_sends_stop_command_to_running_siblings(monkeypatch, tmp_path):
     """Regression for PR #39 R3 Layer 1: a failed transcribe_align must
     fire send_stop_job_command for every sibling sub-job (so diarize
