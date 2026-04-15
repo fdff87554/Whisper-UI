@@ -85,6 +85,29 @@ def _subjobs_key(parent_job_id: str) -> str:
     return f"whisper:pipeline:{parent_job_id}:subjobs"
 
 
+def _generation_key(parent_job_id: str) -> str:
+    return f"whisper:pipeline:{parent_job_id}:generation"
+
+
+# TTL applied to the generation counter so an abandoned job eventually
+# frees the key. Must outlive the longest plausible stage execution so a
+# late writer can still see the bumped value and drop its update.
+_GENERATION_TTL_SECONDS = 86_400
+
+
+def _bump_generation(redis: Redis, parent_job_id: str) -> int:
+    """Atomically advance the generation counter for ``parent_job_id``.
+
+    Returns the new generation. Every enqueue_pipeline call (including
+    retries) goes through this, so sibling sub-jobs from a previous attempt
+    that somehow kept running will see a newer generation when they try
+    to commit their output and silently drop the write.
+    """
+    new_gen = redis.incr(_generation_key(parent_job_id))
+    redis.expire(_generation_key(parent_job_id), _GENERATION_TTL_SECONDS)
+    return int(new_gen)
+
+
 def _record_subjob(redis: Redis, parent_job_id: str, sub_job_id: str) -> None:
     redis.sadd(_subjobs_key(parent_job_id), sub_job_id)
     redis.expire(_subjobs_key(parent_job_id), 86_400)
@@ -135,6 +158,11 @@ def enqueue_pipeline(
     else:
         initial_context["input_path"] = job.filepath or ""
 
+    # Bump the generation counter *before* initializing the context so any
+    # stale writer from the previous attempt sees the new value and drops
+    # its write the next time it calls update_if_generation_matches.
+    generation = _bump_generation(redis, job.id)
+
     ctx_store = PipelineContextStore(redis, job.id)
     ctx_store.initialize(initial_context)
     _clear_subjob_set(redis, job.id)
@@ -142,7 +170,10 @@ def enqueue_pipeline(
     timeout = calculate_job_timeout(job.duration, settings)
     success_cb = Callback("whisper_ui.worker.pipeline_dispatcher.finalize_success")
     failure_cb = Callback("whisper_ui.worker.pipeline_dispatcher.finalize_failure")
-    meta = {"parent_job_id": job.id}
+    # Sub-job meta carries both the parent_job_id (for callbacks that need
+    # to route to the right Job row) and the generation (so stage tasks
+    # can gate their writes against stale retries).
+    meta = {"parent_job_id": job.id, "generation": generation}
 
     llm_active = bool(job.llm_correction_enabled) and bool(settings.ollama_base_url)
 

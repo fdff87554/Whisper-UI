@@ -287,6 +287,62 @@ def test_stage_failure_cancels_downstream_and_marks_job_failed(monkeypatch, fake
             assert not sub.is_finished, f"sub-job {sub.func_name} should not have finished after transcribe failure"
 
 
+def test_retry_isolates_new_attempt_from_stale_sibling_writes(monkeypatch, fake_redis, fake_settings, tmp_path):
+    """End-to-end retry isolation (PR #39 R3 Layer 2). Simulates a stale
+    diarize that is still running after transcribe_align failed and a
+    retry has been enqueued; the stale stage's final write must be
+    rejected because the generation counter has moved on.
+
+    Walks through the exact scenario:
+    1. First enqueue bumps generation to 1 and seeds fresh context.
+    2. A stage task under generation=1 captures its generation but has
+       not yet written its output (simulated by not calling _persist_outputs).
+    3. The user retries the job: enqueue_pipeline runs again, bumps
+       generation to 2, re-seeds the context with fresh initial values.
+    4. The gen=1 stage finally tries to write its output. The gated
+       write returns False and the new attempt's context is untouched.
+    """
+    from whisper_ui.worker.context_store import PipelineContextStore
+    from whisper_ui.worker.pipeline_dispatcher import enqueue_pipeline as real_enqueue
+
+    job = Job(
+        id="job-retry-iso",
+        filename="m.mp3",
+        filepath=str(tmp_path / "m.mp3"),
+        status=JobStatus.QUEUED,
+        enable_diarization=True,
+    )
+    filestore = MagicMock()
+    filestore.prepare_upload_path.return_value = tmp_path / "subdir" / "m.mp3"
+
+    # Attempt 1 — dispatcher bumps generation to 1, seeds context.
+    real_enqueue(job, redis=fake_redis, settings=fake_settings, filestore=filestore)
+    store_v1 = PipelineContextStore(fake_redis, job.id)
+    assert store_v1.get_generation() == 1
+
+    # Stale diarize reads its generation (1) at the moment of execution —
+    # before the user retries. It has produced its result but has not yet
+    # called update_if_generation_matches (e.g. because it is still deep
+    # inside a pyannote C++ call while the retry enqueues a new attempt).
+    stale_generation = 1
+    stale_output = {"diarize_result": ["STALE_FROM_ATTEMPT_1"]}
+
+    # Attempt 2 — user retries, dispatcher bumps generation to 2 and
+    # re-initializes the context with fresh seed keys (no diarize_result).
+    real_enqueue(job, redis=fake_redis, settings=fake_settings, filestore=filestore)
+    store_v2 = PipelineContextStore(fake_redis, job.id)
+    assert store_v2.get_generation() == 2
+    assert "diarize_result" not in store_v2.load()
+
+    # The stale stage finally flushes its output. Because its cached
+    # generation no longer matches the current one, the write must be
+    # dropped and the new attempt's context must stay clean.
+    committed = store_v2.update_if_generation_matches(stale_output, stale_generation)
+
+    assert committed is False
+    assert "diarize_result" not in store_v2.load(), "stale diarize output from attempt 1 leaked into attempt 2 context"
+
+
 def test_parallel_branch_progress_never_regresses_in_redis(monkeypatch, fake_redis, fake_settings, tmp_path):
     """End-to-end monotonicity check for the DAG path. Two real
     ``RedisProgressReporter`` instances (one per parallel branch) pound

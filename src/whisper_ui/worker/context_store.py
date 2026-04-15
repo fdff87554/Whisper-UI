@@ -11,6 +11,22 @@ Values are pickled individually per field so every supported Python object a
 stage stores in the context (dataclasses, dicts, lists, primitives) survives
 the round trip. Large arrays such as ``whisperx_audio`` are deliberately *not*
 persisted here; they only live in the process that produced them.
+
+Generation-gated writes
+-----------------------
+
+A separate per-parent-job counter (``whisper:pipeline:{parent}:generation``)
+is bumped on every ``enqueue_pipeline`` call. Each sub-job is enqueued with
+the current generation embedded in its RQ meta, and
+``update_if_generation_matches`` refuses to write when the caller's
+generation no longer matches the one stored in Redis.
+
+This exists to isolate retries: if a user retries a failed job while a
+lingering stage from the previous attempt (e.g. a diarize call deep inside
+a pyannote C++ inference that did not yet honour ``send_stop_job_command``)
+is still running, that stale stage must not be able to write its stale
+output into the fresh context hash the retry just seeded. Generation gating
+closes that window server-side via a Lua compare-and-write script.
 """
 
 from __future__ import annotations
@@ -27,23 +43,69 @@ if TYPE_CHECKING:
 _CONTEXT_TTL_SECONDS = 86_400
 
 
+# Atomic generation-gated HSET: write the pickled fields only if the stored
+# generation counter matches the caller's expected generation. Returns 1 on
+# success, 0 if the write was rejected because the caller's generation was
+# stale (the parent job has been retried under a new generation).
+#
+# KEYS[1] = context hash key (whisper:ctx:<parent>)
+# KEYS[2] = generation counter key (whisper:pipeline:<parent>:generation)
+# ARGV[1] = expected generation (int as string)
+# ARGV[2] = TTL in seconds
+# ARGV[3..] = alternating field/value pairs for the HSET
+_GENERATION_GATED_HSET_LUA = """
+local ctx_key = KEYS[1]
+local gen_key = KEYS[2]
+local expected = ARGV[1]
+local ttl = tonumber(ARGV[2])
+local current = redis.call('GET', gen_key)
+if current and current ~= expected then
+  return 0
+end
+local pairs_count = #ARGV - 2
+if pairs_count >= 2 then
+  local args = {}
+  for i = 3, #ARGV do
+    args[#args + 1] = ARGV[i]
+  end
+  redis.call('HSET', ctx_key, unpack(args))
+end
+redis.call('EXPIRE', ctx_key, ttl)
+return 1
+"""
+
+
 class PipelineContextStore:
-    """Redis-hash backed view of a parent job's pipeline context."""
+    """Redis-hash backed view of a parent job's pipeline context.
+
+    The store does **not** own the generation counter lifecycle — the
+    dispatcher INCRs it when a pipeline is enqueued and the store only
+    reads it. This separation keeps the context store a plain data layer
+    while the dispatcher remains the single place that decides when a
+    retry starts a new attempt.
+    """
 
     def __init__(self, redis: Redis, parent_job_id: str) -> None:
         self._redis = redis
         self._key = f"whisper:ctx:{parent_job_id}"
+        self._generation_key = f"whisper:pipeline:{parent_job_id}:generation"
+        self._gated_hset_script = redis.register_script(_GENERATION_GATED_HSET_LUA)
 
     @property
     def key(self) -> str:
         return self._key
+
+    @property
+    def generation_key(self) -> str:
+        return self._generation_key
 
     def initialize(self, context: dict[str, Any]) -> None:
         """Replace the context with ``context``.
 
         Used by the dispatcher when a new pipeline is enqueued so that any
         stale hash left over from a previous run is cleared before the first
-        stage runs.
+        stage runs. Does **not** touch the generation counter — that is the
+        dispatcher's responsibility.
         """
         self._redis.delete(self._key)
         if context:
@@ -62,7 +124,12 @@ class PipelineContextStore:
         return {self._decode(k): pickle.loads(v) for k, v in raw.items()}
 
     def update(self, updates: dict[str, Any]) -> None:
-        """Write ``updates`` to the hash, replacing any existing fields.
+        """Write ``updates`` to the hash unconditionally.
+
+        Used only for seeding keys from the dispatcher / pre-context hooks
+        that run before any sub-job meta exists. Stage tasks must prefer
+        :meth:`update_if_generation_matches` so their writes can be rejected
+        when the parent job has been retried under a new generation.
 
         Empty updates are a no-op so a stage that produces nothing can call
         ``update({})`` unconditionally.
@@ -73,8 +140,49 @@ class PipelineContextStore:
         self._redis.hset(self._key, mapping=mapping)
         self._redis.expire(self._key, _CONTEXT_TTL_SECONDS)
 
+    def update_if_generation_matches(
+        self,
+        updates: dict[str, Any],
+        expected_generation: int,
+    ) -> bool:
+        """Write ``updates`` only if the parent generation still matches.
+
+        Returns True when the write committed, False when it was rejected
+        because another enqueue_pipeline call has since bumped the
+        generation. Callers should treat a False return as "this attempt
+        has been superseded" and stop mutating shared state; the stage
+        itself has already run and its work is simply discarded.
+
+        Empty updates still go through the Lua script so the TTL is
+        refreshed and the generation check runs — this keeps the
+        invariant that any successful stage execution either commits its
+        output or discovers the retry, with no silent middle ground.
+        """
+        serialized_pairs: list[str | bytes] = []
+        for field, value in updates.items():
+            serialized_pairs.append(field)
+            serialized_pairs.append(pickle.dumps(value))
+        result = self._gated_hset_script(
+            keys=[self._key, self._generation_key],
+            args=[str(expected_generation), _CONTEXT_TTL_SECONDS, *serialized_pairs],
+        )
+        return int(result) == 1
+
+    def get_generation(self) -> int | None:
+        """Return the current generation, or None if none has been set yet."""
+        raw = self._redis.get(self._generation_key)
+        if raw is None:
+            return None
+        return int(raw)
+
     def delete(self) -> None:
-        """Drop the context hash. Called by the pipeline finalizer."""
+        """Drop the context hash. Called by the pipeline finalizer.
+
+        Intentionally does *not* delete the generation counter: if a late
+        retry comes in while a stale stage is mid-execution, we want the
+        counter to still be visible so the stale stage's
+        update_if_generation_matches call can see the new value.
+        """
         self._redis.delete(self._key)
 
     @staticmethod
