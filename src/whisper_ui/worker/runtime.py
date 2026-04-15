@@ -135,7 +135,26 @@ def make_throttled_progress_reporter(
                 if delta < min_delta and (now - last_written_at) < min_interval_sec:
                     return
 
-            reporter.report(progress, message)
+            # The reporter returns False exactly when its Lua script
+            # determined the caller's generation is strictly older than
+            # the stored one (i.e. the parent job has been retried under
+            # a newer attempt). In that case we must NOT touch the Job
+            # object or the SQLite row: db.update_job performs a
+            # full-column UPDATE from the in-memory snapshot, so a stale
+            # Job captured by this closure would overwrite the current
+            # attempt's status / result_path / error fields. Silently
+            # drop the DB mirror and leave the closure's monotonic /
+            # throttle state untouched so a subsequent (equally stale)
+            # call takes the same fast path instead of slipping through.
+            accepted = reporter.report(progress, message)
+            if not accepted:
+                logger.debug(
+                    "progress write for %s dropped server-side (stale generation); "
+                    "skipping DB mirror to avoid overwriting the current attempt",
+                    job.id,
+                )
+                return
+
             job.progress = progress
             job.progress_message = message
             db.update_job(job)

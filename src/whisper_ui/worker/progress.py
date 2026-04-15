@@ -228,31 +228,53 @@ class RedisProgressReporter:
         """
         return _NO_GENERATION if self._generation is None else int(self._generation)
 
-    def report(self, progress: float, message: str) -> None:
-        # Progress reports are best-effort: SQLite remains the source of
-        # truth for job state. A transient Redis outage mid-job must not
-        # take down the worker — log and swallow so the pipeline keeps
-        # running and the user only loses live progress updates.
+    def report(self, progress: float, message: str) -> bool:
+        """Attempt a generation-gated max-write.
+
+        Returns ``True`` when the Lua script accepted the write (or when
+        ``generation`` is None, meaning legacy max-write semantics always
+        accept), ``False`` when the script explicitly rejected a stale
+        write (``caller_gen < stored_gen``).
+
+        Transient Redis outages are swallowed and reported as accepted so
+        the legacy throttler path keeps writing to SQLite — SQLite is the
+        source of truth when Redis is unavailable. Only an explicit "Lua
+        returned 0" is surfaced to the caller as a rejection signal, and
+        that only happens in exactly one branch of the script: a stage
+        attempting to write under a superseded generation. ``runtime.
+        make_throttled_progress_reporter`` uses this signal to skip its
+        DB mirror so a stale Job snapshot cannot overwrite the current
+        attempt's row via the full-column ``update_job`` UPDATE path.
+        """
         try:
-            self._max_write_script(
+            result = self._max_write_script(
                 keys=[self._key],
                 args=[progress, message, self._processing_ttl, self._caller_gen_arg()],
             )
         except RedisError:
             logger.warning("Redis progress write failed for %s", self._job_id, exc_info=True)
+            # SQLite is the source of truth during transient Redis outages;
+            # treating the write as accepted lets the throttler keep the DB
+            # mirror fresh even when Redis is down.
+            return True
+        return int(result) != 0
 
-    def complete(self, result_path: str) -> None:
+    def complete(self, result_path: str) -> bool:
+        """Terminal-state write. See :meth:`report` for the bool contract."""
         try:
-            self._complete_script(
+            result = self._complete_script(
                 keys=[self._key],
                 args=[result_path, PIPELINE_COMPLETE, REDIS_COMPLETED_EXPIRY, self._caller_gen_arg()],
             )
         except RedisError:
             logger.warning("Redis complete write failed for %s", self._job_id, exc_info=True)
+            return True
+        return int(result) != 0
 
-    def fail(self, error: str) -> None:
+    def fail(self, error: str) -> bool:
+        """Terminal-state write. See :meth:`report` for the bool contract."""
         try:
-            self._fail_script(
+            result = self._fail_script(
                 keys=[self._key],
                 args=[
                     error[:MESSAGE_MAX_LENGTH],
@@ -263,6 +285,8 @@ class RedisProgressReporter:
             )
         except RedisError:
             logger.warning("Redis fail write failed for %s", self._job_id, exc_info=True)
+            return True
+        return int(result) != 0
 
     @staticmethod
     def get_progress(redis: Redis, job_id: str) -> dict[str, str]:

@@ -222,6 +222,91 @@ def test_report_progress_updates_message_when_equal():
     assert stored["message"] == "diarize running"
 
 
+def test_report_returns_true_when_lua_accepts_fresh_write():
+    """``report()`` returns True when the Lua script commits the write.
+    Covers all three accepting branches: legacy (no generation), reset
+    (caller_gen > stored_gen), and same-generation max-write.
+    """
+    fake = fakeredis.FakeRedis()
+
+    # Legacy branch (caller_gen = -1).
+    legacy = RedisProgressReporter(fake, "job-legacy")
+    assert legacy.report(0.1, "m") is True
+
+    # Reset branch (higher caller_gen than stored).
+    gen_aware = RedisProgressReporter(fake, "job-reset", generation=2)
+    assert gen_aware.report(0.3, "m") is True
+
+    # Same-generation max-write branch (new >= stored).
+    same_gen = RedisProgressReporter(fake, "job-reset", generation=2)
+    assert same_gen.report(0.5, "m") is True
+
+
+def test_report_returns_false_when_lua_drops_stale_write():
+    """Core PR #39 Round 3 regression: ``report()`` returns False when
+    the caller's generation is strictly older than the stored one, so
+    the throttler can skip its SQLite mirror path and leave the
+    current attempt's Job row alone.
+    """
+    fake = fakeredis.FakeRedis()
+
+    # Attempt 2 owns the hash.
+    RedisProgressReporter(fake, "job-stale", generation=2).report(0.4, "attempt2 running")
+
+    # Attempt 1 late writer.
+    stale = RedisProgressReporter(fake, "job-stale", generation=1)
+    accepted = stale.report(0.99, "attempt1 stale heartbeat")
+
+    assert accepted is False
+    # And the hash is untouched (sanity: confirms Lua dropped the write).
+    stored = _stored(fake, "job-stale")
+    assert float(stored["progress"]) == 0.4
+    assert stored["generation"] == "2"
+
+
+def test_report_returns_true_on_redis_error():
+    """Transient Redis failures must *not* surface as rejection: the
+    legacy "SQLite is source of truth when Redis is unavailable" contract
+    requires the throttler to keep writing to the DB during an outage.
+    """
+    _fake, reporter = _fake_reporter()
+    reporter._max_write_script = MagicMock(side_effect=RedisConnectionError("down"))
+
+    assert reporter.report(0.5, "m") is True
+
+
+def test_complete_returns_true_when_accepted():
+    """Legacy (no generation) complete() always accepts; so does a
+    gen-aware reporter whose generation is at least the stored one.
+    """
+    fake = fakeredis.FakeRedis()
+    legacy = RedisProgressReporter(fake, "job-ok-legacy")
+    assert legacy.complete("/tmp/legacy.json") is True
+
+    gen_aware = RedisProgressReporter(fake, "job-ok-gen", generation=5)
+    assert gen_aware.complete("/tmp/gen.json") is True
+
+
+def test_complete_returns_false_when_stale():
+    fake = fakeredis.FakeRedis()
+    RedisProgressReporter(fake, "job-ct", generation=2).report(0.5, "attempt2 running")
+    stale = RedisProgressReporter(fake, "job-ct", generation=1)
+
+    assert stale.complete("/tmp/stale.json") is False
+    stored = _stored(fake, "job-ct")
+    assert stored["status"] == "processing"
+
+
+def test_fail_returns_false_when_stale():
+    fake = fakeredis.FakeRedis()
+    RedisProgressReporter(fake, "job-fl", generation=2).report(0.5, "attempt2 running")
+    stale = RedisProgressReporter(fake, "job-fl", generation=1)
+
+    assert stale.fail("stale error") is False
+    stored = _stored(fake, "job-fl")
+    assert stored["status"] == "processing"
+
+
 def test_complete_sets_done():
     fake, reporter = _fake_reporter()
     reporter.complete("/path/to/result.json")
@@ -466,6 +551,43 @@ class TestThrottledProgressReporter:
         # actually wrote — i.e. monotonically non-decreasing.
         final_progress = max(call.args[0] for call in reporter.report.call_args_list)
         assert final_progress > 0
+
+    def test_throttle_skips_db_update_when_reporter_rejects_stale_write(self):
+        """Regression for PR #39 Round 3 R3-1. When the Redis Lua script
+        rejects a write because the caller's generation is strictly older
+        than the stored one, the throttler must NOT proceed to update the
+        SQLite Job row from its captured (stale) Job object. Before this
+        fix the throttler always called db.update_job(job) regardless of
+        whether the Redis write landed, so a stale stage's captured Job
+        snapshot could clobber the current attempt's status, progress,
+        and result_path fields via the full-column UPDATE path.
+        """
+        on_progress, reporter, db, job, _clock = _make_throttle()
+        reporter.report.return_value = False  # Lua rejected (stale generation)
+
+        on_progress(0.85, "attempt1 stale heartbeat")
+
+        reporter.report.assert_called_once_with(0.85, "attempt1 stale heartbeat")
+        db.update_job.assert_not_called()
+        # Captured Job must not be mutated — otherwise a *subsequent*
+        # legitimate writer would inherit the stale progress value.
+        assert job.progress == 0.0
+        assert job.progress_message == ""
+
+    def test_throttle_proceeds_when_reporter_accepts_write(self):
+        """Sanity pair for the test above: when the reporter returns
+        True (legacy max-write, reset branch, or current generation
+        match) the throttler still writes to SQLite as before.
+        """
+        on_progress, reporter, db, job, _clock = _make_throttle()
+        reporter.report.return_value = True
+
+        on_progress(0.42, "running")
+
+        reporter.report.assert_called_once_with(0.42, "running")
+        db.update_job.assert_called_once_with(job)
+        assert job.progress == 0.42
+        assert job.progress_message == "running"
 
     def test_late_heartbeat_with_old_message_is_dropped(self):
         """Same race as above, but the late update still carries the old
