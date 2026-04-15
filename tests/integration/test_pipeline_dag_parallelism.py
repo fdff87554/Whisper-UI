@@ -344,6 +344,93 @@ def test_retry_progress_starts_fresh_after_stale_writer(fake_redis):
     assert stored["generation"] == "2"
 
 
+def test_stale_throttled_progress_does_not_corrupt_completed_job_row(fake_redis, tmp_path):
+    """End-to-end regression for PR #39 Round 3 R3-1.
+
+    Walks the exact scenario the reviewer reproducer flagged:
+
+    1. Seed a SQLite Job row in terminal COMPLETED state with a
+       persisted result_path — this is the "new attempt" that has
+       already finished successfully.
+    2. Seed a matching Redis progress hash under generation=2 so the
+       reporter's Lua script knows which attempt owns the key.
+    3. Capture a stale Job snapshot from DB and mutate it to match
+       what attempt 1 saw before the retry — as the stale stage task
+       would have (status=PROCESSING, progress=0.80, no result_path).
+    4. Build a throttled reporter against that stale snapshot with a
+       gen=1 RedisProgressReporter, and call it with a progress update.
+    5. Assert both Redis and SQLite are untouched: the Redis hash still
+       reflects attempt 2, and the Job row still shows COMPLETED with
+       its real result_path — the stale throttler must not have
+       overwritten anything.
+
+    Before this commit, step 4 wrote attempt 1's snapshot back to
+    SQLite via the full-column db.update_job path, flipping the Job
+    row to processing and nulling result_path. The bool return from
+    ``RedisProgressReporter.report()`` now lets the throttler skip the
+    DB mirror when the Lua script rejects the stale write.
+    """
+    from whisper_ui.core.models import Job, JobStatus
+    from whisper_ui.storage.database import JobDatabase
+    from whisper_ui.worker.progress import RedisProgressReporter
+    from whisper_ui.worker.runtime import make_throttled_progress_reporter
+
+    db_path = tmp_path / "round3.db"
+    db = JobDatabase(db_path)
+    try:
+        job_id = "job-round3-e2e"
+        completed = Job(
+            id=job_id,
+            filename="m.mp3",
+            filepath=str(tmp_path / "m.mp3"),
+            status=JobStatus.COMPLETED,
+            progress=1.0,
+            progress_message="Pipeline complete",
+            result_path="/tmp/attempt2-result.json",
+            duration=42.0,
+        )
+        db.insert_job(completed)
+
+        # Attempt 2 is actively reporting under generation=2 so the
+        # hash carries a stored_gen that will cause Lua to reject
+        # anything older.
+        RedisProgressReporter(fake_redis, job_id, generation=2).report(0.40, "attempt2 running")
+
+        # Stale stage captures an old snapshot. The stage holds this by
+        # reference — it is not re-fetched across throttler invocations.
+        stale_snapshot = db.get_job(job_id)
+        stale_snapshot.status = JobStatus.PROCESSING
+        stale_snapshot.progress = 0.80
+        stale_snapshot.progress_message = "attempt1 old state"
+        stale_snapshot.result_path = None
+
+        stale_reporter = RedisProgressReporter(fake_redis, job_id, generation=1)
+        stale_throttled = make_throttled_progress_reporter(stale_reporter, db, stale_snapshot)
+
+        # Fire the late heartbeat that used to corrupt the DB.
+        stale_throttled(0.85, "attempt1 stale heartbeat")
+
+        # SQLite side: the Job row must still reflect attempt 2's
+        # COMPLETED state, not the stale snapshot.
+        reloaded = db.get_job(job_id)
+        assert reloaded.status == JobStatus.COMPLETED
+        assert reloaded.progress == pytest.approx(1.0)
+        assert reloaded.progress_message == "Pipeline complete"
+        assert reloaded.result_path == "/tmp/attempt2-result.json"
+        assert reloaded.duration == pytest.approx(42.0)
+
+        # Redis side: unchanged, still showing attempt 2.
+        stored = {
+            k.decode() if isinstance(k, bytes) else k: v.decode() if isinstance(v, bytes) else v
+            for k, v in fake_redis.hgetall(f"job:{job_id}").items()
+        }
+        assert stored["generation"] == "2"
+        assert stored["message"] == "attempt2 running"
+        assert float(stored["progress"]) == 0.40
+    finally:
+        db.close()
+
+
 def test_retry_isolates_new_attempt_from_stale_sibling_writes(monkeypatch, fake_redis, fake_settings, tmp_path):
     """End-to-end retry isolation (PR #39 R3 Layer 2). Simulates a stale
     diarize that is still running after transcribe_align failed and a
