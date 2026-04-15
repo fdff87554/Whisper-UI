@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from rq import Callback, Queue
+from rq.timeouts import BaseTimeoutException
 
 from whisper_ui.core.constants import (
     ERROR_DISPLAY_LENGTH,
@@ -35,8 +36,9 @@ from whisper_ui.core.constants import (
 )
 from whisper_ui.core.messages import PIPELINE_COMPLETE
 from whisper_ui.core.models import JobStatus
+from whisper_ui.ui.labels import JOBS_TIMEOUT_ERROR
 from whisper_ui.worker.context_store import PipelineContextStore
-from whisper_ui.worker.runtime import build_worker_runtime
+from whisper_ui.worker.runtime import build_worker_runtime, extract_rq_timeout_seconds
 from whisper_ui.worker.stage_tasks import (
     run_assign_speakers,
     run_diarize,
@@ -270,6 +272,29 @@ def finalize_success(rq_job, connection, _result) -> None:
             _clear_subjob_set(runtime.redis, parent_job_id)
 
 
+def _format_failure_message(exc_type, exc_value) -> str:
+    """Turn an RQ ``on_failure`` exception triple into the user-facing error.
+
+    RQ timeouts get routed through the same ``JOBS_TIMEOUT_ERROR`` label the
+    legacy monolithic worker used (see ``worker/tasks.py``) so the UI shows
+    the Chinese "任務總執行時間超出上限" message regardless of whether the
+    pipeline ran in the DAG or legacy path. Any other exception falls back
+    to ``str(exc_value)``, matching the pre-DAG behaviour for non-timeout
+    failures.
+
+    RQ passes the exception *class* as ``exc_type`` (not an instance), so the
+    type check must use ``issubclass``. ``exc_value`` is still the instance
+    and is passed through to ``extract_rq_timeout_seconds`` for message-regex
+    parsing when the current-job lookup is unavailable.
+    """
+    if exc_type is not None and isinstance(exc_type, type) and issubclass(exc_type, BaseTimeoutException):
+        seconds = extract_rq_timeout_seconds(exc_value) if exc_value is not None else "?"
+        return JOBS_TIMEOUT_ERROR.format(seconds=seconds)
+    if exc_value is not None:
+        return str(exc_value)
+    return "unknown pipeline failure"
+
+
 def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> None:
     """RQ ``on_failure`` callback attached to every sub-job.
 
@@ -282,7 +307,7 @@ def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> No
         logger.error("finalize_failure invoked without parent_job_id in meta")
         return
 
-    error_msg = str(exc_value) if exc_value is not None else "unknown pipeline failure"
+    error_msg = _format_failure_message(_exc_type, exc_value)
 
     with build_worker_runtime(parent_job_id) as runtime:
         job = runtime.db.get_job(parent_job_id)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import fakeredis
 import pytest
@@ -383,3 +383,99 @@ def test_finalize_failure_marks_job_failed_and_cancels_siblings(monkeypatch, tmp
         assert refreshed.is_canceled, f"sub-job {_stage_func(other)} should be cancelled"
     # context store should be wiped
     assert PipelineContextStore(redis, job.id).load() == {}
+
+
+def test_finalize_failure_uses_chinese_timeout_label_for_rq_timeout(monkeypatch, tmp_path):
+    """When an RQ death-penalty timeout kills a DAG sub-job, the parent
+    job's ``error`` field must render the same Chinese JOBS_TIMEOUT_ERROR
+    label the legacy monolithic worker used. Without this, users see the
+    raw "Task exceeded maximum timeout value (N seconds)" English message
+    which is both ugly and an i18n regression.
+    """
+    from rq.timeouts import JobTimeoutException
+
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(
+        id="job-timeout",
+        filename="m.mp3",
+        filepath=str(tmp_path / "m.mp3"),
+        status=JobStatus.PROCESSING,
+    )
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    failing = next(s for s in _load_subjobs(redis, job.id) if _stage_func(s) == "run_transcribe_align")
+
+    runtime = MagicMock()
+    runtime.redis = redis
+    runtime.db.get_job.return_value = job
+    runtime.reporter = MagicMock()
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _fake_builder(job_id):
+        yield runtime
+
+    monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
+
+    failing.meta = {"parent_job_id": job.id}
+    # Simulate an RQ death-penalty outside the timing-out worker: current
+    # job lookup returns None, so extract_rq_timeout_seconds must parse
+    # the formatted exception message.
+    with patch("rq.get_current_job", return_value=None):
+        pd.finalize_failure(
+            failing,
+            redis,
+            JobTimeoutException,
+            JobTimeoutException("Task exceeded maximum timeout value (3600 seconds)"),
+            None,
+        )
+
+    assert job.status == JobStatus.FAILED
+    assert job.error is not None
+    assert "任務總執行時間超出上限" in job.error
+    assert "3600" in job.error
+    # The raw English message must not leak through.
+    assert "Task exceeded" not in job.error
+
+
+def test_finalize_failure_generic_exception_still_uses_str(monkeypatch, tmp_path):
+    """Non-timeout exceptions keep the existing str(exc_value) path so
+    pipeline-level errors (e.g. PipelineError) are surfaced verbatim."""
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(
+        id="job-generic-fail",
+        filename="m.mp3",
+        filepath=str(tmp_path / "m.mp3"),
+        status=JobStatus.PROCESSING,
+    )
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    failing = next(s for s in _load_subjobs(redis, job.id) if _stage_func(s) == "run_transcribe_align")
+
+    runtime = MagicMock()
+    runtime.redis = redis
+    runtime.db.get_job.return_value = job
+    runtime.reporter = MagicMock()
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _fake_builder(job_id):
+        yield runtime
+
+    monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
+
+    failing.meta = {"parent_job_id": job.id}
+    pd.finalize_failure(failing, redis, RuntimeError, RuntimeError("whisper model oom"), None)
+
+    assert job.status == JobStatus.FAILED
+    assert "whisper model oom" in (job.error or "")
+    # Must not be silently rewritten to the timeout label.
+    assert "任務總執行時間" not in (job.error or "")
