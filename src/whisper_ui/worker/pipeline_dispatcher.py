@@ -1,0 +1,335 @@
+"""Dispatcher that assembles a per-pipeline DAG of RQ sub-jobs.
+
+``enqueue_pipeline`` replaces the legacy single-task ``process_transcription``
+path. Instead of running every pipeline stage inside one monolithic worker
+task, it seeds the shared context in Redis and fans out one RQ sub-job per
+logical stage (or stage group). The sub-jobs are wired together via
+``depends_on`` so that:
+
+* download (if any) runs before preprocess
+* transcribe_align and diarize start in parallel after preprocess
+* assign_speakers fans them back in
+* postprocess (and the optional llm_correction) finish the chain
+
+The final job carries an ``on_success`` callback that saves the transcript
+result, marks the parent job COMPLETED, and clears the context store. Every
+sub-job also carries an ``on_failure`` callback that marks the parent FAILED,
+cancels any dependent jobs that have not yet run, and cleans up the
+intermediate 16 kHz WAV.
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from rq import Callback, Queue
+
+from whisper_ui.core.constants import (
+    ERROR_DISPLAY_LENGTH,
+    ERROR_MAX_LENGTH,
+)
+from whisper_ui.core.messages import PIPELINE_COMPLETE
+from whisper_ui.core.models import JobStatus
+from whisper_ui.worker.context_store import PipelineContextStore
+from whisper_ui.worker.runtime import build_worker_runtime
+from whisper_ui.worker.stage_tasks import (
+    run_assign_speakers,
+    run_diarize,
+    run_download,
+    run_llm_correction,
+    run_postprocess,
+    run_preprocess,
+    run_transcribe_align,
+)
+from whisper_ui.worker.timeout import calculate_job_timeout
+
+if TYPE_CHECKING:
+    from redis import Redis
+    from rq.job import Job as RQJob
+
+    from whisper_ui.core.config import Settings
+    from whisper_ui.core.models import Job
+    from whisper_ui.storage.database import JobDatabase
+    from whisper_ui.storage.filestore import FileStore
+    from whisper_ui.worker.progress import RedisProgressReporter
+
+logger = logging.getLogger(__name__)
+
+
+# Redis set key used to track the RQ ids of sub-jobs belonging to one parent.
+# The failure callback reads this set so it can cancel any dependents that
+# have not yet started.
+def _subjobs_key(parent_job_id: str) -> str:
+    return f"whisper:pipeline:{parent_job_id}:subjobs"
+
+
+def _record_subjob(redis: Redis, parent_job_id: str, sub_job_id: str) -> None:
+    redis.sadd(_subjobs_key(parent_job_id), sub_job_id)
+    redis.expire(_subjobs_key(parent_job_id), 86_400)
+
+
+def _load_subjob_ids(redis: Redis, parent_job_id: str) -> list[str]:
+    raw = redis.smembers(_subjobs_key(parent_job_id))
+    return [item.decode() if isinstance(item, bytes) else item for item in raw]
+
+
+def _clear_subjob_set(redis: Redis, parent_job_id: str) -> None:
+    redis.delete(_subjobs_key(parent_job_id))
+
+
+def enqueue_pipeline(
+    job: Job,
+    *,
+    redis: Redis,
+    settings: Settings,
+    filestore: FileStore,
+) -> str:
+    """Build and enqueue the RQ DAG for ``job``.
+
+    The DAG shape depends on three flags that come from the Job record and
+    the deployment settings:
+
+    * ``job.source_url`` → prepend a download sub-job
+    * ``job.enable_diarization`` → add a diarize branch parallel to transcribe
+    * ``job.llm_correction_enabled`` (AND ``settings.ollama_base_url``) → add
+      an llm_correction sub-job after postprocess
+
+    Returns the id of the last sub-job in the chain, so callers can attach
+    monitoring to the tail of the pipeline if they want to.
+    """
+    q = Queue(connection=redis)
+
+    initial_context: dict = {
+        "language": job.language,
+        "batch_size": settings.batch_size,
+        "num_speakers": job.num_speakers,
+    }
+    if job.source_url:
+        initial_context["source_url"] = job.source_url
+        initial_context["download_dir"] = str(filestore.prepare_upload_path(job.id, "_").parent)
+        initial_context["input_path"] = ""
+    else:
+        initial_context["input_path"] = job.filepath or ""
+
+    ctx_store = PipelineContextStore(redis, job.id)
+    ctx_store.initialize(initial_context)
+    _clear_subjob_set(redis, job.id)
+
+    timeout = calculate_job_timeout(job.duration, settings)
+    success_cb = Callback("whisper_ui.worker.pipeline_dispatcher.finalize_success")
+    failure_cb = Callback("whisper_ui.worker.pipeline_dispatcher.finalize_failure")
+    meta = {"parent_job_id": job.id}
+
+    llm_active = bool(job.llm_correction_enabled) and bool(settings.ollama_base_url)
+
+    enqueued: list[RQJob] = []
+
+    def _enqueue(func, *, depends_on=None, is_final: bool) -> RQJob:
+        kwargs = {
+            "job_timeout": timeout,
+            "meta": dict(meta),
+            "on_failure": failure_cb,
+        }
+        if depends_on is not None:
+            kwargs["depends_on"] = depends_on
+        if is_final:
+            kwargs["on_success"] = success_cb
+        sub = q.enqueue(func, job.id, **kwargs)
+        enqueued.append(sub)
+        _record_subjob(redis, job.id, sub.id)
+        return sub
+
+    # Build the DAG. Note the "is_final" flag is only true on the very last
+    # sub-job of the chosen branch, so finalize_success runs exactly once.
+    if job.source_url:
+        download_job = _enqueue(run_download, is_final=False)
+        preprocess_job = _enqueue(run_preprocess, depends_on=download_job, is_final=False)
+    else:
+        preprocess_job = _enqueue(run_preprocess, is_final=False)
+
+    transcribe_job = _enqueue(
+        run_transcribe_align,
+        depends_on=preprocess_job,
+        is_final=False,
+    )
+
+    if job.enable_diarization:
+        diarize_job = _enqueue(run_diarize, depends_on=preprocess_job, is_final=False)
+        assign_deps: list[RQJob] = [transcribe_job, diarize_job]
+    else:
+        assign_deps = [transcribe_job]
+
+    assign_job = _enqueue(run_assign_speakers, depends_on=assign_deps, is_final=False)
+    postprocess_final = not llm_active
+    postprocess_job = _enqueue(
+        run_postprocess,
+        depends_on=assign_job,
+        is_final=postprocess_final,
+    )
+
+    if llm_active:
+        llm_job = _enqueue(run_llm_correction, depends_on=postprocess_job, is_final=True)
+        tail_id = llm_job.id
+    else:
+        tail_id = postprocess_job.id
+
+    logger.info(
+        "Enqueued pipeline DAG for job %s with %d sub-jobs",
+        job.id,
+        len(enqueued),
+    )
+    return tail_id
+
+
+def _apply_filename_from_video_title(job: Job, context: dict) -> None:
+    """If the pipeline downloaded a YouTube video, surface its title as the
+    user-facing filename. Mirrors the legacy behaviour in
+    ``worker.tasks.process_transcription``.
+    """
+    if job.source_url and context.get("video_title"):
+        job.filename = context["video_title"]
+
+
+def _cleanup_preprocessed_audio(context: dict) -> None:
+    audio_path = context.get("audio_path")
+    if not audio_path:
+        return
+    try:
+        Path(audio_path).unlink(missing_ok=True)
+    except OSError:
+        logger.warning("Failed to clean up preprocessed file: %s", audio_path)
+
+
+def finalize_success(rq_job, connection, _result) -> None:
+    """RQ ``on_success`` callback for the final sub-job.
+
+    Converts the accumulated context into a persisted transcript file,
+    updates the parent Job row to COMPLETED, and clears the Redis context
+    hash + sub-job tracking set.
+    """
+    parent_job_id = rq_job.meta.get("parent_job_id") if rq_job.meta else None
+    if not parent_job_id:
+        logger.error("finalize_success invoked without parent_job_id in meta")
+        return
+
+    with build_worker_runtime(parent_job_id) as runtime:
+        job = runtime.db.get_job(parent_job_id)
+        if job is None:
+            logger.error("finalize_success could not find parent job %s", parent_job_id)
+            return
+
+        ctx_store = PipelineContextStore(runtime.redis, parent_job_id)
+        context = ctx_store.load()
+
+        transcript_result = context.get("transcript_result")
+        if transcript_result is None:
+            logger.error("finalize_success for job %s: no transcript_result in context", parent_job_id)
+            _mark_failed(job, runtime.db, runtime.reporter, "transcript_result missing")
+            ctx_store.delete()
+            _clear_subjob_set(runtime.redis, parent_job_id)
+            return
+
+        try:
+            _apply_filename_from_video_title(job, context)
+            result_path = runtime.filestore.save_result(parent_job_id, transcript_result)
+
+            job.status = JobStatus.COMPLETED
+            job.progress = 1.0
+            job.progress_message = PIPELINE_COMPLETE
+            job.result_path = str(result_path)
+            job.duration = transcript_result.duration
+            runtime.db.update_job(job)
+            runtime.reporter.complete(str(result_path))
+
+            logger.info("Job %s completed successfully via DAG pipeline", parent_job_id)
+        finally:
+            _cleanup_preprocessed_audio(context)
+            ctx_store.delete()
+            _clear_subjob_set(runtime.redis, parent_job_id)
+
+
+def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> None:
+    """RQ ``on_failure`` callback attached to every sub-job.
+
+    Called once per failing sub-job. The first invocation marks the parent
+    FAILED and cancels the other sub-jobs; subsequent invocations become
+    no-ops because the parent is already in a terminal state.
+    """
+    parent_job_id = rq_job.meta.get("parent_job_id") if rq_job.meta else None
+    if not parent_job_id:
+        logger.error("finalize_failure invoked without parent_job_id in meta")
+        return
+
+    error_msg = str(exc_value) if exc_value is not None else "unknown pipeline failure"
+
+    with build_worker_runtime(parent_job_id) as runtime:
+        job = runtime.db.get_job(parent_job_id)
+        if job is None:
+            logger.error("finalize_failure could not find parent job %s", parent_job_id)
+            return
+
+        if job.status == JobStatus.FAILED:
+            logger.debug(
+                "finalize_failure: job %s already FAILED, skipping duplicate cleanup",
+                parent_job_id,
+            )
+            return
+
+        ctx_store = PipelineContextStore(runtime.redis, parent_job_id)
+        context = ctx_store.load()
+
+        try:
+            _cancel_remaining_subjobs(runtime.redis, parent_job_id, exclude=rq_job.id)
+            _mark_failed(job, runtime.db, runtime.reporter, error_msg)
+        finally:
+            _cleanup_preprocessed_audio(context)
+            ctx_store.delete()
+            _clear_subjob_set(runtime.redis, parent_job_id)
+
+
+def _mark_failed(
+    job: Job,
+    db: JobDatabase,
+    reporter: RedisProgressReporter,
+    error_msg: str,
+) -> None:
+    job.status = JobStatus.FAILED
+    job.error = error_msg[:ERROR_MAX_LENGTH]
+    job.progress_message = f"Failed: {error_msg[:ERROR_DISPLAY_LENGTH]}"
+    db.update_job(job)
+    reporter.fail(error_msg)
+
+
+def _cancel_remaining_subjobs(redis: Redis, parent_job_id: str, *, exclude: str) -> None:
+    """Cancel every sub-job that has not yet started, except the one that
+    just failed (``exclude``).
+
+    RQ's default behaviour for a failed dependency is to move the dependent
+    job to the ``deferred`` registry and never execute it; from the user's
+    perspective that looks like a hang. Explicitly cancelling them here means
+    the queue drains cleanly and monitoring dashboards show a clear terminal
+    state for every sub-job.
+    """
+    from rq.job import Job as RQJob
+
+    for sub_id in _load_subjob_ids(redis, parent_job_id):
+        if sub_id == exclude:
+            continue
+        try:
+            sub = RQJob.fetch(sub_id, connection=redis)
+        except Exception:
+            logger.debug("sub-job %s no longer exists, skipping cancel", sub_id)
+            continue
+        try:
+            sub.cancel()
+        except Exception:
+            logger.warning("failed to cancel sub-job %s", sub_id, exc_info=True)
+
+
+__all__ = [
+    "enqueue_pipeline",
+    "finalize_failure",
+    "finalize_success",
+]
