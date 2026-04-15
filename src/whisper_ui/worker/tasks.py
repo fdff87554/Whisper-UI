@@ -22,14 +22,14 @@ from whisper_ui.pipeline.align import AlignStage
 from whisper_ui.pipeline.assign_speakers import AssignSpeakersStage
 from whisper_ui.pipeline.diarize import DiarizeStage
 from whisper_ui.pipeline.download import DownloadStage
-from whisper_ui.pipeline.orchestrator import (
+from whisper_ui.pipeline.orchestrator import PipelineOrchestrator
+from whisper_ui.pipeline.postprocess import PostprocessStage
+from whisper_ui.pipeline.preprocess import PreprocessStage
+from whisper_ui.pipeline.progress_bands import (
     STAGE_WEIGHTS_WITH_DOWNLOAD,
     STAGE_WEIGHTS_WITH_DOWNLOAD_AND_LLM,
     STAGE_WEIGHTS_WITH_LLM,
-    PipelineOrchestrator,
 )
-from whisper_ui.pipeline.postprocess import PostprocessStage
-from whisper_ui.pipeline.preprocess import PreprocessStage
 from whisper_ui.pipeline.transcribe import TranscribeStage
 from whisper_ui.storage.database import JobDatabase
 from whisper_ui.storage.filestore import FileStore
