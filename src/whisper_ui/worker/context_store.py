@@ -12,6 +12,44 @@ stage stores in the context (dataclasses, dicts, lists, primitives) survives
 the round trip. Large arrays such as ``whisperx_audio`` are deliberately *not*
 persisted here; they only live in the process that produced them.
 
+Serialization choice and threat model
+-------------------------------------
+
+Using ``pickle`` for values is an explicit, documented trade-off against
+switching to JSON or msgpack. The reasoning is layered:
+
+1. **Deployment target is internal network only.** Whisper-UI is shipped as
+   a docker-compose stack intended to run on a trusted internal host; the
+   README explicitly does not claim support for public / multi-tenant
+   deployment. The compose file configures ``REDIS_PASSWORD`` and binds
+   Redis to the internal network only, so an attacker reaching the Redis
+   hash at all already implies a prior compromise inside that network.
+   At that point a pickle RCE gadget only promotes attacker-on-Redis to
+   attacker-on-worker — the attack surface is not novel, merely wider by
+   one hop.
+
+2. **Context payloads contain whisperx internals.** The rich fields
+   (``transcription_result``, ``aligned_result``, ``diarize_result``,
+   ``final_result``) are nested Python dicts with numpy arrays and pandas
+   frames in the middle. JSON does not round-trip numpy cleanly; msgpack
+   round-trips only with a numpy extension, and either choice would force
+   every stage to maintain a custom ``to_dict`` / ``from_dict`` layer. The
+   audit cost of that migration is large, and every new stage would have
+   to stay in sync with it.
+
+3. **No alternative is strictly safer in the current threat model.** The
+   only meaningful threat model shift would be exposing Redis to an
+   untrusted network. If that ever happens, the right response is a
+   deployment hardening pass (Redis auth, TLS, network segmentation),
+   alongside a serializer migration — not a serializer migration alone.
+
+**Upgrade path.** When/if the deployment story opens up to public
+networks, replace ``pickle.dumps`` / ``pickle.loads`` with
+``msgpack-numpy`` and audit every ``output_keys`` tuple in
+``worker/stage_tasks.py`` to make sure the payloads round-trip
+losslessly. Generation-gated writes are orthogonal and will continue to
+work unchanged because the Lua script only sees opaque bytes.
+
 Generation-gated writes
 -----------------------
 
@@ -31,6 +69,12 @@ closes that window server-side via a Lua compare-and-write script.
 
 from __future__ import annotations
 
+# ``pickle`` is deliberate — see "Serialization choice and threat model" in
+# the module docstring for the full rationale. The internal-network-only
+# deployment story plus authenticated Redis means the pickle attack surface
+# already requires a prior internal compromise, and the context payloads
+# (whisperx nested dicts with numpy arrays) do not round-trip cleanly
+# through safer serializers without a large per-stage audit.
 import pickle
 from typing import TYPE_CHECKING, Any
 
@@ -121,6 +165,9 @@ class PipelineContextStore:
         empty dict before the pipeline has started seeding it.
         """
         raw = self._redis.hgetall(self._key)
+        # pickle.loads is safe in this codebase only under the threat model
+        # documented at the top of this module. Do not change this call
+        # site without also updating that docstring.
         return {self._decode(k): pickle.loads(v) for k, v in raw.items()}
 
     def update(self, updates: dict[str, Any]) -> None:
