@@ -116,6 +116,59 @@ All settings are configured via environment variables (`.env` file):
 > processing times. GPU deployment with `large-v3` and `int8_float16` gives the
 > best accuracy-to-speed ratio.
 
+### Worker topology and queues (advanced)
+
+Each upload is dispatched as an RQ **DAG of sub-jobs** (one per pipeline
+stage) rather than a single monolithic task. Sub-jobs are routed to
+resource-class queues so a long-running IO or network stage never blocks
+a GPU worker from picking up the next job:
+
+| Queue         | Stages                                     |
+| ------------- | ------------------------------------------ |
+| `whisper:gpu` | `transcribe_align`, `diarize`              |
+| `whisper:io`  | `download`, `preprocess`, `llm_correction` |
+| `whisper:cpu` | `assign_speakers`, `postprocess`           |
+
+**Single-container (default).** `docker compose --profile gpu up -d` keeps
+the existing behaviour: `worker-gpu` listens to every queue so one
+container drains the full pipeline end-to-end. You do not need to touch
+any queue variables for this layout.
+
+**Scaled topology.** To stop the GPU worker from picking up IO/LLM work,
+add the `io` profile and narrow the GPU worker's queue set:
+
+```bash
+# .env
+WORKER_GPU_QUEUES="whisper:gpu default"
+WORKER_IO_QUEUES="whisper:io whisper:cpu default"
+
+docker compose --profile gpu --profile io up -d
+```
+
+`worker-io` is a lightweight CPU container that drains `whisper:io`
+(download / preprocess / llm_correction) in parallel with `worker-gpu`
+running transcribe_align / diarize on the GPU. Two jobs enqueued back to
+back overlap: job B can be downloading while job A is on the GPU, and
+job A can be in llm_correction (hitting an external Ollama server) while
+job B is already transcribing.
+
+**Multi-GPU hosts.** When the DAG fans out transcribe_align and diarize
+as sibling branches they will automatically run in parallel once you
+provision more than one GPU worker. Example with two cards:
+
+```bash
+# Launch two GPU workers, each pinned to one card.
+docker compose --profile gpu up -d --scale worker-gpu=2
+# Or run named services and set WORKER_GPU_DEVICE_ID per container.
+```
+
+**Upgrading from the monolithic path.** Any jobs already enqueued under
+the legacy `process_transcription` entry point keep working — the
+default queue set on every worker still includes `default`, and the old
+monolithic function still exists in `whisper_ui.worker.tasks` for
+backwards compatibility. Drain in-flight jobs (or simply wait them out)
+before narrowing `WORKER_*_QUEUES` on a scaled topology.
+
 ### Queue / Timeout tuning (advanced)
 
 The RQ job timeout is derived from the probed audio duration
