@@ -57,6 +57,12 @@ services:
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     environment:
+      # Queues this worker listens on. The default includes every queue so a
+      # single-profile `docker compose --profile gpu up` still runs the full
+      # pipeline end-to-end. For the scaled topology, set
+      # `WORKER_GPU_QUEUES=whisper:gpu default` and add the `io` profile so
+      # a dedicated worker-io handles download / preprocess / llm_correction.
+      - WORKER_QUEUES=${WORKER_GPU_QUEUES:-whisper:gpu whisper:io whisper:cpu default}
       - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
       - DATABASE_PATH=/app/data/db/whisper_ui.db
       - UPLOAD_DIR=/app/data/uploads
@@ -107,6 +113,10 @@ services:
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     environment:
+      # Same broad default as worker-gpu: runs the whole pipeline in a
+      # single container when the CPU profile is used alone. Override with
+      # `WORKER_CPU_QUEUES=whisper:cpu default` to specialise.
+      - WORKER_QUEUES=${WORKER_CPU_QUEUES:-whisper:gpu whisper:io whisper:cpu default}
       - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
       - DATABASE_PATH=/app/data/db/whisper_ui.db
       - UPLOAD_DIR=/app/data/uploads
@@ -137,6 +147,56 @@ services:
     volumes:
       - app-data:/app/data
       - model-cache:/cache/huggingface
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+  # Optional IO-dedicated worker for multi-worker topologies. Use it when
+  # you want the GPU worker(s) to stay focused on whisper:gpu while a
+  # lightweight CPU container handles download / preprocess / llm_correction.
+  # Enable with: docker compose --profile gpu --profile io up -d
+  # Typically also set WORKER_GPU_QUEUES="whisper:gpu default" so the GPU
+  # worker stops picking up IO/CPU jobs itself.
+  #
+  # The image reuses Dockerfile.worker.cpu: stage_tasks.py imports every
+  # PipelineStage at module load time (RQ needs the symbols addressable
+  # even on workers that never execute them), so a slim Python-only image
+  # would still need torch / whisperx installed. Making the stage imports
+  # lazy is a follow-up; until then the IO worker just runs the CPU image
+  # with its queue narrowed to whisper:io.
+  worker-io:
+    profiles: [io]
+    image: ghcr.io/fdff87554/whisper-ui-worker-cpu:${WHISPER_UI_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker.cpu
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+    environment:
+      - WORKER_QUEUES=${WORKER_IO_QUEUES:-whisper:io whisper:cpu default}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
+      - DATABASE_PATH=/app/data/db/whisper_ui.db
+      - UPLOAD_DIR=/app/data/uploads
+      - OUTPUT_DIR=/app/data/outputs
+      - DEVICE=cpu
+      - LANGUAGE=${LANGUAGE:-zh}
+      - YOUTUBE_MAX_DURATION=${YOUTUBE_MAX_DURATION:-14400}
+      - JOB_TIMEOUT_DEFAULT=${JOB_TIMEOUT_DEFAULT:-7200}
+      - JOB_TIMEOUT_FLOOR=${JOB_TIMEOUT_FLOOR:-1800}
+      - JOB_TIMEOUT_AUDIO_MULTIPLIER=${JOB_TIMEOUT_AUDIO_MULTIPLIER:-3.0}
+      - JOB_TIMEOUT_MAX=${JOB_TIMEOUT_MAX:-28800}
+      - STALE_JOB_BUFFER=${STALE_JOB_BUFFER:-1800}
+      - REDIS_PROCESSING_EXPIRY=${REDIS_PROCESSING_EXPIRY:-30600}
+      # LLM correction runs here when enabled — no GPU required.
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e2b}
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
+      - OLLAMA_REQUEST_TIMEOUT=${OLLAMA_REQUEST_TIMEOUT:-120}
+      - LLM_CHUNK_SIZE=${LLM_CHUNK_SIZE:-8}
+      - LLM_CHUNK_CONTEXT=${LLM_CHUNK_CONTEXT:-2}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.1}
+    volumes:
+      - app-data:/app/data
     depends_on:
       redis:
         condition: service_healthy
