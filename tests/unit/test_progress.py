@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import fakeredis
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from whisper_ui.core.models import Job
@@ -15,31 +16,47 @@ def _make_reporter(processing_ttl: int = 7200) -> tuple[MagicMock, RedisProgress
     return mock_redis, reporter
 
 
+def _fake_reporter(job_id: str = "test-job-id", processing_ttl: int = 7200):
+    """Build a RedisProgressReporter backed by fakeredis[lua], which supports
+    the atomic max-write Lua script the reporter uses for ``report()``.
+    Returns (FakeRedis, reporter) so tests can hgetall the actual stored
+    state instead of asserting on mock call args.
+    """
+    fake = fakeredis.FakeRedis()
+    reporter = RedisProgressReporter(fake, job_id, processing_ttl=processing_ttl)
+    return fake, reporter
+
+
+def _stored(fake, job_id: str = "test-job-id") -> dict[str, str]:
+    return {
+        k.decode() if isinstance(k, bytes) else k: v.decode() if isinstance(v, bytes) else v
+        for k, v in fake.hgetall(f"job:{job_id}").items()
+    }
+
+
 def test_report_sets_progress():
-    mock_redis, reporter = _make_reporter()
+    fake, reporter = _fake_reporter()
     reporter.report(0.5, "halfway")
 
-    mock_redis.hset.assert_called_once()
-    call_kwargs = mock_redis.hset.call_args
-    mapping = call_kwargs.kwargs.get("mapping") or call_kwargs[1].get("mapping")
-    assert mapping["progress"] == "0.5"
-    assert mapping["message"] == "halfway"
-    assert mapping["status"] == "processing"
-    mock_redis.expire.assert_called_once_with("job:test-job-id", 7200)
+    stored = _stored(fake)
+    assert float(stored["progress"]) == 0.5
+    assert stored["message"] == "halfway"
+    assert stored["status"] == "processing"
+    assert fake.ttl("job:test-job-id") > 0
 
 
 def test_report_uses_injected_processing_ttl():
-    mock_redis, reporter = _make_reporter(processing_ttl=12345)
+    fake, reporter = _fake_reporter(processing_ttl=12345)
     reporter.report(0.1, "starting")
-    mock_redis.expire.assert_called_once_with("job:test-job-id", 12345)
+    # fakeredis returns the TTL the last EXPIRE set; within ±1 s is fine.
+    assert 12000 <= fake.ttl("job:test-job-id") <= 12345
 
 
 def test_report_falls_back_to_default_ttl_when_omitted():
-    mock_redis = MagicMock()
-    reporter = RedisProgressReporter(mock_redis, "default-ttl-job")
+    fake = fakeredis.FakeRedis()
+    reporter = RedisProgressReporter(fake, "default-ttl-job")
     reporter.report(0.2, "running")
-    args, _ = mock_redis.expire.call_args
-    assert args[1] > 0
+    assert fake.ttl("job:default-ttl-job") > 0
 
 
 def test_complete_sets_done():
@@ -65,11 +82,16 @@ def test_fail_sets_error():
 def test_report_swallows_redis_connection_error(caplog):
     """Progress writes are best-effort. SQLite is the source of truth, so a
     transient Redis outage must NOT propagate up and tear down the worker.
+    The Lua script path is still wrapped by the ``except RedisError`` so
+    a failing EVAL should be logged and swallowed just like the old HSET
+    error path.
     """
     import logging
 
-    mock_redis, reporter = _make_reporter()
-    mock_redis.hset.side_effect = RedisConnectionError("redis down")
+    _fake, reporter = _fake_reporter()
+    # Force the reporter's bound script to raise, simulating a mid-EVAL
+    # Redis outage without having to tear down the whole fakeredis server.
+    reporter._max_write_script = MagicMock(side_effect=RedisConnectionError("redis down"))
 
     with caplog.at_level(logging.WARNING):
         reporter.report(0.4, "halfway")
