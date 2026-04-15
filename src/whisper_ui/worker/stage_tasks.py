@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 from rq.timeouts import BaseTimeoutException
 
 from whisper_ui.core.exceptions import PipelineError
+from whisper_ui.core.models import JobStatus
 from whisper_ui.pipeline.align import AlignStage
 from whisper_ui.pipeline.assign_speakers import AssignSpeakersStage
 from whisper_ui.pipeline.diarize import DiarizeStage
@@ -80,6 +81,31 @@ def _load_job(runtime: WorkerRuntime, parent_job_id: str) -> Job:
     if job is None:
         raise PipelineError(f"Job {parent_job_id} not found while running stage task")
     return job
+
+
+def _mark_processing_if_queued(runtime: WorkerRuntime, job: Job) -> None:
+    """Flip the parent job from QUEUED to PROCESSING on first stage entry.
+
+    The legacy monolithic worker task set PROCESSING at the very top of
+    ``process_transcription``. In the DAG path, multiple sub-jobs can be the
+    "first" one to actually run (e.g. transcribe_align and diarize start in
+    parallel after preprocess), so every stage task idempotently promotes
+    the job when it observes QUEUED. The SQLite write path serialises
+    concurrent writers via WAL mode + busy_timeout, so two parallel branches
+    flipping simultaneously converge on the same PROCESSING state without
+    corrupting the row.
+
+    This guards three downstream behaviours that depend on the
+    QUEUED → PROCESSING transition:
+
+    - ``recover_stale_jobs`` only scans status = 'processing'; without this
+      flip a crashed DAG leaves the parent stuck in QUEUED forever.
+    - Dashboard polling speed and status badges branch on PROCESSING.
+    - Legacy tests asserting a running job's status expect PROCESSING.
+    """
+    if job.status == JobStatus.QUEUED:
+        job.status = JobStatus.PROCESSING
+        runtime.db.update_job(job)
 
 
 def _banded_progress(
@@ -158,6 +184,7 @@ def _run_single_stage(
     """
     with build_worker_runtime(parent_job_id) as runtime:
         job = _load_job(runtime, parent_job_id)
+        _mark_processing_if_queued(runtime, job)
         ctx_store = PipelineContextStore(runtime.redis, parent_job_id)
         context = ctx_store.load()
 
@@ -236,6 +263,7 @@ def run_transcribe_align(parent_job_id: str) -> str:
     """
     with build_worker_runtime(parent_job_id) as runtime:
         job = _load_job(runtime, parent_job_id)
+        _mark_processing_if_queued(runtime, job)
         ctx_store = PipelineContextStore(runtime.redis, parent_job_id)
         context = ctx_store.load()
 

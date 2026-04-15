@@ -184,6 +184,69 @@ def test_run_postprocess_persists_transcript_result(monkeypatch):
     assert stored["transcript_result"] == {"segments": [], "language": "zh"}
 
 
+def test_stage_task_transitions_queued_parent_job_to_processing(monkeypatch):
+    """Regression for R1: in the DAG path the parent job must flip from
+    QUEUED to PROCESSING as soon as any stage actually starts running.
+    Without this the stale-job reaper (which only scans PROCESSING) can
+    never recover a crashed DAG, and the UI keeps showing the job as
+    queued forever.
+    """
+    fake_redis = fakeredis.FakeRedis()
+    job = Job(id="job-queued", status=JobStatus.QUEUED, filepath="/tmp/a.mp3")
+    runtime = _install_fake_runtime(monkeypatch, fake_redis, job)
+
+    fake_stage = _RecordingStage({"audio_path": "/tmp/16k.wav", "duration": 1.0})
+    with patch("whisper_ui.worker.stage_tasks.PreprocessStage", return_value=fake_stage):
+        run_preprocess("job-queued")
+
+    assert job.status == JobStatus.PROCESSING
+    runtime.db.update_job.assert_any_call(job)
+
+
+def test_stage_task_leaves_already_processing_job_alone(monkeypatch):
+    """Second parallel branch (e.g. diarize starting after transcribe_align
+    already flipped the flag) must not re-issue a pointless status update.
+    This keeps SQLite writes limited to state transitions.
+    """
+    fake_redis = fakeredis.FakeRedis()
+    job = Job(id="job-proc", status=JobStatus.PROCESSING, filepath="/tmp/a.mp3")
+    runtime = _install_fake_runtime(monkeypatch, fake_redis, job)
+
+    fake_stage = _RecordingStage({"diarize_result": [("SPK0", 0.0, 1.0)]})
+    with patch("whisper_ui.worker.stage_tasks.DiarizeStage", return_value=fake_stage):
+        run_diarize("job-proc")
+
+    # update_job must not be called for a status flip (no QUEUED-to-PROCESSING
+    # transition happened). The diarize stage itself does not write status,
+    # so update_job should not have been called at all here.
+    for call in runtime.db.update_job.call_args_list:
+        assert call.args[0].status == JobStatus.PROCESSING
+
+
+def test_run_transcribe_align_also_transitions_queued_to_processing(monkeypatch):
+    """run_transcribe_align has its own driver (not _run_single_stage) so
+    it needs the same guarded transition. Guards against the common
+    mistake of adding the fix in one place and forgetting the other.
+    """
+    fake_redis = fakeredis.FakeRedis()
+    job = Job(id="job-ta", status=JobStatus.QUEUED, filepath="/tmp/a.mp3")
+    _install_fake_runtime(monkeypatch, fake_redis, job)
+    PipelineContextStore(fake_redis, "job-ta").initialize({"audio_path": "/tmp/16k.wav"})
+
+    fake_transcribe = _RecordingStage({"transcription_result": {"segments": []}})
+    fake_align = _RecordingStage({"aligned_result": {"segments": []}})
+
+    from whisper_ui.worker.stage_tasks import run_transcribe_align
+
+    with (
+        patch("whisper_ui.worker.stage_tasks.TranscribeStage", return_value=fake_transcribe),
+        patch("whisper_ui.worker.stage_tasks.AlignStage", return_value=fake_align),
+    ):
+        run_transcribe_align("job-ta")
+
+    assert job.status == JobStatus.PROCESSING
+
+
 def test_run_diarize_raises_pipeline_error_when_job_missing(monkeypatch):
     fake_redis = fakeredis.FakeRedis()
     runtime = _make_runtime(fake_redis)
