@@ -49,3 +49,16 @@ YT_DLP_SOCKET_TIMEOUT = 30
 # REDIS_PROCESSING_EXPIRY now lives in Settings.redis_processing_expiry.
 REDIS_COMPLETED_EXPIRY = 86400  # 24 hours
 REDIS_FAILED_EXPIRY = 86400  # 24 hours
+
+# Worker queues. Stages are partitioned across these queues by the resource
+# they consume so a long-running IO or network stage (download, llm_correction)
+# never blocks a GPU worker from picking up the next job.
+#   whisper:io  -> network / disk IO (download, preprocess, llm_correction)
+#   whisper:gpu -> GPU inference (transcribe_align, diarize)
+#   whisper:cpu -> lightweight CPU finalisation (assign_speakers, postprocess)
+# The default queue is kept for backwards-compatibility with in-flight jobs
+# enqueued by the legacy process_transcription path before the upgrade.
+WORKER_QUEUE_IO = "whisper:io"
+WORKER_QUEUE_GPU = "whisper:gpu"
+WORKER_QUEUE_CPU = "whisper:cpu"
+WORKER_QUEUE_DEFAULT = "default"

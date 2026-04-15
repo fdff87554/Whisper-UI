@@ -29,6 +29,9 @@ from rq import Callback, Queue
 from whisper_ui.core.constants import (
     ERROR_DISPLAY_LENGTH,
     ERROR_MAX_LENGTH,
+    WORKER_QUEUE_CPU,
+    WORKER_QUEUE_GPU,
+    WORKER_QUEUE_IO,
 )
 from whisper_ui.core.messages import PIPELINE_COMPLETE
 from whisper_ui.core.models import JobStatus
@@ -44,6 +47,20 @@ from whisper_ui.worker.stage_tasks import (
     run_transcribe_align,
 )
 from whisper_ui.worker.timeout import calculate_job_timeout
+
+# Stage function → queue name. IO stages (download, preprocess, llm_correction)
+# go to a queue serviced by workers that do not hold a CUDA context, GPU
+# stages go to the GPU queue, and lightweight CPU finalisation stages go to
+# the CPU queue. See whisper_ui.core.constants for the rationale.
+_STAGE_QUEUES = {
+    run_download.__name__: WORKER_QUEUE_IO,
+    run_preprocess.__name__: WORKER_QUEUE_IO,
+    run_llm_correction.__name__: WORKER_QUEUE_IO,
+    run_transcribe_align.__name__: WORKER_QUEUE_GPU,
+    run_diarize.__name__: WORKER_QUEUE_GPU,
+    run_assign_speakers.__name__: WORKER_QUEUE_CPU,
+    run_postprocess.__name__: WORKER_QUEUE_CPU,
+}
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -99,7 +116,9 @@ def enqueue_pipeline(
     Returns the id of the last sub-job in the chain, so callers can attach
     monitoring to the tail of the pipeline if they want to.
     """
-    q = Queue(connection=redis)
+    queues = {
+        name: Queue(name=name, connection=redis) for name in (WORKER_QUEUE_IO, WORKER_QUEUE_GPU, WORKER_QUEUE_CPU)
+    }
 
     initial_context: dict = {
         "language": job.language,
@@ -127,6 +146,7 @@ def enqueue_pipeline(
     enqueued: list[RQJob] = []
 
     def _enqueue(func, *, depends_on=None, is_final: bool) -> RQJob:
+        queue_name = _STAGE_QUEUES[func.__name__]
         kwargs = {
             "job_timeout": timeout,
             "meta": dict(meta),
@@ -136,7 +156,7 @@ def enqueue_pipeline(
             kwargs["depends_on"] = depends_on
         if is_final:
             kwargs["on_success"] = success_cb
-        sub = q.enqueue(func, job.id, **kwargs)
+        sub = queues[queue_name].enqueue(func, job.id, **kwargs)
         enqueued.append(sub)
         _record_subjob(redis, job.id, sub.id)
         return sub
