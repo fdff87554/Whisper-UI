@@ -442,6 +442,61 @@ def test_finalize_failure_uses_chinese_timeout_label_for_rq_timeout(monkeypatch,
     assert "Task exceeded" not in job.error
 
 
+def test_cancel_remaining_subjobs_sends_stop_command_to_running_siblings(monkeypatch, tmp_path):
+    """Regression for PR #39 R3 Layer 1: a failed transcribe_align must
+    fire send_stop_job_command for every sibling sub-job (so diarize
+    running on a second GPU worker is actually stopped), not just
+    sub.cancel() which leaves running jobs untouched. The test mocks
+    send_stop_job_command on the dispatcher module and asserts it was
+    invoked for each non-excluded sub-job.
+    """
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(
+        id="job-stop",
+        filename="m.mp3",
+        filepath=str(tmp_path / "m.mp3"),
+        status=JobStatus.PROCESSING,
+        enable_diarization=True,
+    )
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+
+    sub_ids = set(pd._load_subjob_ids(redis, job.id))
+    assert len(sub_ids) >= 3  # preprocess + transcribe_align + diarize at minimum
+
+    failing = next(s for s in _load_subjobs(redis, job.id) if _stage_func(s) == "run_transcribe_align")
+    expected_targets = sub_ids - {failing.id}
+
+    runtime = MagicMock()
+    runtime.redis = redis
+    runtime.db.get_job.return_value = job
+    runtime.reporter = MagicMock()
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _fake_builder(job_id):
+        yield runtime
+
+    monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
+
+    with patch.object(pd, "send_stop_job_command") as mock_stop:
+        failing.meta = {"parent_job_id": job.id}
+        pd.finalize_failure(failing, redis, RuntimeError, RuntimeError("kaboom"), None)
+
+    called_sub_ids = {call.args[1] for call in mock_stop.call_args_list}
+    assert called_sub_ids == expected_targets, (
+        f"send_stop_job_command should target every sibling except the failing one. "
+        f"expected {expected_targets}, got {called_sub_ids}"
+    )
+    # The failing sub-job itself must not receive a stop command (RQ would
+    # reject it anyway, but asserting no-op keeps the boundary clean).
+    assert failing.id not in called_sub_ids
+
+
 def test_finalize_failure_generic_exception_still_uses_str(monkeypatch, tmp_path):
     """Non-timeout exceptions keep the existing str(exc_value) path so
     pipeline-level errors (e.g. PipelineError) are surfaced verbatim."""

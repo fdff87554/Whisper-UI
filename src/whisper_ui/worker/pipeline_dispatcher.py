@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from rq import Callback, Queue
+from rq.command import send_stop_job_command
 from rq.timeouts import BaseTimeoutException
 
 from whisper_ui.core.constants import (
@@ -348,20 +349,52 @@ def _mark_failed(
 
 
 def _cancel_remaining_subjobs(redis: Redis, parent_job_id: str, *, exclude: str) -> None:
-    """Cancel every sub-job that has not yet started, except the one that
+    """Stop every sub-job belonging to the same parent, except the one that
     just failed (``exclude``).
 
-    RQ's default behaviour for a failed dependency is to move the dependent
-    job to the ``deferred`` registry and never execute it; from the user's
-    perspective that looks like a hang. Explicitly cancelling them here means
-    the queue drains cleanly and monitoring dashboards show a clear terminal
-    state for every sub-job.
+    This has to handle two distinct states for each sibling:
+
+    1. **Already running.** ``RQJob.cancel()`` alone does *not* stop a
+       running job — it only removes pending / deferred ones from the
+       queue. For running jobs we fire ``send_stop_job_command`` first,
+       which RQ delivers via a Redis pub/sub channel to the owning
+       worker; the worker then raises a stop exception inside the job
+       process at the next safe point. (See PR #39 review R3: without
+       this, the diarize branch could keep running after transcribe
+       failed and eventually write its result into the Redis context
+       store, polluting a subsequent retry.)
+    2. **Still queued / deferred.** ``send_stop_job_command`` is a no-op
+       for jobs that have not started, so we follow it with ``cancel()``
+       to evict them from the queue registry. Downstream dependent jobs
+       (e.g. assign_speakers waiting on transcribe_align + diarize)
+       would otherwise sit in the deferred registry forever.
+
+    Both calls are best-effort: any failure only debug-logs and the
+    loop keeps going so one stuck sibling cannot block the others.
+
+    Note that even after ``send_stop_job_command`` lands, a worker
+    already inside a native extension call (pyannote / whisperx C++
+    inference) can take a bounded amount of time to actually exit. That
+    residual window is closed by the generation-id gating in the next
+    commit — this layer is the fast-path that minimizes wasted GPU time.
     """
     from rq.job import Job as RQJob
 
     for sub_id in _load_subjob_ids(redis, parent_job_id):
         if sub_id == exclude:
             continue
+        # Layer 1a: stop if currently running. Fire-and-forget — the stop
+        # command is delivered over Redis pub/sub, so we cannot
+        # synchronously confirm it took effect.
+        try:
+            send_stop_job_command(redis, sub_id)
+        except Exception:
+            logger.debug(
+                "send_stop_job_command for %s failed (likely not currently running)",
+                sub_id,
+                exc_info=True,
+            )
+        # Layer 1b: cancel queued / deferred siblings so the queue drains.
         try:
             sub = RQJob.fetch(sub_id, connection=redis)
         except Exception:
