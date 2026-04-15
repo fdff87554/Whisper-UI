@@ -87,6 +87,125 @@ def test_report_progress_never_regresses_on_second_writer():
     assert float(_stored(fake, "same-job")["progress"]) == 0.90
 
 
+def test_report_with_newer_generation_resets_stale_high_watermark():
+    """Regression for PR #39 Round 2 R2-2. The exact scenario the
+    reviewer reproducer flagged: attempt 1's stale late writer has
+    pinned the hash at progress=0.85, the user retries, and attempt 2's
+    first stage wants to start reporting from 0.05. Before the fix, the
+    Lua max-write compared 0.05 against 0.85 and rejected the update,
+    so the UI saw attempt 2 stuck at 85% with attempt 2's message.
+    With the generation-aware reset branch, the higher caller_gen
+    signals "new attempt owns this key now" and the hash is
+    unconditionally rewritten.
+    """
+    fake = fakeredis.FakeRedis()
+
+    # Attempt 1 runs and pins the hash.
+    stale_reporter = RedisProgressReporter(fake, "job-retry", generation=1)
+    stale_reporter.report(0.85, "attempt1 diarize")
+    assert _stored(fake, "job-retry")["progress"] == "0.85"
+
+    # User retries; attempt 2 starts under generation=2.
+    fresh_reporter = RedisProgressReporter(fake, "job-retry", generation=2)
+    fresh_reporter.report(0.05, "attempt2 preprocess starting")
+
+    stored = _stored(fake, "job-retry")
+    assert stored["progress"] == "0.05"
+    assert stored["message"] == "attempt2 preprocess starting"
+    assert stored["status"] == "processing"
+    assert stored["generation"] == "2"
+
+
+def test_report_with_older_generation_is_dropped():
+    """After attempt 2 takes over the hash, any late writer from
+    attempt 1 must be silently dropped — otherwise a residual pyannote
+    C++ thread that honoured ``send_stop_job_command`` slowly could
+    still corrupt the fresh attempt's progress.
+    """
+    fake = fakeredis.FakeRedis()
+
+    # Attempt 2 is running and has already stamped its generation.
+    RedisProgressReporter(fake, "job-retry", generation=2).report(0.30, "attempt2 transcribe")
+    assert float(_stored(fake, "job-retry")["progress"]) == 0.30
+
+    # Late writer from attempt 1 tries to overwrite.
+    RedisProgressReporter(fake, "job-retry", generation=1).report(0.99, "late stale write")
+
+    stored = _stored(fake, "job-retry")
+    assert float(stored["progress"]) == 0.30, "stale attempt-1 write must not touch attempt 2's hash"
+    assert stored["message"] == "attempt2 transcribe"
+    assert stored["generation"] == "2"
+
+
+def test_report_without_generation_keeps_legacy_max_write_semantics():
+    """Legacy callers (monolithic ``process_transcription`` path, any
+    reporter built via ``build_worker_runtime`` without explicit
+    generation) must keep their pre-Round-2 max-write behaviour so
+    their tests and production behaviour are unchanged.
+    """
+    fake = fakeredis.FakeRedis()
+    legacy = RedisProgressReporter(fake, "legacy-job")
+    legacy.report(0.30, "A")
+    legacy.report(0.70, "B")
+    legacy.report(0.40, "C")  # rejected by max-write, but message updates
+
+    stored = _stored(fake, "legacy-job")
+    assert stored["progress"] == "0.7"
+    assert stored["message"] == "C"
+    # No generation field in legacy mode.
+    assert "generation" not in stored
+
+
+def test_complete_with_older_generation_is_dropped():
+    """Defense-in-depth: if a stale attempt-1 finalize_success somehow
+    bypasses the Python-level short-circuit in pipeline_dispatcher, the
+    reporter's own Lua script still refuses to overwrite a newer
+    attempt's hash.
+    """
+    fake = fakeredis.FakeRedis()
+    # Attempt 2 has already stamped the hash.
+    RedisProgressReporter(fake, "job-complete", generation=2).report(0.40, "attempt2 running")
+
+    # Stale attempt-1 tries to mark the job COMPLETED.
+    RedisProgressReporter(fake, "job-complete", generation=1).complete("/stale/result.json")
+
+    stored = _stored(fake, "job-complete")
+    assert stored["status"] == "processing", "stale attempt-1 complete() must not mark attempt 2 as completed"
+    assert stored.get("result_path") is None or "stale" not in stored.get("result_path", "")
+    assert stored["generation"] == "2"
+
+
+def test_complete_with_current_generation_writes_through():
+    """Sanity: a legitimate complete() under the current generation
+    still lands, so the defense-in-depth check does not paper over
+    the happy path.
+    """
+    fake = fakeredis.FakeRedis()
+    reporter = RedisProgressReporter(fake, "job-complete-ok", generation=3)
+    reporter.report(0.90, "finishing")
+    reporter.complete("/tmp/result.json")
+
+    stored = _stored(fake, "job-complete-ok")
+    assert stored["status"] == "completed"
+    assert stored["result_path"] == "/tmp/result.json"
+    assert stored["generation"] == "3"
+
+
+def test_fail_with_older_generation_is_dropped():
+    """Symmetric defense-in-depth check for fail(). A stale attempt-1
+    finalize_failure must not mark a running attempt 2 as FAILED at
+    the Redis progress-hash layer.
+    """
+    fake = fakeredis.FakeRedis()
+    RedisProgressReporter(fake, "job-fail", generation=2).report(0.40, "attempt2 running")
+    RedisProgressReporter(fake, "job-fail", generation=1).fail("stale error")
+
+    stored = _stored(fake, "job-fail")
+    assert stored["status"] == "processing"
+    assert stored.get("error") is None or "stale error" not in stored.get("error", "")
+    assert stored["generation"] == "2"
+
+
 def test_report_progress_updates_message_when_equal():
     """Equal progress values must still update the message so the user
     sees the current stage label when a branch reports a status change
@@ -104,23 +223,23 @@ def test_report_progress_updates_message_when_equal():
 
 
 def test_complete_sets_done():
-    mock_redis, reporter = _make_reporter()
+    fake, reporter = _fake_reporter()
     reporter.complete("/path/to/result.json")
 
-    mapping = mock_redis.hset.call_args.kwargs.get("mapping") or mock_redis.hset.call_args[1].get("mapping")
-    assert mapping["progress"] == "1.0"
-    assert mapping["status"] == "completed"
-    assert mapping["result_path"] == "/path/to/result.json"
-    mock_redis.expire.assert_called_once_with("job:test-job-id", 86400)
+    stored = _stored(fake)
+    assert stored["progress"] == "1.0"
+    assert stored["status"] == "completed"
+    assert stored["result_path"] == "/path/to/result.json"
+    assert fake.ttl("job:test-job-id") > 0
 
 
 def test_fail_sets_error():
-    mock_redis, reporter = _make_reporter()
+    fake, reporter = _fake_reporter()
     reporter.fail("something broke")
 
-    mapping = mock_redis.hset.call_args.kwargs.get("mapping") or mock_redis.hset.call_args[1].get("mapping")
-    assert mapping["status"] == "failed"
-    assert "something broke" in mapping["error"]
+    stored = _stored(fake)
+    assert stored["status"] == "failed"
+    assert "something broke" in stored["error"]
 
 
 def test_report_swallows_redis_connection_error(caplog):
@@ -146,8 +265,8 @@ def test_report_swallows_redis_connection_error(caplog):
 def test_complete_swallows_redis_connection_error(caplog):
     import logging
 
-    mock_redis, reporter = _make_reporter()
-    mock_redis.hset.side_effect = RedisConnectionError("redis down")
+    _fake, reporter = _fake_reporter()
+    reporter._complete_script = MagicMock(side_effect=RedisConnectionError("redis down"))
 
     with caplog.at_level(logging.WARNING):
         reporter.complete("/path/to/result.json")
@@ -158,8 +277,8 @@ def test_complete_swallows_redis_connection_error(caplog):
 def test_fail_swallows_redis_connection_error(caplog):
     import logging
 
-    mock_redis, reporter = _make_reporter()
-    mock_redis.hset.side_effect = RedisConnectionError("redis down")
+    _fake, reporter = _fake_reporter()
+    reporter._fail_script = MagicMock(side_effect=RedisConnectionError("redis down"))
 
     with caplog.at_level(logging.WARNING):
         reporter.fail("worker exploded")
@@ -181,13 +300,13 @@ def test_get_progress_returns_empty_dict_on_redis_error(caplog):
 
 
 def test_fail_truncates_long_error():
-    mock_redis, reporter = _make_reporter()
+    fake, reporter = _fake_reporter()
     long_error = "x" * 2000
     reporter.fail(long_error)
 
-    mapping = mock_redis.hset.call_args.kwargs.get("mapping") or mock_redis.hset.call_args[1].get("mapping")
-    assert len(mapping["error"]) <= 1000
-    assert len(mapping["message"]) <= 500
+    stored = _stored(fake)
+    assert len(stored["error"]) <= 1000
+    assert len(stored["message"]) <= 500
 
 
 def test_get_progress_empty():

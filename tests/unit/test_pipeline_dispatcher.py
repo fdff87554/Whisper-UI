@@ -322,6 +322,7 @@ def test_finalize_success_marks_job_completed(monkeypatch, tmp_path):
     runtime.redis = redis
     runtime.db.get_job.return_value = job
     runtime.filestore.save_result.return_value = tmp_path / "result.json"
+    runtime.settings.redis_processing_expiry = 7200
     runtime.reporter = MagicMock()
 
     from contextlib import contextmanager
@@ -341,7 +342,14 @@ def test_finalize_success_marks_job_completed(monkeypatch, tmp_path):
     assert job.progress == 1.0
     assert job.result_path == str(tmp_path / "result.json")
     assert job.duration == pytest.approx(42.0)
-    runtime.reporter.complete.assert_called_once_with(str(tmp_path / "result.json"))
+    # Observable terminal state in Redis — finalize_success now builds its
+    # own generation-aware reporter instead of reusing runtime.reporter.
+    stored = {
+        k.decode() if isinstance(k, bytes) else k: v.decode() if isinstance(v, bytes) else v
+        for k, v in redis.hgetall(f"job:{job.id}").items()
+    }
+    assert stored["status"] == "completed"
+    assert stored["result_path"] == str(tmp_path / "result.json")
     assert not preprocessed.exists(), "preprocessed WAV should be cleaned up"
     assert PipelineContextStore(redis, job.id).load() == {}
 
@@ -369,6 +377,7 @@ def test_finalize_failure_marks_job_failed_and_cancels_siblings(monkeypatch, tmp
     runtime = MagicMock()
     runtime.redis = redis
     runtime.db.get_job.return_value = job
+    runtime.settings.redis_processing_expiry = 7200
     runtime.reporter = MagicMock()
 
     from contextlib import contextmanager
@@ -387,7 +396,14 @@ def test_finalize_failure_marks_job_failed_and_cancels_siblings(monkeypatch, tmp
 
     assert job.status == JobStatus.FAILED
     assert "kaboom" in (job.error or "")
-    runtime.reporter.fail.assert_called_once()
+    # Observable terminal state — finalize_failure now builds its own
+    # generation-aware reporter instead of reusing runtime.reporter.
+    stored = {
+        k.decode() if isinstance(k, bytes) else k: v.decode() if isinstance(v, bytes) else v
+        for k, v in redis.hgetall(f"job:{job.id}").items()
+    }
+    assert stored["status"] == "failed"
+    assert "kaboom" in stored["error"]
 
     for other in others:
         refreshed = RQJob.fetch(other.id, connection=redis)

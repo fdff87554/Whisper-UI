@@ -289,6 +289,61 @@ def test_stage_failure_cancels_downstream_and_marks_job_failed(monkeypatch, fake
                 assert not sub.is_finished, f"sub-job {sub.func_name} should not have finished after transcribe failure"
 
 
+def test_retry_progress_starts_fresh_after_stale_writer(fake_redis):
+    """End-to-end regression for PR #39 Round 2 R2-2. Reproduces the
+    exact sequence from the reviewer's reproducer: attempt 1 writes
+    0.85 → retry route deletes the progress key → stale attempt-1
+    late writer re-seeds 0.85 → attempt 2 wants to start from 0.05.
+
+    Before the fix the Lua max-write rejected 0.05 as "less than
+    0.85" and the UI saw attempt 2 stuck at 85% under attempt 2's
+    message — directly undermining the retry isolation the PR
+    promises. With the generation-aware reset branch, attempt 2's
+    higher caller_gen triggers the reset path and the hash is
+    rewritten cleanly from 0.05.
+    """
+    from whisper_ui.worker.progress import RedisProgressReporter
+
+    # Attempt 1 — a stage reporter writes 0.85.
+    attempt1_reporter = RedisProgressReporter(fake_redis, "job-retry-progress", generation=1)
+    attempt1_reporter.report(0.85, "attempt1 diarize")
+
+    stored = {
+        k.decode() if isinstance(k, bytes) else k: v.decode() if isinstance(v, bytes) else v
+        for k, v in fake_redis.hgetall("job:job-retry-progress").items()
+    }
+    assert stored["progress"] == "0.85"
+
+    # User clicks retry — web/routes/jobs.py deletes the progress key.
+    fake_redis.delete("job:job-retry-progress")
+
+    # Stale attempt-1 late writer re-seeds 0.85 via its still-live
+    # reporter before it observes the stop. Without the generation
+    # stamp on the hash this would still be indistinguishable from a
+    # fresh reset, but here it re-writes with generation=1.
+    attempt1_reporter.report(0.85, "attempt1 stale late")
+
+    stored = {
+        k.decode() if isinstance(k, bytes) else k: v.decode() if isinstance(v, bytes) else v
+        for k, v in fake_redis.hgetall("job:job-retry-progress").items()
+    }
+    assert stored["progress"] == "0.85"
+    assert stored["generation"] == "1"
+
+    # Attempt 2's first stage reports under the new generation.
+    attempt2_reporter = RedisProgressReporter(fake_redis, "job-retry-progress", generation=2)
+    attempt2_reporter.report(0.05, "attempt2 preprocess starting")
+
+    stored = {
+        k.decode() if isinstance(k, bytes) else k: v.decode() if isinstance(v, bytes) else v
+        for k, v in fake_redis.hgetall("job:job-retry-progress").items()
+    }
+    # The stale 0.85 high-water mark must NOT pin the fresh attempt.
+    assert stored["progress"] == "0.05", f"attempt 2's 0.05 was rejected by the stale 0.85 max-write; stored={stored}"
+    assert stored["message"] == "attempt2 preprocess starting"
+    assert stored["generation"] == "2"
+
+
 def test_retry_isolates_new_attempt_from_stale_sibling_writes(monkeypatch, fake_redis, fake_settings, tmp_path):
     """End-to-end retry isolation (PR #39 R3 Layer 2). Simulates a stale
     diarize that is still running after transcribe_align failed and a
