@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from rq.timeouts import JobTimeoutException
+
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.worker.progress import RedisProgressReporter
 from whisper_ui.worker.runtime import (
     WorkerRuntime,
     build_worker_runtime,
+    extract_rq_timeout_seconds,
     make_throttled_progress_reporter,
 )
 
@@ -145,3 +148,31 @@ def test_throttle_always_flushes_terminal_progress():
     clock[0] += 0.01
     report(1.0, "nearly done")
     reporter.report.assert_called_once()
+
+
+def test_extract_rq_timeout_prefers_current_job_when_available():
+    """Inside a real worker the authoritative source is
+    ``rq.get_current_job().timeout`` — the exception message may say
+    something else if tests construct it directly."""
+    fake_current = MagicMock()
+    fake_current.timeout = 7200
+    with patch("rq.get_current_job", return_value=fake_current):
+        exc = JobTimeoutException("Task exceeded maximum timeout value (999 seconds)")
+        assert extract_rq_timeout_seconds(exc) == 7200
+
+
+def test_extract_rq_timeout_falls_back_to_message_regex():
+    """Outside a worker context ``get_current_job()`` returns None; the
+    helper must parse the RQ-formatted exception message instead.
+    This is the code path the DAG finalize_failure callback hits because
+    it runs in a separate worker, not inside the timing-out job itself.
+    """
+    with patch("rq.get_current_job", return_value=None):
+        exc = JobTimeoutException("Task exceeded maximum timeout value (3600 seconds)")
+        assert extract_rq_timeout_seconds(exc) == 3600
+
+
+def test_extract_rq_timeout_returns_placeholder_when_nothing_matches():
+    with patch("rq.get_current_job", return_value=None):
+        exc = JobTimeoutException("something totally unexpected")
+        assert extract_rq_timeout_seconds(exc) == "?"
