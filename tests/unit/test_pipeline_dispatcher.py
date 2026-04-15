@@ -6,6 +6,11 @@ import fakeredis
 import pytest
 from rq.job import Job as RQJob
 
+from whisper_ui.core.constants import (
+    WORKER_QUEUE_CPU,
+    WORKER_QUEUE_GPU,
+    WORKER_QUEUE_IO,
+)
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.worker.context_store import PipelineContextStore
 from whisper_ui.worker.pipeline_dispatcher import (
@@ -230,6 +235,43 @@ def test_enqueue_pipeline_seeds_initial_context(tmp_path):
     assert ctx["batch_size"] == settings.batch_size
     assert ctx["input_path"] == str(tmp_path / "m.mp3")
     assert "source_url" not in ctx
+
+
+def test_subjobs_are_routed_to_resource_specific_queues(tmp_path):
+    """Each stage must land on the queue matching the resource it consumes.
+
+    Without this partitioning a long-running IO or LLM stage on the generic
+    queue would keep a GPU worker blocked from picking up the next job,
+    which is the whole reason for the DAG refactor. The assertion guards
+    against accidental regressions of the _STAGE_QUEUES map.
+    """
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings()
+    filestore = _build_filestore(tmp_path)
+    job = Job(
+        id="job-queues",
+        filename="m.mp3",
+        filepath=str(tmp_path / "m.mp3"),
+        status=JobStatus.QUEUED,
+        source_url="https://www.youtube.com/watch?v=abc",
+        enable_diarization=True,
+        llm_correction_enabled=True,
+    )
+
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    subs = _by_stage(_load_subjobs(redis, job.id))
+
+    expected = {
+        "run_download": WORKER_QUEUE_IO,
+        "run_preprocess": WORKER_QUEUE_IO,
+        "run_llm_correction": WORKER_QUEUE_IO,
+        "run_transcribe_align": WORKER_QUEUE_GPU,
+        "run_diarize": WORKER_QUEUE_GPU,
+        "run_assign_speakers": WORKER_QUEUE_CPU,
+        "run_postprocess": WORKER_QUEUE_CPU,
+    }
+    for stage, queue_name in expected.items():
+        assert subs[stage].origin == queue_name, f"{stage} should be on {queue_name}, got {subs[stage].origin}"
 
 
 def test_url_upload_seeds_download_context(tmp_path):
