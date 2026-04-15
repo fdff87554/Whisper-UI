@@ -19,9 +19,10 @@ class TestWorkerTaskSetup:
         mock_redis.expire = MagicMock()
 
         with (
-            patch("whisper_ui.worker.tasks.get_settings", return_value=settings),
-            patch("whisper_ui.worker.tasks.Redis") as mock_redis_cls,
-            patch("whisper_ui.worker.tasks.JobDatabase") as mock_db_cls,
+            patch("whisper_ui.worker.runtime.get_settings", return_value=settings),
+            patch("whisper_ui.worker.runtime.Redis") as mock_redis_cls,
+            patch("whisper_ui.worker.runtime.JobDatabase") as mock_db_cls,
+            patch("whisper_ui.worker.runtime.FileStore"),
         ):
             mock_redis_cls.from_url.return_value = mock_redis
             mock_db_instance = MagicMock()
@@ -39,9 +40,10 @@ class TestWorkerTaskSetup:
         mock_redis.expire = MagicMock()
 
         with (
-            patch("whisper_ui.worker.tasks.get_settings", return_value=settings),
-            patch("whisper_ui.worker.tasks.Redis") as mock_redis_cls,
-            patch("whisper_ui.worker.tasks.JobDatabase") as mock_db_cls,
+            patch("whisper_ui.worker.runtime.get_settings", return_value=settings),
+            patch("whisper_ui.worker.runtime.Redis") as mock_redis_cls,
+            patch("whisper_ui.worker.runtime.JobDatabase") as mock_db_cls,
+            patch("whisper_ui.worker.runtime.FileStore"),
         ):
             mock_redis_cls.from_url.return_value = mock_redis
             mock_db_instance = MagicMock()
@@ -110,9 +112,9 @@ class TestWorkerTaskSetup:
         # Let it use a real one bound to the same path as the test fixture
         # so it commits; re-open afterwards to verify persisted state.
         with (
-            patch("whisper_ui.worker.tasks.get_settings", return_value=settings),
-            patch("whisper_ui.worker.tasks.Redis") as mock_redis_cls,
-            patch("whisper_ui.worker.tasks.FileStore") as mock_filestore_cls,
+            patch("whisper_ui.worker.runtime.get_settings", return_value=settings),
+            patch("whisper_ui.worker.runtime.Redis") as mock_redis_cls,
+            patch("whisper_ui.worker.runtime.FileStore") as mock_filestore_cls,
             patch("whisper_ui.worker.tasks.PipelineOrchestrator", return_value=mock_orchestrator),
         ):
             mock_redis_cls.from_url.return_value = mock_redis
@@ -196,9 +198,9 @@ class TestWorkerTaskSetup:
         mock_redis = MagicMock()
 
         with (
-            patch("whisper_ui.worker.tasks.get_settings", return_value=settings),
-            patch("whisper_ui.worker.tasks.Redis") as mock_redis_cls,
-            patch("whisper_ui.worker.tasks.FileStore") as mock_filestore_cls,
+            patch("whisper_ui.worker.runtime.get_settings", return_value=settings),
+            patch("whisper_ui.worker.runtime.Redis") as mock_redis_cls,
+            patch("whisper_ui.worker.runtime.FileStore") as mock_filestore_cls,
             patch("whisper_ui.worker.tasks.PipelineOrchestrator", side_effect=_orchestrator_factory),
             patch.dict(sys.modules, {"whisperx.diarize": mock_diarize_module, "whisperx": MagicMock()}),
         ):
