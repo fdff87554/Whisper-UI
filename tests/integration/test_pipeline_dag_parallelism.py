@@ -53,6 +53,7 @@ def fake_settings() -> MagicMock:
     settings.youtube_max_duration = 3600
     settings.diarize_heartbeat_interval = 30
     settings.hf_token = "fake-token-not-real"
+    settings.redis_processing_expiry = 7200
     return settings
 
 

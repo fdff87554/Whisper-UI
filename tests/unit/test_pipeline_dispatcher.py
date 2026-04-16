@@ -47,6 +47,7 @@ def _build_settings(*, ollama: str = "http://ollama.internal:11434") -> MagicMoc
     settings.job_timeout_floor = 300
     settings.job_timeout_max = 14_400
     settings.job_timeout_audio_multiplier = 2.0
+    settings.redis_processing_expiry = 7200
     return settings
 
 

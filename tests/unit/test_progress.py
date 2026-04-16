@@ -264,6 +264,64 @@ def test_report_returns_false_when_lua_drops_stale_write():
     assert stored["generation"] == "2"
 
 
+def test_report_returns_false_when_central_gen_exceeds_caller_gen_despite_empty_hash():
+    """Regression for PR #39 Round 4 R4-1. The retry route deletes the
+    progress hash (wiping the embedded generation field), but the
+    central generation counter has already been bumped. A stale gen=1
+    writer arriving after the delete must be rejected by the Lua
+    central-counter check (KEYS[2]) even though the hash-level check
+    would let it through via the ``(not stored_gen)`` reset branch.
+    """
+    fake = fakeredis.FakeRedis()
+
+    # Central counter bumped to 2 by enqueue_pipeline.
+    fake.set("whisper:pipeline:job-r4:generation", 2)
+
+    # Hash is completely absent (retry route deleted it).
+    assert not fake.exists("job:job-r4")
+
+    # Stale gen=1 writer.
+    stale = RedisProgressReporter(fake, "job-r4", generation=1)
+    accepted = stale.report(0.85, "stale heartbeat")
+
+    assert accepted is False
+    assert not fake.exists("job:job-r4"), "stale writer must not re-seed the hash"
+
+
+def test_report_returns_true_when_central_gen_matches_caller_gen():
+    """Same Round 4 scenario but for the legitimate gen=2 writer.
+    The central counter is 2 and the caller is 2 → the Lua central
+    check passes, and the ``(not stored_gen)`` reset branch seeds
+    the hash correctly.
+    """
+    fake = fakeredis.FakeRedis()
+    fake.set("whisper:pipeline:job-r4ok:generation", 2)
+
+    fresh = RedisProgressReporter(fake, "job-r4ok", generation=2)
+    accepted = fresh.report(0.05, "attempt2 preprocess starting")
+
+    assert accepted is True
+    stored = _stored(fake, "job-r4ok")
+    assert stored["progress"] == "0.05"
+    assert stored["generation"] == "2"
+
+
+def test_complete_rejected_by_central_gen():
+    fake = fakeredis.FakeRedis()
+    fake.set("whisper:pipeline:job-r4c:generation", 3)
+
+    stale = RedisProgressReporter(fake, "job-r4c", generation=1)
+    assert stale.complete("/stale.json") is False
+
+
+def test_fail_rejected_by_central_gen():
+    fake = fakeredis.FakeRedis()
+    fake.set("whisper:pipeline:job-r4f:generation", 3)
+
+    stale = RedisProgressReporter(fake, "job-r4f", generation=1)
+    assert stale.fail("stale error") is False
+
+
 def test_report_returns_true_on_redis_error():
     """Transient Redis failures must *not* surface as rejection: the
     legacy "SQLite is source of truth when Redis is unavailable" contract
