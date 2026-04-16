@@ -179,6 +179,24 @@ def enqueue_pipeline(
     # its write the next time it calls update_if_generation_matches.
     generation = _bump_generation(redis, job.id)
 
+    # Seed the progress hash with the new generation immediately so a stale
+    # writer that arrives after the retry route deleted ``job:{id}`` (wiping
+    # the hash-embedded generation field) sees the fresh generation=N via
+    # both the central counter (checked in Lua KEYS[2]) AND the hash field.
+    # This is the hash-level belt on top of the central-counter suspenders
+    # added in Commit 21, and also gives the UI a clean ``progress=0,
+    # status=queued`` read right after retry instead of an empty hash.
+    progress_key = f"job:{job.id}"
+    redis.hset(
+        progress_key,
+        mapping={
+            "progress": "0",
+            "status": "queued",
+            "generation": str(generation),
+        },
+    )
+    redis.expire(progress_key, settings.redis_processing_expiry)
+
     ctx_store = PipelineContextStore(redis, job.id)
     ctx_store.initialize(initial_context)
     # The subjobs set is now per-generation, so we do NOT clear previous

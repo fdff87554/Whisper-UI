@@ -78,6 +78,23 @@ if caller_gen < 0 then
   return 1
 end
 
+-- Authoritative check: the central generation counter at KEYS[2] is the
+-- source of truth for which attempt currently owns the pipeline. The
+-- hash-embedded generation (checked further down) is an optimisation
+-- that avoids the extra GET when the hash is already stamped, but after
+-- the retry route deletes the progress hash the embedded field vanishes.
+-- Without this central-counter check, a stale gen=1 writer arriving
+-- after the delete would walk into the "(not stored_gen)" reset branch
+-- and be accepted — the exact Round-4 review race window.
+local central_gen_key = KEYS[2]
+local central_gen_raw = redis.call('GET', central_gen_key)
+if central_gen_raw then
+  local central_gen = tonumber(central_gen_raw)
+  if central_gen and caller_gen < central_gen then
+    return 0
+  end
+end
+
 local stored_gen_raw = redis.call('HGET', key, 'generation')
 local stored_gen = nil
 if stored_gen_raw then
@@ -128,6 +145,13 @@ local ttl = tonumber(ARGV[3])
 local caller_gen = tonumber(ARGV[4])
 
 if caller_gen >= 0 then
+  local central_gen_raw = redis.call('GET', KEYS[2])
+  if central_gen_raw then
+    local central_gen = tonumber(central_gen_raw)
+    if central_gen and caller_gen < central_gen then
+      return 0
+    end
+  end
   local stored_gen_raw = redis.call('HGET', key, 'generation')
   if stored_gen_raw then
     local stored_gen = tonumber(stored_gen_raw)
@@ -159,6 +183,13 @@ local ttl = tonumber(ARGV[3])
 local caller_gen = tonumber(ARGV[4])
 
 if caller_gen >= 0 then
+  local central_gen_raw = redis.call('GET', KEYS[2])
+  if central_gen_raw then
+    local central_gen = tonumber(central_gen_raw)
+    if central_gen and caller_gen < central_gen then
+      return 0
+    end
+  end
   local stored_gen_raw = redis.call('HGET', key, 'generation')
   if stored_gen_raw then
     local stored_gen = tonumber(stored_gen_raw)
@@ -206,6 +237,13 @@ class RedisProgressReporter:
         self._redis = redis
         self._job_id = job_id
         self._key = f"job:{job_id}"
+        # Central generation counter — the authoritative source for which
+        # attempt currently owns the pipeline. Lua scripts read this via
+        # KEYS[2] as a belt-and-suspenders check on top of the hash-level
+        # generation field. Closing the Round-4 window where the retry
+        # route deletes the hash (wiping the embedded generation) but the
+        # central counter has already been bumped.
+        self._generation_key = f"whisper:pipeline:{job_id}:generation"
         self._processing_ttl = processing_ttl
         self._generation = generation
         # register_script loads each script lazily; the first call goes
@@ -248,7 +286,7 @@ class RedisProgressReporter:
         """
         try:
             result = self._max_write_script(
-                keys=[self._key],
+                keys=[self._key, self._generation_key],
                 args=[progress, message, self._processing_ttl, self._caller_gen_arg()],
             )
         except RedisError:
@@ -263,7 +301,7 @@ class RedisProgressReporter:
         """Terminal-state write. See :meth:`report` for the bool contract."""
         try:
             result = self._complete_script(
-                keys=[self._key],
+                keys=[self._key, self._generation_key],
                 args=[result_path, PIPELINE_COMPLETE, REDIS_COMPLETED_EXPIRY, self._caller_gen_arg()],
             )
         except RedisError:
@@ -275,7 +313,7 @@ class RedisProgressReporter:
         """Terminal-state write. See :meth:`report` for the bool contract."""
         try:
             result = self._fail_script(
-                keys=[self._key],
+                keys=[self._key, self._generation_key],
                 args=[
                     error[:MESSAGE_MAX_LENGTH],
                     error[:ERROR_MAX_LENGTH],
