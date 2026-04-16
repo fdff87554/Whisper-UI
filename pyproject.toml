@@ -38,8 +38,11 @@ dev = [
   "pytest>=9.0,<10",
   "pytest-cov>=7.0,<8",
   # In-process Redis stand-in for the end-to-end integration test. Avoids
-  # spinning up a real Redis or a Docker testcontainer in CI.
-  "fakeredis>=2.30,<3",
+  # spinning up a real Redis or a Docker testcontainer in CI. The ``lua``
+  # extra pulls in ``lupa`` so the RedisProgressReporter's EVAL-based
+  # atomic max-write script (see whisper_ui/worker/progress.py) can be
+  # exercised under fakeredis without a real Redis server.
+  "fakeredis[lua]>=2.30,<3",
 ]
 
 [build-system]

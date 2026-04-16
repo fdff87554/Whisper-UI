@@ -15,8 +15,8 @@ from whisper_ui.ui import labels as ui_labels
 from whisper_ui.web.batch_zip import create_batch_zip
 from whisper_ui.web.deps import DbDep, FileStoreDep, RedisDep, SettingsDep, make_content_disposition, templates
 from whisper_ui.web.validation import validate_hex_id
+from whisper_ui.worker.pipeline_dispatcher import enqueue_pipeline
 from whisper_ui.worker.progress import RedisProgressReporter
-from whisper_ui.worker.timeout import calculate_job_timeout
 
 if TYPE_CHECKING:
     from whisper_ui.storage.database import JobDatabase
@@ -123,15 +123,19 @@ def _probe_retry_duration(job: Job) -> float | None:
 
 
 @router.post("/jobs/{job_id}/retry")
-async def retry_job(job_id: str, db: DbDep, redis: RedisDep, settings: SettingsDep):
+async def retry_job(
+    job_id: str,
+    db: DbDep,
+    redis: RedisDep,
+    settings: SettingsDep,
+    filestore: FileStoreDep,
+):
     validate_hex_id(job_id, "job_id")
     job = db.get_job(job_id)
     if job is None or job.status != JobStatus.FAILED:
         return Response(status_code=404)
 
     try:
-        from rq import Queue
-
         retry_duration = _probe_retry_duration(job)
         job.status = JobStatus.QUEUED
         job.error = None
@@ -142,12 +146,7 @@ async def retry_job(job_id: str, db: DbDep, redis: RedisDep, settings: SettingsD
         db.update_job(job)
         redis.delete(f"job:{job.id}")
 
-        q = Queue(connection=redis)
-        q.enqueue(
-            "whisper_ui.worker.tasks.process_transcription",
-            job.id,
-            job_timeout=calculate_job_timeout(retry_duration, settings),
-        )
+        enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
     except Exception:
         logger.exception("Failed to enqueue retry for job %s", job.id)
         job.status = JobStatus.FAILED
@@ -173,15 +172,18 @@ async def delete_job(job_id: str, db: DbDep, filestore: FileStoreDep, redis: Red
 
 
 @router.post("/jobs/batch/{batch_id}/retry")
-async def retry_batch(batch_id: str, db: DbDep, redis: RedisDep, settings: SettingsDep):
+async def retry_batch(
+    batch_id: str,
+    db: DbDep,
+    redis: RedisDep,
+    settings: SettingsDep,
+    filestore: FileStoreDep,
+):
     validate_hex_id(batch_id, "batch_id")
     all_jobs = db.list_jobs_by_batch(batch_id)
     if not all_jobs:
         return Response(status_code=404)
 
-    from rq import Queue
-
-    q = Queue(connection=redis)
     for job in all_jobs:
         if job.status != JobStatus.FAILED:
             continue
@@ -195,11 +197,7 @@ async def retry_batch(batch_id: str, db: DbDep, redis: RedisDep, settings: Setti
             job.duration = retry_duration
             db.update_job(job)
             redis.delete(f"job:{job.id}")
-            q.enqueue(
-                "whisper_ui.worker.tasks.process_transcription",
-                job.id,
-                job_timeout=calculate_job_timeout(retry_duration, settings),
-            )
+            enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
         except Exception:
             logger.exception("Failed to retry job %s", job.id)
             job.status = JobStatus.FAILED
