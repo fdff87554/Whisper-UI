@@ -6,6 +6,12 @@ from typing import TYPE_CHECKING, Any
 from rq.timeouts import BaseTimeoutException
 
 from whisper_ui.core.exceptions import PipelineError
+from whisper_ui.pipeline.progress_bands import (
+    STAGE_WEIGHTS,
+    STAGE_WEIGHTS_WITH_DOWNLOAD,
+    STAGE_WEIGHTS_WITH_DOWNLOAD_AND_LLM,
+    STAGE_WEIGHTS_WITH_LLM,
+)
 
 if TYPE_CHECKING:
     from whisper_ui.core.models import TranscriptResult
@@ -13,49 +19,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-STAGE_WEIGHTS: dict[str, tuple[float, float]] = {
-    "preprocess": (0.00, 0.05),
-    "transcribe": (0.05, 0.55),
-    "align": (0.55, 0.65),
-    "diarize": (0.65, 0.90),
-    "assign_speakers": (0.90, 0.95),
-    "postprocess": (0.95, 1.00),
-}
-
-STAGE_WEIGHTS_WITH_DOWNLOAD: dict[str, tuple[float, float]] = {
-    "download": (0.00, 0.15),
-    "preprocess": (0.15, 0.20),
-    "transcribe": (0.20, 0.60),
-    "align": (0.60, 0.70),
-    "diarize": (0.70, 0.90),
-    "assign_speakers": (0.90, 0.95),
-    "postprocess": (0.95, 1.00),
-}
-
-# Weight bands used when LLMCorrectionStage is appended. Kept separate from
-# the default dicts so production jobs enqueued before an upgrade keep using
-# the layout they started with — changing the existing dicts would cause
-# their progress bars to jump when the worker is redeployed.
-STAGE_WEIGHTS_WITH_LLM: dict[str, tuple[float, float]] = {
-    "preprocess": (0.00, 0.05),
-    "transcribe": (0.05, 0.50),
-    "align": (0.50, 0.60),
-    "diarize": (0.60, 0.85),
-    "assign_speakers": (0.85, 0.90),
-    "postprocess": (0.90, 0.92),
-    "llm_correction": (0.92, 1.00),
-}
-
-STAGE_WEIGHTS_WITH_DOWNLOAD_AND_LLM: dict[str, tuple[float, float]] = {
-    "download": (0.00, 0.12),
-    "preprocess": (0.12, 0.17),
-    "transcribe": (0.17, 0.55),
-    "align": (0.55, 0.65),
-    "diarize": (0.65, 0.85),
-    "assign_speakers": (0.85, 0.90),
-    "postprocess": (0.90, 0.92),
-    "llm_correction": (0.92, 1.00),
-}
+# Re-exported so existing callers that import weight bands from the
+# orchestrator module continue to work. New code should import from
+# `whisper_ui.pipeline.progress_bands` directly.
+__all__ = [
+    "STAGE_WEIGHTS",
+    "STAGE_WEIGHTS_WITH_DOWNLOAD",
+    "STAGE_WEIGHTS_WITH_DOWNLOAD_AND_LLM",
+    "STAGE_WEIGHTS_WITH_LLM",
+    "PipelineOrchestrator",
+]
 
 
 class PipelineOrchestrator:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import fakeredis
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from whisper_ui.core.models import Job
@@ -15,61 +16,388 @@ def _make_reporter(processing_ttl: int = 7200) -> tuple[MagicMock, RedisProgress
     return mock_redis, reporter
 
 
+def _fake_reporter(job_id: str = "test-job-id", processing_ttl: int = 7200):
+    """Build a RedisProgressReporter backed by fakeredis[lua], which supports
+    the atomic max-write Lua script the reporter uses for ``report()``.
+    Returns (FakeRedis, reporter) so tests can hgetall the actual stored
+    state instead of asserting on mock call args.
+    """
+    fake = fakeredis.FakeRedis()
+    reporter = RedisProgressReporter(fake, job_id, processing_ttl=processing_ttl)
+    return fake, reporter
+
+
+def _stored(fake, job_id: str = "test-job-id") -> dict[str, str]:
+    return {
+        k.decode() if isinstance(k, bytes) else k: v.decode() if isinstance(v, bytes) else v
+        for k, v in fake.hgetall(f"job:{job_id}").items()
+    }
+
+
 def test_report_sets_progress():
-    mock_redis, reporter = _make_reporter()
+    fake, reporter = _fake_reporter()
     reporter.report(0.5, "halfway")
 
-    mock_redis.hset.assert_called_once()
-    call_kwargs = mock_redis.hset.call_args
-    mapping = call_kwargs.kwargs.get("mapping") or call_kwargs[1].get("mapping")
-    assert mapping["progress"] == "0.5"
-    assert mapping["message"] == "halfway"
-    assert mapping["status"] == "processing"
-    mock_redis.expire.assert_called_once_with("job:test-job-id", 7200)
+    stored = _stored(fake)
+    assert float(stored["progress"]) == 0.5
+    assert stored["message"] == "halfway"
+    assert stored["status"] == "processing"
+    assert fake.ttl("job:test-job-id") > 0
 
 
 def test_report_uses_injected_processing_ttl():
-    mock_redis, reporter = _make_reporter(processing_ttl=12345)
+    fake, reporter = _fake_reporter(processing_ttl=12345)
     reporter.report(0.1, "starting")
-    mock_redis.expire.assert_called_once_with("job:test-job-id", 12345)
+    # fakeredis returns the TTL the last EXPIRE set; within ±1 s is fine.
+    assert 12000 <= fake.ttl("job:test-job-id") <= 12345
 
 
 def test_report_falls_back_to_default_ttl_when_omitted():
-    mock_redis = MagicMock()
-    reporter = RedisProgressReporter(mock_redis, "default-ttl-job")
+    fake = fakeredis.FakeRedis()
+    reporter = RedisProgressReporter(fake, "default-ttl-job")
     reporter.report(0.2, "running")
-    args, _ = mock_redis.expire.call_args
-    assert args[1] > 0
+    assert fake.ttl("job:default-ttl-job") > 0
+
+
+def test_report_progress_never_regresses_on_second_writer():
+    """Direct Lua-max semantics test: two reporters bound to the same
+    job_id write interleaved values and the stored progress must always
+    be the highest one any writer has observed. Message always follows
+    the latest write so the UI can switch stage labels even when
+    progress happens to stall.
+    """
+    fake = fakeredis.FakeRedis()
+    r1 = RedisProgressReporter(fake, "same-job")
+    r2 = RedisProgressReporter(fake, "same-job")
+
+    r1.report(0.30, "transcribe running")
+    assert _stored(fake, "same-job")["progress"] == "0.3"
+
+    r2.report(0.72, "diarize running")
+    assert _stored(fake, "same-job")["progress"] == "0.72"
+
+    # Regression attempt — must be dropped. Message still advances.
+    r1.report(0.35, "transcribe chunk 2")
+    stored = _stored(fake, "same-job")
+    assert float(stored["progress"]) == 0.72
+    assert stored["message"] == "transcribe chunk 2"
+
+    # A strictly larger write still wins.
+    r1.report(0.90, "transcribe chunk 3")
+    assert float(_stored(fake, "same-job")["progress"]) == 0.90
+
+
+def test_report_with_newer_generation_resets_stale_high_watermark():
+    """Regression for PR #39 Round 2 R2-2. The exact scenario the
+    reviewer reproducer flagged: attempt 1's stale late writer has
+    pinned the hash at progress=0.85, the user retries, and attempt 2's
+    first stage wants to start reporting from 0.05. Before the fix, the
+    Lua max-write compared 0.05 against 0.85 and rejected the update,
+    so the UI saw attempt 2 stuck at 85% with attempt 2's message.
+    With the generation-aware reset branch, the higher caller_gen
+    signals "new attempt owns this key now" and the hash is
+    unconditionally rewritten.
+    """
+    fake = fakeredis.FakeRedis()
+
+    # Attempt 1 runs and pins the hash.
+    stale_reporter = RedisProgressReporter(fake, "job-retry", generation=1)
+    stale_reporter.report(0.85, "attempt1 diarize")
+    assert _stored(fake, "job-retry")["progress"] == "0.85"
+
+    # User retries; attempt 2 starts under generation=2.
+    fresh_reporter = RedisProgressReporter(fake, "job-retry", generation=2)
+    fresh_reporter.report(0.05, "attempt2 preprocess starting")
+
+    stored = _stored(fake, "job-retry")
+    assert stored["progress"] == "0.05"
+    assert stored["message"] == "attempt2 preprocess starting"
+    assert stored["status"] == "processing"
+    assert stored["generation"] == "2"
+
+
+def test_report_with_older_generation_is_dropped():
+    """After attempt 2 takes over the hash, any late writer from
+    attempt 1 must be silently dropped — otherwise a residual pyannote
+    C++ thread that honoured ``send_stop_job_command`` slowly could
+    still corrupt the fresh attempt's progress.
+    """
+    fake = fakeredis.FakeRedis()
+
+    # Attempt 2 is running and has already stamped its generation.
+    RedisProgressReporter(fake, "job-retry", generation=2).report(0.30, "attempt2 transcribe")
+    assert float(_stored(fake, "job-retry")["progress"]) == 0.30
+
+    # Late writer from attempt 1 tries to overwrite.
+    RedisProgressReporter(fake, "job-retry", generation=1).report(0.99, "late stale write")
+
+    stored = _stored(fake, "job-retry")
+    assert float(stored["progress"]) == 0.30, "stale attempt-1 write must not touch attempt 2's hash"
+    assert stored["message"] == "attempt2 transcribe"
+    assert stored["generation"] == "2"
+
+
+def test_report_without_generation_keeps_legacy_max_write_semantics():
+    """Legacy callers (monolithic ``process_transcription`` path, any
+    reporter built via ``build_worker_runtime`` without explicit
+    generation) must keep their pre-Round-2 max-write behaviour so
+    their tests and production behaviour are unchanged.
+    """
+    fake = fakeredis.FakeRedis()
+    legacy = RedisProgressReporter(fake, "legacy-job")
+    legacy.report(0.30, "A")
+    legacy.report(0.70, "B")
+    legacy.report(0.40, "C")  # rejected by max-write, but message updates
+
+    stored = _stored(fake, "legacy-job")
+    assert stored["progress"] == "0.7"
+    assert stored["message"] == "C"
+    # No generation field in legacy mode.
+    assert "generation" not in stored
+
+
+def test_complete_with_older_generation_is_dropped():
+    """Defense-in-depth: if a stale attempt-1 finalize_success somehow
+    bypasses the Python-level short-circuit in pipeline_dispatcher, the
+    reporter's own Lua script still refuses to overwrite a newer
+    attempt's hash.
+    """
+    fake = fakeredis.FakeRedis()
+    # Attempt 2 has already stamped the hash.
+    RedisProgressReporter(fake, "job-complete", generation=2).report(0.40, "attempt2 running")
+
+    # Stale attempt-1 tries to mark the job COMPLETED.
+    RedisProgressReporter(fake, "job-complete", generation=1).complete("/stale/result.json")
+
+    stored = _stored(fake, "job-complete")
+    assert stored["status"] == "processing", "stale attempt-1 complete() must not mark attempt 2 as completed"
+    assert stored.get("result_path") is None or "stale" not in stored.get("result_path", "")
+    assert stored["generation"] == "2"
+
+
+def test_complete_with_current_generation_writes_through():
+    """Sanity: a legitimate complete() under the current generation
+    still lands, so the defense-in-depth check does not paper over
+    the happy path.
+    """
+    fake = fakeredis.FakeRedis()
+    reporter = RedisProgressReporter(fake, "job-complete-ok", generation=3)
+    reporter.report(0.90, "finishing")
+    reporter.complete("/tmp/result.json")
+
+    stored = _stored(fake, "job-complete-ok")
+    assert stored["status"] == "completed"
+    assert stored["result_path"] == "/tmp/result.json"
+    assert stored["generation"] == "3"
+
+
+def test_fail_with_older_generation_is_dropped():
+    """Symmetric defense-in-depth check for fail(). A stale attempt-1
+    finalize_failure must not mark a running attempt 2 as FAILED at
+    the Redis progress-hash layer.
+    """
+    fake = fakeredis.FakeRedis()
+    RedisProgressReporter(fake, "job-fail", generation=2).report(0.40, "attempt2 running")
+    RedisProgressReporter(fake, "job-fail", generation=1).fail("stale error")
+
+    stored = _stored(fake, "job-fail")
+    assert stored["status"] == "processing"
+    assert stored.get("error") is None or "stale error" not in stored.get("error", "")
+    assert stored["generation"] == "2"
+
+
+def test_report_progress_updates_message_when_equal():
+    """Equal progress values must still update the message so the user
+    sees the current stage label when a branch reports a status change
+    without moving the percentage (e.g. "diarize loading" → "diarize
+    running" at 0.65).
+    """
+    fake = fakeredis.FakeRedis()
+    reporter = RedisProgressReporter(fake, "stall-job")
+    reporter.report(0.65, "diarize loading")
+    reporter.report(0.65, "diarize running")
+
+    stored = _stored(fake, "stall-job")
+    assert float(stored["progress"]) == 0.65
+    assert stored["message"] == "diarize running"
+
+
+def test_report_returns_true_when_lua_accepts_fresh_write():
+    """``report()`` returns True when the Lua script commits the write.
+    Covers all three accepting branches: legacy (no generation), reset
+    (caller_gen > stored_gen), and same-generation max-write.
+    """
+    fake = fakeredis.FakeRedis()
+
+    # Legacy branch (caller_gen = -1).
+    legacy = RedisProgressReporter(fake, "job-legacy")
+    assert legacy.report(0.1, "m") is True
+
+    # Reset branch (higher caller_gen than stored).
+    gen_aware = RedisProgressReporter(fake, "job-reset", generation=2)
+    assert gen_aware.report(0.3, "m") is True
+
+    # Same-generation max-write branch (new >= stored).
+    same_gen = RedisProgressReporter(fake, "job-reset", generation=2)
+    assert same_gen.report(0.5, "m") is True
+
+
+def test_report_returns_false_when_lua_drops_stale_write():
+    """Core PR #39 Round 3 regression: ``report()`` returns False when
+    the caller's generation is strictly older than the stored one, so
+    the throttler can skip its SQLite mirror path and leave the
+    current attempt's Job row alone.
+    """
+    fake = fakeredis.FakeRedis()
+
+    # Attempt 2 owns the hash.
+    RedisProgressReporter(fake, "job-stale", generation=2).report(0.4, "attempt2 running")
+
+    # Attempt 1 late writer.
+    stale = RedisProgressReporter(fake, "job-stale", generation=1)
+    accepted = stale.report(0.99, "attempt1 stale heartbeat")
+
+    assert accepted is False
+    # And the hash is untouched (sanity: confirms Lua dropped the write).
+    stored = _stored(fake, "job-stale")
+    assert float(stored["progress"]) == 0.4
+    assert stored["generation"] == "2"
+
+
+def test_report_returns_false_when_central_gen_exceeds_caller_gen_despite_empty_hash():
+    """Regression for PR #39 Round 4 R4-1. The retry route deletes the
+    progress hash (wiping the embedded generation field), but the
+    central generation counter has already been bumped. A stale gen=1
+    writer arriving after the delete must be rejected by the Lua
+    central-counter check (KEYS[2]) even though the hash-level check
+    would let it through via the ``(not stored_gen)`` reset branch.
+    """
+    fake = fakeredis.FakeRedis()
+
+    # Central counter bumped to 2 by enqueue_pipeline.
+    fake.set("whisper:pipeline:job-r4:generation", 2)
+
+    # Hash is completely absent (retry route deleted it).
+    assert not fake.exists("job:job-r4")
+
+    # Stale gen=1 writer.
+    stale = RedisProgressReporter(fake, "job-r4", generation=1)
+    accepted = stale.report(0.85, "stale heartbeat")
+
+    assert accepted is False
+    assert not fake.exists("job:job-r4"), "stale writer must not re-seed the hash"
+
+
+def test_report_returns_true_when_central_gen_matches_caller_gen():
+    """Same Round 4 scenario but for the legitimate gen=2 writer.
+    The central counter is 2 and the caller is 2 → the Lua central
+    check passes, and the ``(not stored_gen)`` reset branch seeds
+    the hash correctly.
+    """
+    fake = fakeredis.FakeRedis()
+    fake.set("whisper:pipeline:job-r4ok:generation", 2)
+
+    fresh = RedisProgressReporter(fake, "job-r4ok", generation=2)
+    accepted = fresh.report(0.05, "attempt2 preprocess starting")
+
+    assert accepted is True
+    stored = _stored(fake, "job-r4ok")
+    assert stored["progress"] == "0.05"
+    assert stored["generation"] == "2"
+
+
+def test_complete_rejected_by_central_gen():
+    fake = fakeredis.FakeRedis()
+    fake.set("whisper:pipeline:job-r4c:generation", 3)
+
+    stale = RedisProgressReporter(fake, "job-r4c", generation=1)
+    assert stale.complete("/stale.json") is False
+
+
+def test_fail_rejected_by_central_gen():
+    fake = fakeredis.FakeRedis()
+    fake.set("whisper:pipeline:job-r4f:generation", 3)
+
+    stale = RedisProgressReporter(fake, "job-r4f", generation=1)
+    assert stale.fail("stale error") is False
+
+
+def test_report_returns_true_on_redis_error():
+    """Transient Redis failures must *not* surface as rejection: the
+    legacy "SQLite is source of truth when Redis is unavailable" contract
+    requires the throttler to keep writing to the DB during an outage.
+    """
+    _fake, reporter = _fake_reporter()
+    reporter._max_write_script = MagicMock(side_effect=RedisConnectionError("down"))
+
+    assert reporter.report(0.5, "m") is True
+
+
+def test_complete_returns_true_when_accepted():
+    """Legacy (no generation) complete() always accepts; so does a
+    gen-aware reporter whose generation is at least the stored one.
+    """
+    fake = fakeredis.FakeRedis()
+    legacy = RedisProgressReporter(fake, "job-ok-legacy")
+    assert legacy.complete("/tmp/legacy.json") is True
+
+    gen_aware = RedisProgressReporter(fake, "job-ok-gen", generation=5)
+    assert gen_aware.complete("/tmp/gen.json") is True
+
+
+def test_complete_returns_false_when_stale():
+    fake = fakeredis.FakeRedis()
+    RedisProgressReporter(fake, "job-ct", generation=2).report(0.5, "attempt2 running")
+    stale = RedisProgressReporter(fake, "job-ct", generation=1)
+
+    assert stale.complete("/tmp/stale.json") is False
+    stored = _stored(fake, "job-ct")
+    assert stored["status"] == "processing"
+
+
+def test_fail_returns_false_when_stale():
+    fake = fakeredis.FakeRedis()
+    RedisProgressReporter(fake, "job-fl", generation=2).report(0.5, "attempt2 running")
+    stale = RedisProgressReporter(fake, "job-fl", generation=1)
+
+    assert stale.fail("stale error") is False
+    stored = _stored(fake, "job-fl")
+    assert stored["status"] == "processing"
 
 
 def test_complete_sets_done():
-    mock_redis, reporter = _make_reporter()
+    fake, reporter = _fake_reporter()
     reporter.complete("/path/to/result.json")
 
-    mapping = mock_redis.hset.call_args.kwargs.get("mapping") or mock_redis.hset.call_args[1].get("mapping")
-    assert mapping["progress"] == "1.0"
-    assert mapping["status"] == "completed"
-    assert mapping["result_path"] == "/path/to/result.json"
-    mock_redis.expire.assert_called_once_with("job:test-job-id", 86400)
+    stored = _stored(fake)
+    assert stored["progress"] == "1.0"
+    assert stored["status"] == "completed"
+    assert stored["result_path"] == "/path/to/result.json"
+    assert fake.ttl("job:test-job-id") > 0
 
 
 def test_fail_sets_error():
-    mock_redis, reporter = _make_reporter()
+    fake, reporter = _fake_reporter()
     reporter.fail("something broke")
 
-    mapping = mock_redis.hset.call_args.kwargs.get("mapping") or mock_redis.hset.call_args[1].get("mapping")
-    assert mapping["status"] == "failed"
-    assert "something broke" in mapping["error"]
+    stored = _stored(fake)
+    assert stored["status"] == "failed"
+    assert "something broke" in stored["error"]
 
 
 def test_report_swallows_redis_connection_error(caplog):
     """Progress writes are best-effort. SQLite is the source of truth, so a
     transient Redis outage must NOT propagate up and tear down the worker.
+    The Lua script path is still wrapped by the ``except RedisError`` so
+    a failing EVAL should be logged and swallowed just like the old HSET
+    error path.
     """
     import logging
 
-    mock_redis, reporter = _make_reporter()
-    mock_redis.hset.side_effect = RedisConnectionError("redis down")
+    _fake, reporter = _fake_reporter()
+    # Force the reporter's bound script to raise, simulating a mid-EVAL
+    # Redis outage without having to tear down the whole fakeredis server.
+    reporter._max_write_script = MagicMock(side_effect=RedisConnectionError("redis down"))
 
     with caplog.at_level(logging.WARNING):
         reporter.report(0.4, "halfway")
@@ -80,8 +408,8 @@ def test_report_swallows_redis_connection_error(caplog):
 def test_complete_swallows_redis_connection_error(caplog):
     import logging
 
-    mock_redis, reporter = _make_reporter()
-    mock_redis.hset.side_effect = RedisConnectionError("redis down")
+    _fake, reporter = _fake_reporter()
+    reporter._complete_script = MagicMock(side_effect=RedisConnectionError("redis down"))
 
     with caplog.at_level(logging.WARNING):
         reporter.complete("/path/to/result.json")
@@ -92,8 +420,8 @@ def test_complete_swallows_redis_connection_error(caplog):
 def test_fail_swallows_redis_connection_error(caplog):
     import logging
 
-    mock_redis, reporter = _make_reporter()
-    mock_redis.hset.side_effect = RedisConnectionError("redis down")
+    _fake, reporter = _fake_reporter()
+    reporter._fail_script = MagicMock(side_effect=RedisConnectionError("redis down"))
 
     with caplog.at_level(logging.WARNING):
         reporter.fail("worker exploded")
@@ -115,13 +443,13 @@ def test_get_progress_returns_empty_dict_on_redis_error(caplog):
 
 
 def test_fail_truncates_long_error():
-    mock_redis, reporter = _make_reporter()
+    fake, reporter = _fake_reporter()
     long_error = "x" * 2000
     reporter.fail(long_error)
 
-    mapping = mock_redis.hset.call_args.kwargs.get("mapping") or mock_redis.hset.call_args[1].get("mapping")
-    assert len(mapping["error"]) <= 1000
-    assert len(mapping["message"]) <= 500
+    stored = _stored(fake)
+    assert len(stored["error"]) <= 1000
+    assert len(stored["message"]) <= 500
 
 
 def test_get_progress_empty():
@@ -281,6 +609,43 @@ class TestThrottledProgressReporter:
         # actually wrote — i.e. monotonically non-decreasing.
         final_progress = max(call.args[0] for call in reporter.report.call_args_list)
         assert final_progress > 0
+
+    def test_throttle_skips_db_update_when_reporter_rejects_stale_write(self):
+        """Regression for PR #39 Round 3 R3-1. When the Redis Lua script
+        rejects a write because the caller's generation is strictly older
+        than the stored one, the throttler must NOT proceed to update the
+        SQLite Job row from its captured (stale) Job object. Before this
+        fix the throttler always called db.update_job(job) regardless of
+        whether the Redis write landed, so a stale stage's captured Job
+        snapshot could clobber the current attempt's status, progress,
+        and result_path fields via the full-column UPDATE path.
+        """
+        on_progress, reporter, db, job, _clock = _make_throttle()
+        reporter.report.return_value = False  # Lua rejected (stale generation)
+
+        on_progress(0.85, "attempt1 stale heartbeat")
+
+        reporter.report.assert_called_once_with(0.85, "attempt1 stale heartbeat")
+        db.update_job.assert_not_called()
+        # Captured Job must not be mutated — otherwise a *subsequent*
+        # legitimate writer would inherit the stale progress value.
+        assert job.progress == 0.0
+        assert job.progress_message == ""
+
+    def test_throttle_proceeds_when_reporter_accepts_write(self):
+        """Sanity pair for the test above: when the reporter returns
+        True (legacy max-write, reset branch, or current generation
+        match) the throttler still writes to SQLite as before.
+        """
+        on_progress, reporter, db, job, _clock = _make_throttle()
+        reporter.report.return_value = True
+
+        on_progress(0.42, "running")
+
+        reporter.report.assert_called_once_with(0.42, "running")
+        db.update_job.assert_called_once_with(job)
+        assert job.progress == 0.42
+        assert job.progress_message == "running"
 
     def test_late_heartbeat_with_old_message_is_dropped(self):
         """Same race as above, but the late update still carries the old

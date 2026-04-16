@@ -189,45 +189,42 @@ class TestJobsRoutes:
         assert resp.status_code == 409
         assert db.get_job(job.id) is not None
 
-    def test_retry_file_job_uses_dynamic_timeout(self, client, db, settings):
+    def test_retry_file_job_passes_probed_duration_to_dispatcher(self, client, db):
         job = _create_failed_job(db)
-        mock_queue = MagicMock()
         with (
-            patch("rq.Queue", return_value=mock_queue),
+            patch("whisper_ui.web.routes.jobs.enqueue_pipeline") as mock_enqueue,
             patch("whisper_ui.web.routes.jobs.get_audio_duration_seconds", return_value=3600.0),
         ):
             resp = client.post(f"/jobs/{job.id}/retry")
         assert resp.status_code == 204
-        mock_queue.enqueue.assert_called_once()
-        # 3600s audio * 3.0 multiplier = 10800, within [floor, max]
-        assert mock_queue.enqueue.call_args[1]["job_timeout"] == int(3600 * settings.job_timeout_audio_multiplier)
+        mock_enqueue.assert_called_once()
+        retried_job = mock_enqueue.call_args[0][0]
+        assert retried_job.id == job.id
+        assert retried_job.duration == 3600.0
 
-    def test_retry_file_job_with_unknown_duration_uses_default(self, client, db, settings):
+    def test_retry_file_job_with_unknown_duration_passes_none(self, client, db):
         job = _create_failed_job(db)
-        mock_queue = MagicMock()
         with (
-            patch("rq.Queue", return_value=mock_queue),
+            patch("whisper_ui.web.routes.jobs.enqueue_pipeline") as mock_enqueue,
             patch("whisper_ui.web.routes.jobs.get_audio_duration_seconds", return_value=None),
         ):
             resp = client.post(f"/jobs/{job.id}/retry")
         assert resp.status_code == 204
-        assert mock_queue.enqueue.call_args[1]["job_timeout"] == settings.job_timeout_default
+        assert mock_enqueue.call_args[0][0].duration is None
 
-    def test_retry_url_job_uses_default_timeout(self, client, db, settings):
+    def test_retry_url_job_passes_none_duration(self, client, db):
         job = _create_failed_job(db, source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ")
-        mock_queue = MagicMock()
-        with patch("rq.Queue", return_value=mock_queue):
+        with patch("whisper_ui.web.routes.jobs.enqueue_pipeline") as mock_enqueue:
             resp = client.post(f"/jobs/{job.id}/retry")
         assert resp.status_code == 204
-        mock_queue.enqueue.assert_called_once()
-        # URL jobs cannot be re-probed locally, so they fall back to default.
-        assert mock_queue.enqueue.call_args[1]["job_timeout"] == settings.job_timeout_default
+        mock_enqueue.assert_called_once()
+        # URL jobs cannot be re-probed locally; dispatcher sees duration=None.
+        assert mock_enqueue.call_args[0][0].duration is None
 
-    def test_retry_probe_exception_falls_back_to_default(self, client, db, settings):
+    def test_retry_probe_exception_passes_none_duration(self, client, db):
         job = _create_failed_job(db)
-        mock_queue = MagicMock()
         with (
-            patch("rq.Queue", return_value=mock_queue),
+            patch("whisper_ui.web.routes.jobs.enqueue_pipeline") as mock_enqueue,
             patch(
                 "whisper_ui.web.routes.jobs.get_audio_duration_seconds",
                 side_effect=OSError("file vanished"),
@@ -235,15 +232,16 @@ class TestJobsRoutes:
         ):
             resp = client.post(f"/jobs/{job.id}/retry")
         assert resp.status_code == 204
-        mock_queue.enqueue.assert_called_once()
-        assert mock_queue.enqueue.call_args[1]["job_timeout"] == settings.job_timeout_default
+        mock_enqueue.assert_called_once()
+        assert mock_enqueue.call_args[0][0].duration is None
 
     def test_retry_enqueue_failure_uses_generic_error(self, client, db):
         job = _create_failed_job(db)
-        mock_queue = MagicMock()
-        mock_queue.enqueue.side_effect = Exception("Redis internal: secret/key/path leak")
         with (
-            patch("rq.Queue", return_value=mock_queue),
+            patch(
+                "whisper_ui.web.routes.jobs.enqueue_pipeline",
+                side_effect=Exception("Redis internal: secret/key/path leak"),
+            ),
             patch("whisper_ui.web.routes.jobs.get_audio_duration_seconds", return_value=60.0),
         ):
             client.post(f"/jobs/{job.id}/retry")
@@ -359,9 +357,7 @@ class TestUploadPost:
         return client.post("/upload", data=data, files=file_list, follow_redirects=False)
 
     def test_upload_post_submits_job(self, client, app):
-        mock_queue = MagicMock()
-        with patch("rq.Queue", return_value=mock_queue):
-            # Need to patch at the import location
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
             resp = self._upload(client)
         assert resp.status_code == 303
         assert "/jobs?submitted=" in resp.headers["location"]
@@ -388,7 +384,7 @@ class TestUploadPost:
     def test_upload_file_too_large_redirects(self, client, app):
         app.state.settings = app.state.settings.model_copy(update={"max_upload_size": 10})
         files = [("files", ("big.mp3", b"x" * 20, "audio/mpeg"))]
-        with patch("rq.Queue", return_value=MagicMock()):
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
             resp = self._upload(client, files=files)
         assert resp.status_code == 303
         assert "error=too_large" in resp.headers["location"]
@@ -396,7 +392,7 @@ class TestUploadPost:
     def test_upload_too_large_url_encodes_special_chars(self, client, app):
         app.state.settings = app.state.settings.model_copy(update={"max_upload_size": 5})
         files = [("files", ("evil&limit=1.mp3", b"x" * 10, "audio/mpeg"))]
-        with patch("rq.Queue", return_value=MagicMock()):
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
             resp = self._upload(client, files=files)
         assert resp.status_code == 303
         location = resp.headers["location"]
@@ -406,7 +402,7 @@ class TestUploadPost:
     def test_upload_too_large_cleans_up_partial_file(self, client, app, filestore):
         app.state.settings = app.state.settings.model_copy(update={"max_upload_size": 5})
         files = [("files", ("big.mp3", b"x" * 10, "audio/mpeg"))]
-        with patch("rq.Queue", return_value=MagicMock()):
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
             resp = self._upload(client, files=files)
         assert resp.status_code == 303
         # Verify no partial files remain in upload dir
@@ -420,14 +416,16 @@ class TestUploadPost:
         assert "error=no_files" in resp.headers["location"]
 
     def test_upload_partial_enqueue_failure_reports_failed_count(self, client, app, db):
-        mock_queue = MagicMock()
         # First file succeeds, second raises — simulate a transient Redis error.
-        mock_queue.enqueue.side_effect = [None, Exception("Redis hiccup")]
+        enqueue_side_effects = [None, Exception("Redis hiccup")]
         files = [
             ("files", ("a.mp3", b"data1", "audio/mpeg")),
             ("files", ("b.mp3", b"data2", "audio/mpeg")),
         ]
-        with patch("rq.Queue", return_value=mock_queue):
+        with patch(
+            "whisper_ui.web.routes.upload.enqueue_pipeline",
+            side_effect=enqueue_side_effects,
+        ):
             resp = self._upload(client, files=files)
         assert resp.status_code == 303
         location = resp.headers["location"]
@@ -461,15 +459,13 @@ class TestUploadURLPost:
         return client.post("/upload/url", data=data, follow_redirects=False)
 
     def test_upload_url_submits_job(self, client, app, db):
-        mock_queue = MagicMock()
-        with patch("rq.Queue", return_value=mock_queue):
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
             resp = self._post_url(client)
         assert resp.status_code == 303
         assert "/jobs?submitted=1" in resp.headers["location"]
 
     def test_upload_url_creates_job_with_source_url(self, client, app, db):
-        mock_queue = MagicMock()
-        with patch("rq.Queue", return_value=mock_queue):
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
             self._post_url(client)
         jobs = db.list_jobs()
         assert len(jobs) == 1
@@ -495,8 +491,7 @@ class TestUploadURLPost:
         assert "error=invalid_language" in resp.headers["location"]
 
     def test_upload_url_htmx_returns_redirect_header(self, client, app, db):
-        mock_queue = MagicMock()
-        with patch("rq.Queue", return_value=mock_queue):
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
             resp = client.post(
                 "/upload/url",
                 data={
@@ -511,22 +506,26 @@ class TestUploadURLPost:
         assert resp.status_code == 204
         assert resp.headers.get("HX-Redirect") == "/jobs?submitted=1"
 
-    def test_upload_url_uses_default_timeout(self, client, app, db, settings):
-        mock_queue = MagicMock()
-        with patch("rq.Queue", return_value=mock_queue):
+    def test_upload_url_passes_job_without_probed_duration(self, client, app, db):
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline") as mock_enqueue:
             self._post_url(client)
-        mock_queue.enqueue.assert_called_once()
-        # URL uploads cannot be probed until after download; fall back to default.
-        assert mock_queue.enqueue.call_args[1]["job_timeout"] == settings.job_timeout_default
+        mock_enqueue.assert_called_once()
+        # URL uploads cannot be probed until after download; the dispatcher
+        # receives the Job with duration=None so the timeout helper picks the
+        # settings.job_timeout_default internally.
+        enqueued_job = mock_enqueue.call_args[0][0]
+        assert enqueued_job.duration is None
+        assert enqueued_job.source_url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
     def test_upload_url_enqueue_failure_redirects_to_jobs_with_failed_count(self, client, app, db):
         """When enqueue fails the jobs are already persisted as FAILED; the
         redirect must land on /jobs so the user can see them, matching how
         /upload (file route) handles partial/total enqueue failures.
         """
-        mock_queue = MagicMock()
-        mock_queue.enqueue.side_effect = Exception("Redis connection lost")
-        with patch("rq.Queue", return_value=mock_queue):
+        with patch(
+            "whisper_ui.web.routes.upload.enqueue_pipeline",
+            side_effect=Exception("Redis connection lost"),
+        ):
             resp = self._post_url(client)
         assert resp.status_code == 303
         location = resp.headers["location"]
@@ -541,9 +540,10 @@ class TestUploadURLPost:
         """htmx variant: same behaviour, delivered via HX-Redirect so the
         fragment swap does not swallow the FAILED-job visibility.
         """
-        mock_queue = MagicMock()
-        mock_queue.enqueue.side_effect = Exception("Redis connection lost")
-        with patch("rq.Queue", return_value=mock_queue):
+        with patch(
+            "whisper_ui.web.routes.upload.enqueue_pipeline",
+            side_effect=Exception("Redis connection lost"),
+        ):
             resp = client.post(
                 "/upload/url",
                 data={
@@ -606,12 +606,11 @@ class TestBatchRoutes:
         batch_id = "b" * 32
         job = Job(filename="fail.mp3", status=JobStatus.FAILED, error="err", batch_id=batch_id)
         db.insert_job(job)
-        mock_queue = MagicMock()
-        with patch("rq.Queue", return_value=mock_queue):
+        with patch("whisper_ui.web.routes.jobs.enqueue_pipeline"):
             resp = client.post(f"/jobs/batch/{batch_id}/retry")
         assert resp.status_code == 204
 
-    def test_retry_batch_url_job_uses_default_timeout(self, client, db, app, settings):
+    def test_retry_batch_url_job_passes_none_duration(self, client, db, app):
         batch_id = "d" * 32
         job = Job(
             filename="url.mp3",
@@ -621,12 +620,11 @@ class TestBatchRoutes:
             source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         )
         db.insert_job(job)
-        mock_queue = MagicMock()
-        with patch("rq.Queue", return_value=mock_queue):
+        with patch("whisper_ui.web.routes.jobs.enqueue_pipeline") as mock_enqueue:
             resp = client.post(f"/jobs/batch/{batch_id}/retry")
         assert resp.status_code == 204
-        mock_queue.enqueue.assert_called_once()
-        assert mock_queue.enqueue.call_args[1]["job_timeout"] == settings.job_timeout_default
+        mock_enqueue.assert_called_once()
+        assert mock_enqueue.call_args[0][0].duration is None
 
     def test_delete_batch(self, client, db, filestore):
         batch_id = "c" * 32
