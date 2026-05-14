@@ -17,7 +17,6 @@ htmlcov/
 # IDE / agent tooling (local-only per-machine config)
 .vscode/
 .idea/
-.claude/
 *.swp
 *.swo
 
@@ -58,3 +57,4 @@ src/whisper_ui/web/static/style.css
 logs/
 tmp/
 data/
+compose.override.yml
