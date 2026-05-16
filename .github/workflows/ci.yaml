@@ -12,8 +12,20 @@ jobs:
       - name: Install mise
         uses: jdx/mise-action@v4
       - name: Install dependencies
-        run: pip install ".[dev]"
+        run: uv sync --extra dev --frozen
       - name: Lint
         uses: pre-commit/action@v3.0.1
-      - name: Test
-        run: python -m pytest --tb=short -q
+      - name: Unit tests
+        run: uv run pytest --tb=short -q
+  integration-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install mise
+        uses: jdx/mise-action@v4
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install dependencies
+        run: uv sync --extra dev --frozen
+      - name: Integration tests
+        run: uv run pytest -m integration --tb=short -q
