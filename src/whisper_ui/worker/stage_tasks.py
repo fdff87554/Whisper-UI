@@ -41,6 +41,7 @@ from whisper_ui.worker.progress import RedisProgressReporter
 from whisper_ui.worker.runtime import (
     WorkerRuntime,
     build_worker_runtime,
+    is_llm_active,
     make_throttled_progress_reporter,
 )
 
@@ -53,21 +54,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _llm_is_active(job: Job, runtime: WorkerRuntime) -> bool:
-    """Return whether LLM correction should be part of this job's pipeline.
-
-    Mirrors the trigger in :mod:`whisper_ui.worker.tasks`: the user must have
-    opted in *and* the deployment must expose an Ollama endpoint. The pair is
-    used both to select the right progress weight table and to decide whether
-    to enqueue a ``run_llm_correction`` sub-job.
-    """
-    return bool(job.llm_correction_enabled) and bool(runtime.settings.ollama_base_url)
-
-
 def pick_stage_weights(job: Job, runtime: WorkerRuntime) -> StageWeights:
     """Select the stage weight table that matches this job's pipeline shape."""
     has_download = bool(job.source_url)
-    llm_active = _llm_is_active(job, runtime)
+    llm_active = is_llm_active(job, runtime.settings)
     if has_download and llm_active:
         return STAGE_WEIGHTS_WITH_DOWNLOAD_AND_LLM
     if has_download:

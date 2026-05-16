@@ -84,6 +84,18 @@ def build_worker_runtime(job_id: str) -> Iterator[WorkerRuntime]:
         db.close()
 
 
+def is_llm_active(job: Job, settings: Settings) -> bool:
+    """Return whether the LLM correction stage should run for ``job``.
+
+    Two conditions must hold: the user opted in on the upload form, and the
+    deployment exposes an Ollama endpoint. Both the dispatcher (to decide
+    whether to enqueue ``run_llm_correction``) and the stage selector (to
+    pick the matching progress weight table) consult this so the two
+    decisions never drift.
+    """
+    return bool(job.llm_correction_enabled) and bool(settings.ollama_base_url)
+
+
 def make_throttled_progress_reporter(
     reporter: RedisProgressReporter,
     db: JobDatabase,
@@ -208,5 +220,6 @@ __all__ = [
     "WorkerRuntime",
     "build_worker_runtime",
     "extract_rq_timeout_seconds",
+    "is_llm_active",
     "make_throttled_progress_reporter",
 ]
