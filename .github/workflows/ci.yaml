@@ -18,7 +18,15 @@ jobs:
       - name: Unit tests
         run: uv run pytest --tb=short -q
       - name: Audit dependencies for known vulnerabilities
-        run: uv export --no-emit-project --format requirements-txt | uv tool run pip-audit -r /dev/stdin --strict
+        # --extra dev transitively pulls in the frontend and worker-llm
+        # extras (fastapi / python-docx / httpx) so audit covers the whole
+        # web tier. The worker extra's heavy ML deps (transformers /
+        # pyannote / faster-whisper) are monitored by Dependabot instead
+        # to avoid alert fatigue from upstream-unpatched CVEs.
+        #
+        # --quiet suppresses uv's progress lines so they cannot leak into
+        # stdout and confuse pip-audit's requirements parser.
+        run: uv export --no-emit-project --extra dev --format requirements-txt --quiet | uv tool run pip-audit -r /dev/stdin --strict
   integration-tests:
     runs-on: ubuntu-latest
     steps:
