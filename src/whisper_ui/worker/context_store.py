@@ -78,13 +78,10 @@ from __future__ import annotations
 import pickle
 from typing import TYPE_CHECKING, Any
 
+from whisper_ui.core.constants import PIPELINE_STATE_TTL_SECONDS
+
 if TYPE_CHECKING:
     from redis import Redis
-
-
-# One-day expiry is a safety net for abandoned contexts (worker killed before
-# the finalizer ran). Any successful pipeline will delete its own context.
-_CONTEXT_TTL_SECONDS = 86_400
 
 
 # Atomic generation-gated HSET: write the pickled fields only if the stored
@@ -155,7 +152,7 @@ class PipelineContextStore:
         if context:
             mapping = {k: pickle.dumps(v) for k, v in context.items()}
             self._redis.hset(self._key, mapping=mapping)
-        self._redis.expire(self._key, _CONTEXT_TTL_SECONDS)
+        self._redis.expire(self._key, PIPELINE_STATE_TTL_SECONDS)
 
     def load(self) -> dict[str, Any]:
         """Load the full context as a Python dict.
@@ -185,7 +182,7 @@ class PipelineContextStore:
             return
         mapping = {k: pickle.dumps(v) for k, v in updates.items()}
         self._redis.hset(self._key, mapping=mapping)
-        self._redis.expire(self._key, _CONTEXT_TTL_SECONDS)
+        self._redis.expire(self._key, PIPELINE_STATE_TTL_SECONDS)
 
     def update_if_generation_matches(
         self,
@@ -211,7 +208,7 @@ class PipelineContextStore:
             serialized_pairs.append(pickle.dumps(value))
         result = self._gated_hset_script(
             keys=[self._key, self._generation_key],
-            args=[str(expected_generation), _CONTEXT_TTL_SECONDS, *serialized_pairs],
+            args=[str(expected_generation), PIPELINE_STATE_TTL_SECONDS, *serialized_pairs],
         )
         return int(result) == 1
 
