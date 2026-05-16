@@ -1,10 +1,9 @@
 """Dispatcher that assembles a per-pipeline DAG of RQ sub-jobs.
 
-``enqueue_pipeline`` replaces the legacy single-task ``process_transcription``
-path. Instead of running every pipeline stage inside one monolithic worker
-task, it seeds the shared context in Redis and fans out one RQ sub-job per
-logical stage (or stage group). The sub-jobs are wired together via
-``depends_on`` so that:
+``enqueue_pipeline`` seeds the shared context in Redis and fans out one
+RQ sub-job per logical stage (or stage group) instead of running every
+stage inside one monolithic worker task. The sub-jobs are wired
+together via ``depends_on`` so that:
 
 * download (if any) runs before preprocess
 * transcribe_align and diarize start in parallel after preprocess
@@ -276,8 +275,8 @@ def enqueue_pipeline(
 
 def _apply_filename_from_video_title(job: Job, context: dict) -> None:
     """If the pipeline downloaded a YouTube video, surface its title as the
-    user-facing filename. Mirrors the legacy behaviour in
-    ``worker.tasks.process_transcription``.
+    user-facing filename so the UI shows the human-readable title instead
+    of the auto-generated "_" placeholder used at enqueue time.
     """
     if job.source_url and context.get("video_title"):
         job.filename = context["video_title"]
