@@ -215,15 +215,24 @@ class JobDatabase:
         self._conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
         self._conn.commit()
 
-    def list_terminal_job_ids_older_than(self, threshold_iso: str) -> list[str]:
-        """Return ids of COMPLETED / FAILED jobs whose updated_at < threshold.
+    def list_terminal_job_ids_older_than(
+        self,
+        threshold_iso: str,
+        *,
+        statuses: tuple[str, ...] = (JobStatus.COMPLETED.value,),
+    ) -> list[str]:
+        """Return ids of jobs in ``statuses`` whose updated_at < threshold.
 
-        Used by the optional retention task to find finished jobs whose
-        upload files can be reclaimed from disk. Stays a thin query so
-        retention bookkeeping does not touch any other row state.
+        Defaults to COMPLETED only because FAILED jobs are the ones a user
+        is most likely to retry — and retry currently reuses the original
+        upload path, so reclaiming a FAILED job's upload would silently
+        break the retry button. Callers that explicitly want both states
+        (e.g. an admin sweep) can opt in by passing
+        ``statuses=(JobStatus.COMPLETED.value, JobStatus.FAILED.value)``.
         """
+        placeholders = ", ".join("?" for _ in statuses)
         rows = self._conn.execute(
-            "SELECT id FROM jobs WHERE status IN (?, ?) AND updated_at < ?",
-            (JobStatus.COMPLETED.value, JobStatus.FAILED.value, threshold_iso),
+            f"SELECT id FROM jobs WHERE status IN ({placeholders}) AND updated_at < ?",
+            (*statuses, threshold_iso),
         ).fetchall()
         return [row["id"] for row in rows]

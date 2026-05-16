@@ -335,13 +335,12 @@ def test_recover_stale_jobs_concurrent_workers_dont_double_recover(tmp_path: Pat
         verify.close()
 
 
-def test_list_terminal_job_ids_older_than_filters_by_status_and_age(db: JobDatabase):
-    """Retention task must only see COMPLETED / FAILED jobs whose
-    updated_at lies strictly before the threshold."""
+def test_list_terminal_job_ids_older_than_defaults_to_completed_only(db: JobDatabase):
+    """The default retention sweep must skip FAILED jobs so the retry
+    button still works after the upload window ages out."""
     now = datetime.now(UTC)
     old_iso = (now - timedelta(days=30)).isoformat()
 
-    # Set up four jobs that span the age and status matrix.
     old_completed = Job(filename="oc.mp3", filepath="/tmp/oc.mp3", status=JobStatus.COMPLETED)
     old_failed = Job(filename="of.mp3", filepath="/tmp/of.mp3", status=JobStatus.FAILED)
     recent_completed = Job(filename="rc.mp3", filepath="/tmp/rc.mp3", status=JobStatus.COMPLETED)
@@ -349,7 +348,6 @@ def test_list_terminal_job_ids_older_than_filters_by_status_and_age(db: JobDatab
     for job in (old_completed, old_failed, recent_completed, old_processing):
         db.insert_job(job)
 
-    # Backdate the three "old" rows past the threshold.
     db._conn.execute(
         "UPDATE jobs SET updated_at = ? WHERE id IN (?, ?, ?)",
         (old_iso, old_completed.id, old_failed.id, old_processing.id),
@@ -359,7 +357,34 @@ def test_list_terminal_job_ids_older_than_filters_by_status_and_age(db: JobDatab
     threshold = (now - timedelta(days=7)).isoformat()
     expired = set(db.list_terminal_job_ids_older_than(threshold))
 
-    # Only the two terminal-status rows that are also old qualify.
+    # FAILED is preserved (retry depends on its upload); only old COMPLETED qualifies.
+    assert expired == {old_completed.id}
+
+
+def test_list_terminal_job_ids_older_than_accepts_explicit_statuses(db: JobDatabase):
+    """An admin sweep can opt into reclaiming FAILED jobs too by
+    passing an explicit statuses tuple."""
+    now = datetime.now(UTC)
+    old_iso = (now - timedelta(days=30)).isoformat()
+
+    old_completed = Job(filename="oc.mp3", filepath="/tmp/oc.mp3", status=JobStatus.COMPLETED)
+    old_failed = Job(filename="of.mp3", filepath="/tmp/of.mp3", status=JobStatus.FAILED)
+    db.insert_job(old_completed)
+    db.insert_job(old_failed)
+    db._conn.execute(
+        "UPDATE jobs SET updated_at = ? WHERE id IN (?, ?)",
+        (old_iso, old_completed.id, old_failed.id),
+    )
+    db._conn.commit()
+
+    threshold = (now - timedelta(days=7)).isoformat()
+    expired = set(
+        db.list_terminal_job_ids_older_than(
+            threshold,
+            statuses=(JobStatus.COMPLETED.value, JobStatus.FAILED.value),
+        )
+    )
+
     assert expired == {old_completed.id, old_failed.id}
 
 

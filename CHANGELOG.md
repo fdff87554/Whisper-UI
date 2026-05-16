@@ -36,9 +36,10 @@ Error` JSON body while logging the full traceback, so an
   unanticipated 500 no longer echoes file paths or partial SQL to the
   client.
 - Opt-in upload retention loop: setting `UPLOAD_RETENTION_DAYS > 0`
-  has the web app hourly reclaim the upload directory of
-  COMPLETED / FAILED jobs older than the threshold while keeping the
-  DB row and `result.json` for viewer access.
+  has the web app hourly reclaim the upload directory of COMPLETED
+  jobs older than the threshold while keeping the DB row and
+  `result.json` for viewer access. FAILED jobs are preserved so the
+  retry button keeps working.
 - `uv.lock` is now committed and consumed by both CI jobs (`uv sync
 --frozen`). Dependabot watches `uv`, GitHub Actions, and the
   Dockerfiles for upstream updates.
