@@ -6,7 +6,8 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from whisper_ui.web.deps import templates
@@ -84,6 +85,14 @@ def create_app() -> FastAPI:
     @application.get("/health")
     async def health():
         return {"status": "ok"}
+
+    @application.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        # Anything that escapes a route handler reaches here; log the full
+        # traceback for operators but never let the exception text reach the
+        # client — it can contain file paths or partially-rendered SQL.
+        logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+        return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
     return application
 
