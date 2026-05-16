@@ -23,7 +23,7 @@ src/whisper_ui/
 tests/
   unit/         # 單元測試（預設執行）
   integration/  # 端到端測試，需 ffmpeg，pytest -m integration
-docker/         # Dockerfile（GPU / CPU profile）
+docker/         # Dockerfile.worker (GPU) / Dockerfile.worker.cpu (CPU) / Dockerfile.frontend
 compose.yml / compose.dev.yml / compose.override.yml
 ```
 
@@ -165,8 +165,8 @@ compose.yml / compose.dev.yml / compose.override.yml
 
 ## 專案特殊規範
 
-- **DAG Pipeline 與 generation gating**：`src/whisper_ui/pipeline/` 採 DAG 編排併行 stage；retry 時透過 Redis 中央 generation counter 阻擋 stale write（Lua script 檢查 counter，見 `worker/progress.py` 與 `worker/pipeline.py`）。新增 stage 或修改 retry / cancel 行為時，務必走 generation 檢查路徑，避免覆寫已被取代的 attempt 的進度。
-- **Dual profile（GPU / CPU）**：`docker/Dockerfile` 與 `compose*.yml` 維護 `gpu` / `cpu` 兩個 profile；變更 worker 依賴或啟動行為時，兩個 profile 都需驗證可啟動。
+- **DAG Pipeline 與 generation gating**：`src/whisper_ui/pipeline/` 採 DAG 編排併行 stage；retry 時透過 Redis 中央 generation counter 阻擋 stale write。Gating 入口在 `worker/pipeline_dispatcher.py`（counter 管理）；Lua scripts 在 `worker/progress.py`；context store HSET / current generation lookup 在 `worker/context_store.py` / `worker/stage_tasks.py`。新增 stage 或修改 retry / cancel 行為時，務必走 generation 檢查路徑，避免覆寫已被取代的 attempt 的進度。
+- **Dual profile（GPU / CPU）**：`docker/Dockerfile.worker`（GPU）/ `docker/Dockerfile.worker.cpu`（CPU）/ `docker/Dockerfile.frontend` 與 `compose*.yml` 維護 `gpu` / `cpu` 兩個 profile；變更 worker 依賴或啟動行為時，兩個 profile 都需驗證可啟動。
 - **whisperx 安裝特例**：worker image 內 whisperx 以 `--no-deps` 安裝，以避開其 `torch~=2.8.0` 與 base image `torch 2.10.0` 衝突；whisperx 的 runtime 依賴在 `pyproject.toml` `worker` extra 手動列出。動到 torch 或 whisperx 版本時必須同步檢視 `pyproject.toml` 與 Dockerfile。
 - **可選 LLM 校正 stage**：透過 `OLLAMA_BASE_URL` env var gating；`httpx` 採 lazy import，未設定環境變數時 worker 仍可啟動。對應 extra：`worker-llm`。
 - **整合測試取捨**：`fakeredis[lua]` 取代真實 Redis，避免 CI 額外啟動服務；`pytest` `addopts = "-m 'not integration'"` 預設跳過 integration tests，整合測試明確以 `pytest -m integration` 觸發。
