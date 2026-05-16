@@ -290,6 +290,31 @@ Override either variable in `.env` if your topology differs.
 | `LLM_CHUNK_CONTEXT`      | `2`          | Neighbor segments attached as read-only context for disambiguation.                    |
 | `LLM_TEMPERATURE`        | `0.1`        | Sampling temperature. Low values keep corrections deterministic.                       |
 
+### Optional upload retention
+
+Long-running deployments accumulate per-job upload directories under
+`data/uploads/`. Set `UPLOAD_RETENTION_DAYS` to have the web app
+hourly reclaim the upload directory of any **COMPLETED** job whose
+last update is older than the threshold. FAILED jobs are intentionally
+preserved so the retry button keeps working — retry reuses the
+original upload path and would otherwise fail at the preprocess step.
+
+The DB row and the saved transcript (`data/outputs/<id>/result.json`)
+are always kept, so viewer and export routes remain functional. The
+"Download Media" button for URL jobs hides itself once the source
+media is reclaimed.
+
+```bash
+# .env
+UPLOAD_RETENTION_DAYS=30
+
+docker compose --profile gpu up -d
+```
+
+| Variable                | Default | Description                                                                                                          |
+| ----------------------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
+| `UPLOAD_RETENTION_DAYS` | `0`     | `0` disables the sweep (legacy behaviour). `>0` reclaims COMPLETED job upload dirs older than that many days hourly. |
+
 ## Local Development
 
 ```bash
