@@ -39,7 +39,9 @@ Error` JSON body while logging the full traceback, so an
   has the web app hourly reclaim the upload directory of COMPLETED
   jobs older than the threshold while keeping the DB row and
   `result.json` for viewer access. FAILED jobs are preserved so the
-  retry button keeps working.
+  retry button keeps working. The variable is wired through
+  `compose.yml`'s frontend service and documented in the README
+  "Optional upload retention" section.
 - `uv.lock` is now committed and consumed by both CI jobs (`uv sync
 --frozen`). Dependabot watches `uv`, GitHub Actions, and the
   Dockerfiles for upstream updates.
