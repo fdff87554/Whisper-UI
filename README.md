@@ -285,21 +285,26 @@ Override either variable in `.env` if your topology differs.
 ## Local Development
 
 ```bash
-# Install mise (tool manager)
+# Install mise (tool manager); also pulls uv at the pinned version
 mise install
 
-# Install Python dependencies
-pip install -e ".[dev]"
+# Install Python dependencies from uv.lock for a reproducible env
+uv sync --extra dev
 
 # Run tests
-pytest
+uv run pytest
 
 # Run linting
-ruff format . && ruff check .
+uv run ruff format . && uv run ruff check .
 
 # Start FastAPI dev server (requires Redis running)
-uvicorn whisper_ui.web.app:app --reload --reload-dir=src
+uv run uvicorn whisper_ui.web.app:app --reload --reload-dir=src
 ```
+
+> `uv.lock` is committed and is the source of truth for dependency
+> versions in CI and reproducible local installs. After editing
+> `pyproject.toml`, run `uv lock` to refresh it and commit both files
+> together.
 
 ## Tech Stack
 
