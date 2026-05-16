@@ -39,7 +39,6 @@ from whisper_ui.core.messages import PIPELINE_COMPLETE
 from whisper_ui.core.models import JobStatus
 from whisper_ui.ui.labels import JOBS_TIMEOUT_ERROR
 from whisper_ui.worker.context_store import PipelineContextStore
-from whisper_ui.worker.progress import RedisProgressReporter
 from whisper_ui.worker.runtime import (
     build_worker_runtime,
     cleanup_preprocessed_audio,
@@ -79,6 +78,7 @@ if TYPE_CHECKING:
     from whisper_ui.core.models import Job
     from whisper_ui.storage.database import JobDatabase
     from whisper_ui.storage.filestore import FileStore
+    from whisper_ui.worker.progress import RedisProgressReporter
 
 logger = logging.getLogger(__name__)
 
@@ -304,7 +304,11 @@ def finalize_success(rq_job, connection, _result) -> None:
 
     meta_generation = _extract_meta_generation(rq_job)
 
-    with build_worker_runtime(parent_job_id) as runtime:
+    # Pass meta_generation into build_worker_runtime so runtime.reporter's
+    # terminal writes (complete / fail) are gated by the Lua scripts even
+    # if the Python short-circuit below is somehow bypassed — defense in
+    # depth.
+    with build_worker_runtime(parent_job_id, generation=meta_generation) as runtime:
         if _is_stale_callback(runtime.redis, parent_job_id, meta_generation):
             logger.warning(
                 "finalize_success dropped for job %s: stale callback from generation %s "
@@ -321,11 +325,7 @@ def finalize_success(rq_job, connection, _result) -> None:
 
         ctx_store = PipelineContextStore(runtime.redis, parent_job_id)
         context = ctx_store.load()
-
-        # Build a generation-aware reporter so terminal writes (complete /
-        # fail) are gated by the Lua scripts even if the Python short-
-        # circuit above is somehow bypassed — defense in depth.
-        reporter = _build_generation_aware_reporter(runtime, parent_job_id, meta_generation)
+        reporter = runtime.reporter
 
         transcript_result = context.get("transcript_result")
         if transcript_result is None:
@@ -354,25 +354,6 @@ def finalize_success(rq_job, connection, _result) -> None:
             ctx_store.delete()
             if meta_generation is not None:
                 _clear_subjob_set(runtime.redis, parent_job_id, meta_generation)
-
-
-def _build_generation_aware_reporter(runtime, parent_job_id: str, generation: int | None) -> RedisProgressReporter:
-    """Build a reporter that stamps its terminal writes with ``generation``.
-
-    The finalize callbacks use this to make sure a stale attempt-1
-    ``reporter.complete()`` or ``reporter.fail()`` — which would otherwise
-    race past the Python short-circuit via a partial corruption of the
-    progress hash — is dropped by the Lua scripts server-side. When the
-    caller has no generation (legacy path, fabricated MagicMock RQ
-    job), the reporter falls back to legacy semantics so existing tests
-    and the monolithic worker path stay bit-for-bit compatible.
-    """
-    return RedisProgressReporter(
-        runtime.redis,
-        parent_job_id,
-        processing_ttl=runtime.settings.redis_processing_expiry,
-        generation=generation,
-    )
 
 
 def _extract_meta_generation(rq_job) -> int | None:
@@ -460,7 +441,10 @@ def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> No
     meta_generation = _extract_meta_generation(rq_job)
     error_msg = _format_failure_message(_exc_type, exc_value)
 
-    with build_worker_runtime(parent_job_id) as runtime:
+    # Pass meta_generation into build_worker_runtime so runtime.reporter is
+    # gated by the Lua fail script even if the Python short-circuit below
+    # is bypassed — same defense-in-depth as finalize_success.
+    with build_worker_runtime(parent_job_id, generation=meta_generation) as runtime:
         if _is_stale_callback(runtime.redis, parent_job_id, meta_generation):
             logger.warning(
                 "finalize_failure dropped for job %s: stale callback from generation %s "
@@ -484,12 +468,7 @@ def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> No
 
         ctx_store = PipelineContextStore(runtime.redis, parent_job_id)
         context = ctx_store.load()
-
-        # Build a generation-aware reporter for the same defense-in-depth
-        # reason as finalize_success: even if the Python short-circuit
-        # above is bypassed by a pathological call, the Lua fail script
-        # still refuses to overwrite a newer attempt's hash.
-        reporter = _build_generation_aware_reporter(runtime, parent_job_id, meta_generation)
+        reporter = runtime.reporter
 
         try:
             if meta_generation is not None:
