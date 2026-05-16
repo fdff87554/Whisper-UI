@@ -130,14 +130,35 @@ return 1
 """
 
 
+# Shared snippet for terminal writes: drop the write (return 0 from the
+# enclosing script) if the caller's generation is strictly behind either
+# the central counter or the hash-embedded generation. Inlined into both
+# terminal scripts via f-string interpolation so the two callers cannot
+# drift on the gating logic — PR #39 Round 4 shipped that drift once.
+_LUA_TERMINAL_GENERATION_GATE = """
+local central_gen_raw = redis.call('GET', KEYS[2])
+if central_gen_raw then
+  local central_gen = tonumber(central_gen_raw)
+  if central_gen and caller_gen < central_gen then
+    return 0
+  end
+end
+local stored_gen_raw = redis.call('HGET', key, 'generation')
+if stored_gen_raw then
+  local stored_gen = tonumber(stored_gen_raw)
+  if stored_gen and caller_gen < stored_gen then
+    return 0
+  end
+end
+"""
+
+
 # Atomic generation-aware terminal write for complete().
 #
-# Mirrors the max-write script's generation logic but writes the
-# terminal "completed" hash contents when the generation check passes.
 # Terminal writes are unconditional within the caller's generation: a
 # stage that believes the pipeline is done owns the hash regardless of
 # what progress value was previously stored.
-_PROGRESS_COMPLETE_LUA = """
+_PROGRESS_COMPLETE_LUA = f"""
 local key = KEYS[1]
 local result_path = ARGV[1]
 local pipeline_complete_msg = ARGV[2]
@@ -145,20 +166,7 @@ local ttl = tonumber(ARGV[3])
 local caller_gen = tonumber(ARGV[4])
 
 if caller_gen >= 0 then
-  local central_gen_raw = redis.call('GET', KEYS[2])
-  if central_gen_raw then
-    local central_gen = tonumber(central_gen_raw)
-    if central_gen and caller_gen < central_gen then
-      return 0
-    end
-  end
-  local stored_gen_raw = redis.call('HGET', key, 'generation')
-  if stored_gen_raw then
-    local stored_gen = tonumber(stored_gen_raw)
-    if stored_gen and caller_gen < stored_gen then
-      return 0
-    end
-  end
+  {_LUA_TERMINAL_GENERATION_GATE}
 end
 
 redis.call('HSET', key,
@@ -175,7 +183,7 @@ return 1
 
 
 # Atomic generation-aware terminal write for fail().
-_PROGRESS_FAIL_LUA = """
+_PROGRESS_FAIL_LUA = f"""
 local key = KEYS[1]
 local message = ARGV[1]
 local error_text = ARGV[2]
@@ -183,20 +191,7 @@ local ttl = tonumber(ARGV[3])
 local caller_gen = tonumber(ARGV[4])
 
 if caller_gen >= 0 then
-  local central_gen_raw = redis.call('GET', KEYS[2])
-  if central_gen_raw then
-    local central_gen = tonumber(central_gen_raw)
-    if central_gen and caller_gen < central_gen then
-      return 0
-    end
-  end
-  local stored_gen_raw = redis.call('HGET', key, 'generation')
-  if stored_gen_raw then
-    local stored_gen = tonumber(stored_gen_raw)
-    if stored_gen and caller_gen < stored_gen then
-      return 0
-    end
-  end
+  {_LUA_TERMINAL_GENERATION_GATE}
 end
 
 redis.call('HSET', key,
