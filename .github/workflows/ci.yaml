@@ -17,6 +17,8 @@ jobs:
         uses: pre-commit/action@v3.0.1
       - name: Unit tests
         run: uv run pytest --tb=short -q
+      - name: Audit dependencies for known vulnerabilities
+        run: uv export --no-emit-project --format requirements-txt | uv tool run pip-audit -r /dev/stdin --strict
   integration-tests:
     runs-on: ubuntu-latest
     steps:
