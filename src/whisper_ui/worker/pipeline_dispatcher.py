@@ -41,7 +41,7 @@ from whisper_ui.core.models import JobStatus
 from whisper_ui.ui.labels import JOBS_TIMEOUT_ERROR
 from whisper_ui.worker.context_store import PipelineContextStore
 from whisper_ui.worker.progress import RedisProgressReporter
-from whisper_ui.worker.runtime import build_worker_runtime, extract_rq_timeout_seconds
+from whisper_ui.worker.runtime import build_worker_runtime, extract_rq_timeout_seconds, is_llm_active
 from whisper_ui.worker.stage_tasks import (
     run_assign_speakers,
     run_diarize,
@@ -208,7 +208,7 @@ def enqueue_pipeline(
     # can gate their writes against stale retries).
     meta = {"parent_job_id": job.id, "generation": generation}
 
-    llm_active = bool(job.llm_correction_enabled) and bool(settings.ollama_base_url)
+    llm_active = is_llm_active(job, settings)
 
     enqueued: list[RQJob] = []
 
