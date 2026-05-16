@@ -44,6 +44,12 @@ class Settings(BaseSettings):
 
     # Upload
     max_upload_size: int = 2 * 1024 * 1024 * 1024  # 2 GB
+    # Optional retention: when > 0, the web app's background loop reclaims
+    # the upload directory of any COMPLETED / FAILED job whose updated_at
+    # is older than this many days. The DB row and the saved transcript
+    # (result.json) are kept so the viewer keeps working. Default 0 means
+    # never auto-reclaim — the legacy behaviour.
+    upload_retention_days: int = 0
 
     # YouTube
     youtube_max_duration: int = 14400  # seconds (4 hours)

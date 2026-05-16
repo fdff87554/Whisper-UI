@@ -214,3 +214,16 @@ class JobDatabase:
     def delete_job(self, job_id: str) -> None:
         self._conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
         self._conn.commit()
+
+    def list_terminal_job_ids_older_than(self, threshold_iso: str) -> list[str]:
+        """Return ids of COMPLETED / FAILED jobs whose updated_at < threshold.
+
+        Used by the optional retention task to find finished jobs whose
+        upload files can be reclaimed from disk. Stays a thin query so
+        retention bookkeeping does not touch any other row state.
+        """
+        rows = self._conn.execute(
+            "SELECT id FROM jobs WHERE status IN (?, ?) AND updated_at < ?",
+            (JobStatus.COMPLETED.value, JobStatus.FAILED.value, threshold_iso),
+        ).fetchall()
+        return [row["id"] for row in rows]
