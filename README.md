@@ -72,6 +72,12 @@ docker compose --profile cpu up -d
 
 Open <http://localhost:8080> in your browser.
 
+> **Production note:** the bundled Redis starts without authentication
+> when `REDIS_PASSWORD` is unset (the compose snippet only adds
+> `--requirepass` when the variable is non-empty). For any deployment
+> reachable beyond the local Docker network — even on a trusted LAN —
+> set `REDIS_PASSWORD` in `.env` before bringing the stack up.
+
 ### Pre-built Images
 
 Pre-built Docker images are published to GHCR on each release.
