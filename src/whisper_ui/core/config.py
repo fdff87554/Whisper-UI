@@ -10,10 +10,16 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
+    # extra="ignore" because the same .env feeds both Settings (read by the
+    # FastAPI process) and the worker entrypoint shell, which reads its own
+    # WORKER_GPU_QUEUES / WORKER_IO_QUEUES variables that are not Settings
+    # fields. Forbidding extras would refuse to start the web tier whenever
+    # an operator follows the README's "scaled topology" tuning.
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     # Redis
