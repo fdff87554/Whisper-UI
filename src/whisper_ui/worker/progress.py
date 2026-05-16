@@ -221,9 +221,9 @@ class RedisProgressReporter:
     its writes dropped server-side and cannot corrupt the new attempt's
     progress hash. When left as ``None`` the scripts fall back to legacy
     semantics (max-write for report, unconditional replace for
-    complete/fail) — this keeps the pre-Round-2 behaviour for the
-    legacy ``worker.tasks.process_transcription`` path and for any
-    caller that does not yet know which attempt it belongs to.
+    complete/fail) — this remains the documented escape hatch for unit
+    tests that fabricate a reporter outside an RQ worker context and
+    therefore have no generation to stamp.
     """
 
     def __init__(

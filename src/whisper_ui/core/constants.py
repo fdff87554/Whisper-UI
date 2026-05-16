@@ -64,8 +64,9 @@ PIPELINE_STATE_TTL_SECONDS = 86_400  # 24 hours
 #   whisper:io  -> network / disk IO (download, preprocess, llm_correction)
 #   whisper:gpu -> GPU inference (transcribe_align, diarize)
 #   whisper:cpu -> lightweight CPU finalisation (assign_speakers, postprocess)
-# The default queue is kept for backwards-compatibility with in-flight jobs
-# enqueued by the legacy process_transcription path before the upgrade.
+# The default queue stays listed because worker startup scripts include it in
+# their queue list so an operator can drop ad-hoc maintenance jobs on every
+# worker without learning the resource-class names.
 WORKER_QUEUE_IO = "whisper:io"
 WORKER_QUEUE_GPU = "whisper:gpu"
 WORKER_QUEUE_CPU = "whisper:cpu"

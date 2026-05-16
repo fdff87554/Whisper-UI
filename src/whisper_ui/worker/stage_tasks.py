@@ -76,22 +76,19 @@ def _load_job(runtime: WorkerRuntime, parent_job_id: str) -> Job:
 def _mark_processing_if_queued(runtime: WorkerRuntime, job: Job) -> None:
     """Flip the parent job from QUEUED to PROCESSING on first stage entry.
 
-    The legacy monolithic worker task set PROCESSING at the very top of
-    ``process_transcription``. In the DAG path, multiple sub-jobs can be the
-    "first" one to actually run (e.g. transcribe_align and diarize start in
-    parallel after preprocess), so every stage task idempotently promotes
-    the job when it observes QUEUED. The SQLite write path serialises
-    concurrent writers via WAL mode + busy_timeout, so two parallel branches
-    flipping simultaneously converge on the same PROCESSING state without
-    corrupting the row.
+    Multiple sub-jobs can be the "first" one to actually run (e.g.
+    transcribe_align and diarize start in parallel after preprocess), so
+    every stage task idempotently promotes the job when it observes
+    QUEUED. The SQLite write path serialises concurrent writers via WAL
+    mode + busy_timeout, so two parallel branches flipping simultaneously
+    converge on the same PROCESSING state without corrupting the row.
 
-    This guards three downstream behaviours that depend on the
+    This guards two downstream behaviours that depend on the
     QUEUED → PROCESSING transition:
 
-    - ``recover_stale_jobs`` only scans status = 'processing'; without this
-      flip a crashed DAG leaves the parent stuck in QUEUED forever.
+    - ``recover_stale_jobs`` only scans status = 'processing'; without
+      this flip a crashed DAG leaves the parent stuck in QUEUED forever.
     - Dashboard polling speed and status badges branch on PROCESSING.
-    - Legacy tests asserting a running job's status expect PROCESSING.
     """
     if job.status == JobStatus.QUEUED:
         job.status = JobStatus.PROCESSING
