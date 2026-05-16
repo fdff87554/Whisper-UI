@@ -6,11 +6,30 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from whisper_ui.web.deps import templates
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Defense-in-depth headers for the internal-network deployment.
+
+    No CSP because the templates load htmx and Alpine.js from jsDelivr;
+    crafting a working source list belongs in a separate deployment-time
+    pass. No HSTS because TLS is expected to be terminated by an
+    upstream reverse proxy that owns the TLS-related headers.
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        return response
+
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +81,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     application = FastAPI(title="Whisper UI", lifespan=lifespan)
+    application.add_middleware(SecurityHeadersMiddleware)
 
     application.mount("/static", StaticFiles(directory=_WEB_DIR / "static"), name="static")
 
