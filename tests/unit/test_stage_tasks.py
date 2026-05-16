@@ -129,7 +129,7 @@ def _install_fake_runtime(monkeypatch, fake_redis, job: Job) -> WorkerRuntime:
     from contextlib import contextmanager
 
     @contextmanager
-    def _fake_builder(job_id):
+    def _fake_builder(job_id, *, generation=None):
         yield runtime
 
     monkeypatch.setattr("whisper_ui.worker.stage_tasks.build_worker_runtime", _fake_builder)
@@ -255,7 +255,7 @@ def test_run_diarize_raises_pipeline_error_when_job_missing(monkeypatch):
     from contextlib import contextmanager
 
     @contextmanager
-    def _fake_builder(job_id):
+    def _fake_builder(job_id, *, generation=None):
         yield runtime
 
     monkeypatch.setattr("whisper_ui.worker.stage_tasks.build_worker_runtime", _fake_builder)

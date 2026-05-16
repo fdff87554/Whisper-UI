@@ -58,11 +58,17 @@ class WorkerRuntime:
 
 
 @contextmanager
-def build_worker_runtime(job_id: str) -> Iterator[WorkerRuntime]:
+def build_worker_runtime(job_id: str, *, generation: int | None = None) -> Iterator[WorkerRuntime]:
     """Open the shared worker resources tied to a single job execution.
 
     The same ``job_id`` is used as the Redis progress key so all sub-tasks
     belonging to the same parent job converge onto a single progress hash.
+
+    ``generation`` is stamped onto the bundled ``reporter``; pass the RQ
+    job's meta generation so progress writes from a superseded retry get
+    rejected by the Lua gating script. Leave it None when invoked outside
+    an RQ worker (unit tests or one-off scripts) to preserve the legacy
+    unconditional-write semantics.
     """
     settings = get_settings()
     redis = Redis.from_url(settings.redis_url)
@@ -70,6 +76,7 @@ def build_worker_runtime(job_id: str) -> Iterator[WorkerRuntime]:
         redis,
         job_id,
         processing_ttl=settings.redis_processing_expiry,
+        generation=generation,
     )
     db = JobDatabase(settings.database_path)
     filestore = FileStore(settings.upload_dir, settings.output_dir)

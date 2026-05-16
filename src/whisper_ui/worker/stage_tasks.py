@@ -37,7 +37,6 @@ from whisper_ui.pipeline.progress_bands import (
 )
 from whisper_ui.pipeline.transcribe import TranscribeStage
 from whisper_ui.worker.context_store import PipelineContextStore
-from whisper_ui.worker.progress import RedisProgressReporter
 from whisper_ui.worker.runtime import (
     WorkerRuntime,
     build_worker_runtime,
@@ -165,28 +164,6 @@ def _current_generation() -> int | None:
         return None
 
 
-def _build_generation_aware_reporter(runtime: WorkerRuntime, parent_job_id: str) -> RedisProgressReporter:
-    """Build a ``RedisProgressReporter`` that stamps its writes with the
-    current RQ job's generation.
-
-    This closes the Round 2 R2-2 race where a stale attempt-1 writer
-    could pin the progress hash at its old high-water mark after the
-    user retried: a fresh reporter for attempt 2 carries a higher
-    generation, and the Lua script's reset branch unconditionally
-    overwrites the hash on its first call. The runtime's default
-    ``runtime.reporter`` stays generation-less so the legacy
-    ``worker.tasks.process_transcription`` path keeps its original
-    semantics — only the DAG stage task path is upgraded.
-    """
-    generation = _current_generation()
-    return RedisProgressReporter(
-        runtime.redis,
-        parent_job_id,
-        processing_ttl=runtime.settings.redis_processing_expiry,
-        generation=generation,
-    )
-
-
 def _persist_outputs(
     ctx_store: PipelineContextStore,
     updated: dict[str, Any],
@@ -235,7 +212,7 @@ def _run_single_stage(
     the live ``Job`` record (e.g. download preparing ``download_dir``) do so
     without duplicating the runtime setup.
     """
-    with build_worker_runtime(parent_job_id) as runtime:
+    with build_worker_runtime(parent_job_id, generation=_current_generation()) as runtime:
         job = _load_job(runtime, parent_job_id)
         _mark_processing_if_queued(runtime, job)
         ctx_store = PipelineContextStore(runtime.redis, parent_job_id)
@@ -245,8 +222,7 @@ def _run_single_stage(
             pre_context_update(job, runtime, context)
 
         stage = build_stage(job, runtime)
-        reporter = _build_generation_aware_reporter(runtime, parent_job_id)
-        throttled = make_throttled_progress_reporter(reporter, runtime.db, job)
+        throttled = make_throttled_progress_reporter(runtime.reporter, runtime.db, job)
         weights = pick_stage_weights(job, runtime)
         band = weights.get(stage_name, (0.0, 1.0))
         on_progress = _banded_progress(throttled, band)
@@ -315,14 +291,13 @@ def run_transcribe_align(parent_job_id: str) -> str:
     RQ tasks. The global progress bar still advances through the ``transcribe``
     and ``align`` bands independently.
     """
-    with build_worker_runtime(parent_job_id) as runtime:
+    with build_worker_runtime(parent_job_id, generation=_current_generation()) as runtime:
         job = _load_job(runtime, parent_job_id)
         _mark_processing_if_queued(runtime, job)
         ctx_store = PipelineContextStore(runtime.redis, parent_job_id)
         context = ctx_store.load()
 
-        reporter = _build_generation_aware_reporter(runtime, parent_job_id)
-        throttled = make_throttled_progress_reporter(reporter, runtime.db, job)
+        throttled = make_throttled_progress_reporter(runtime.reporter, runtime.db, job)
         weights = pick_stage_weights(job, runtime)
 
         transcribe = TranscribeStage(
