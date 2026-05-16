@@ -37,6 +37,16 @@ _WEB_DIR = Path(__file__).parent
 
 
 _UPLOAD_RETENTION_CHECK_INTERVAL = 3600  # once per hour is enough for a daily-grained policy
+# Cap how many uploads a single sweep tear down so the offloaded thread
+# never sits on the executor for an absurd duration after, say, a long
+# outage left thousands of expired COMPLETED jobs piled up. 200/hour =
+# 4800/day, which already comfortably exceeds any plausible deployment.
+_UPLOAD_RETENTION_BATCH_LIMIT = 200
+
+
+def _reclaim_upload_batch(filestore, job_ids: list[str]) -> int:
+    """Sync helper: delete upload dirs and return the count that actually existed."""
+    return sum(1 for jid in job_ids if filestore.delete_upload_files(jid))
 
 
 @asynccontextmanager
@@ -75,13 +85,20 @@ async def lifespan(app: FastAPI):
     async def _upload_retention_sweep():
         # Sleep once before the first sweep so a freshly restarted instance
         # is not immediately deleting files while operators are still
-        # poking at the dashboard.
+        # poking at the dashboard. Both the SQLite query and the
+        # shutil.rmtree per reclaimed job are sync I/O — offload them to
+        # asyncio.to_thread so a large sweep cannot stall the FastAPI
+        # event loop.
         while True:
             await asyncio.sleep(_UPLOAD_RETENTION_CHECK_INTERVAL)
             try:
                 threshold = datetime.now(UTC) - timedelta(days=settings.upload_retention_days)
-                ids = app.state.db.list_terminal_job_ids_older_than(threshold.isoformat())
-                removed = sum(1 for jid in ids if app.state.filestore.delete_upload_files(jid))
+                ids = await asyncio.to_thread(
+                    app.state.db.list_terminal_job_ids_older_than,
+                    threshold.isoformat(),
+                )
+                batch = ids[:_UPLOAD_RETENTION_BATCH_LIMIT]
+                removed = await asyncio.to_thread(_reclaim_upload_batch, app.state.filestore, batch)
                 if removed:
                     logger.info(
                         "Upload retention sweep reclaimed %d job upload dirs older than %d days",

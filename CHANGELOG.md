@@ -76,6 +76,10 @@ Error` JSON body while logging the full traceback, so an
 - Settings now uses `extra="ignore"` so worker-only env vars
   (`WORKER_GPU_QUEUES`, `WORKER_IO_QUEUES`) coming from the same
   `.env` no longer block the web tier from starting.
+- The upload-retention sweep now offloads its SQLite query and
+  per-job `shutil.rmtree` calls through `asyncio.to_thread` and caps
+  each pass at 200 jobs, so a long-deferred sweep cannot stall the
+  FastAPI event loop or starve incoming requests.
 - README now points at `uv sync --extra dev` / `uv run` for local
   development and warns that production deployments must set
   `REDIS_PASSWORD`. The quick-start URL was corrected to match the
