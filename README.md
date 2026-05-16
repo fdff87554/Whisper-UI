@@ -168,12 +168,20 @@ docker compose --profile gpu up -d --scale worker-gpu=2
 # Or run named services and set WORKER_GPU_DEVICE_ID per container.
 ```
 
-**Upgrading from the monolithic path.** Any jobs already enqueued under
-the legacy `process_transcription` entry point keep working — the
-default queue set on every worker still includes `default`, and the old
-monolithic function still exists in `whisper_ui.worker.tasks` for
-backwards compatibility. Drain in-flight jobs (or simply wait them out)
-before narrowing `WORKER_*_QUEUES` on a scaled topology.
+**Upgrading from v1.x to v2.0 (BREAKING).** The legacy single-task
+`process_transcription` entry point has been removed in v2.0. Any RQ
+sub-jobs enqueued under it from a v1.x worker will fail import when a
+v2.0 worker picks them up. To upgrade:
+
+1. Stop accepting new uploads (e.g. take the frontend offline) or wait
+   for the dashboard to show no active jobs.
+2. Let the existing workers drain whatever is in flight.
+3. Pull the v2.0 images and `docker compose --profile gpu up -d`.
+
+If a queue is non-empty when the worker is upgraded, drop the queues
+manually before restart: `redis-cli -n 0 FLUSHDB` against the
+`REDIS_URL` Redis only clears RQ state (uploads, the SQLite DB, and
+saved transcripts are untouched).
 
 ### Queue / Timeout tuning (advanced)
 
