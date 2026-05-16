@@ -46,7 +46,11 @@ Error` JSON body while logging the full traceback, so an
 --frozen`). Dependabot watches `uv`, GitHub Actions, and the
   Dockerfiles for upstream updates.
 - CI gained a dedicated integration-tests job (installs ffmpeg) and a
-  `pip-audit` step against the locked requirements.
+  `pip-audit` step against the locked requirements. The audit scans
+  the dev extra (which transitively pulls in `frontend` + `worker-llm`,
+  covering fastapi / python-docx / httpx); the heavy worker ML extras
+  are monitored by Dependabot instead to avoid persistent alerts from
+  upstream-unpatched CVEs.
 
 ### Changed
 
