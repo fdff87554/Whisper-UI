@@ -132,7 +132,7 @@ def _fake_runtime_factory(fake_redis, fake_settings, db, filestore):
     )
 
     @contextlib.contextmanager
-    def _builder(job_id):
+    def _builder(job_id, *, generation=None):
         yield runtime
 
     yield runtime, _builder
