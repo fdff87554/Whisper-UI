@@ -23,12 +23,8 @@ import logging
 from typing import TYPE_CHECKING
 
 from rq import Callback, Queue
-from rq.command import send_stop_job_command
-from rq.timeouts import BaseTimeoutException
 
 from whisper_ui.core.constants import (
-    ERROR_DISPLAY_LENGTH,
-    ERROR_MAX_LENGTH,
     PIPELINE_STATE_TTL_SECONDS,
     WORKER_QUEUE_CPU,
     WORKER_QUEUE_GPU,
@@ -36,12 +32,17 @@ from whisper_ui.core.constants import (
 )
 from whisper_ui.core.messages import PIPELINE_COMPLETE
 from whisper_ui.core.models import JobStatus
-from whisper_ui.ui.labels import JOBS_TIMEOUT_ERROR
 from whisper_ui.worker.context_store import PipelineContextStore
+from whisper_ui.worker.pipeline_callbacks import (
+    cancel_remaining_subjobs,
+    extract_meta_generation,
+    format_failure_message,
+    is_stale_callback,
+    mark_failed,
+)
 from whisper_ui.worker.runtime import (
     build_worker_runtime,
     cleanup_preprocessed_audio,
-    extract_rq_timeout_seconds,
     is_llm_active,
 )
 from whisper_ui.worker.stage_tasks import (
@@ -75,9 +76,7 @@ if TYPE_CHECKING:
 
     from whisper_ui.core.config import Settings
     from whisper_ui.core.models import Job
-    from whisper_ui.storage.database import JobDatabase
     from whisper_ui.storage.filestore import FileStore
-    from whisper_ui.worker.progress import RedisProgressReporter
 
 logger = logging.getLogger(__name__)
 
@@ -301,14 +300,14 @@ def finalize_success(rq_job, connection, _result) -> None:
         logger.error("finalize_success invoked without parent_job_id in meta")
         return
 
-    meta_generation = _extract_meta_generation(rq_job)
+    meta_generation = extract_meta_generation(rq_job)
 
     # Pass meta_generation into build_worker_runtime so runtime.reporter's
     # terminal writes (complete / fail) are gated by the Lua scripts even
     # if the Python short-circuit below is somehow bypassed — defense in
     # depth.
     with build_worker_runtime(parent_job_id, generation=meta_generation) as runtime:
-        if _is_stale_callback(runtime.redis, parent_job_id, meta_generation):
+        if is_stale_callback(_current_generation(runtime.redis, parent_job_id), meta_generation):
             logger.warning(
                 "finalize_success dropped for job %s: stale callback from generation %s "
                 "(current generation has moved on)",
@@ -329,7 +328,7 @@ def finalize_success(rq_job, connection, _result) -> None:
         transcript_result = context.get("transcript_result")
         if transcript_result is None:
             logger.error("finalize_success for job %s: no transcript_result in context", parent_job_id)
-            _mark_failed(job, runtime.db, reporter, "transcript_result missing")
+            mark_failed(job, runtime.db, reporter, "transcript_result missing")
             ctx_store.delete()
             if meta_generation is not None:
                 _clear_subjob_set(runtime.redis, parent_job_id, meta_generation)
@@ -355,67 +354,6 @@ def finalize_success(rq_job, connection, _result) -> None:
                 _clear_subjob_set(runtime.redis, parent_job_id, meta_generation)
 
 
-def _extract_meta_generation(rq_job) -> int | None:
-    """Pull the generation id a sub-job was enqueued under out of its RQ meta.
-
-    Sub-jobs from the legacy monolithic path (or tests that fabricate a
-    MagicMock RQ job) may not carry this field at all — treat that as
-    "no generation tracked" so the finalize callbacks fall through to
-    their original behaviour and we do not regress the legacy path.
-    """
-    if rq_job is None or not getattr(rq_job, "meta", None):
-        return None
-    raw = rq_job.meta.get("generation")
-    if raw is None:
-        return None
-    try:
-        return int(raw)
-    except (TypeError, ValueError):
-        return None
-
-
-def _is_stale_callback(redis: Redis, parent_job_id: str, meta_generation: int | None) -> bool:
-    """Return True when a finalize callback's meta generation has been
-    superseded by a retry that bumped the parent generation counter.
-
-    Degrades gracefully when either generation is unknown: if the meta
-    has no generation (legacy / fabricated job) or the Redis counter is
-    missing, we treat the callback as still valid so legacy code paths
-    and tests that don't set up the full retry machinery keep working.
-    Only a strictly-older meta generation than the current counter
-    triggers the stale short-circuit.
-    """
-    if meta_generation is None:
-        return False
-    current = _current_generation(redis, parent_job_id)
-    if current is None:
-        return False
-    return meta_generation < current
-
-
-def _format_failure_message(exc_type, exc_value) -> str:
-    """Turn an RQ ``on_failure`` exception triple into the user-facing error.
-
-    RQ timeouts get routed through the same ``JOBS_TIMEOUT_ERROR`` label the
-    legacy monolithic worker used (see ``worker/tasks.py``) so the UI shows
-    the Chinese "任務總執行時間超出上限" message regardless of whether the
-    pipeline ran in the DAG or legacy path. Any other exception falls back
-    to ``str(exc_value)``, matching the pre-DAG behaviour for non-timeout
-    failures.
-
-    RQ passes the exception *class* as ``exc_type`` (not an instance), so the
-    type check must use ``issubclass``. ``exc_value`` is still the instance
-    and is passed through to ``extract_rq_timeout_seconds`` for message-regex
-    parsing when the current-job lookup is unavailable.
-    """
-    if exc_type is not None and isinstance(exc_type, type) and issubclass(exc_type, BaseTimeoutException):
-        seconds = extract_rq_timeout_seconds(exc_value) if exc_value is not None else "?"
-        return JOBS_TIMEOUT_ERROR.format(seconds=seconds)
-    if exc_value is not None:
-        return str(exc_value)
-    return "unknown pipeline failure"
-
-
 def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> None:
     """RQ ``on_failure`` callback attached to every sub-job.
 
@@ -437,14 +375,14 @@ def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> No
         logger.error("finalize_failure invoked without parent_job_id in meta")
         return
 
-    meta_generation = _extract_meta_generation(rq_job)
-    error_msg = _format_failure_message(_exc_type, exc_value)
+    meta_generation = extract_meta_generation(rq_job)
+    error_msg = format_failure_message(_exc_type, exc_value)
 
     # Pass meta_generation into build_worker_runtime so runtime.reporter is
     # gated by the Lua fail script even if the Python short-circuit below
     # is bypassed — same defense-in-depth as finalize_success.
     with build_worker_runtime(parent_job_id, generation=meta_generation) as runtime:
-        if _is_stale_callback(runtime.redis, parent_job_id, meta_generation):
+        if is_stale_callback(_current_generation(runtime.redis, parent_job_id), meta_generation):
             logger.warning(
                 "finalize_failure dropped for job %s: stale callback from generation %s "
                 "(current generation has moved on)",
@@ -471,101 +409,17 @@ def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> No
 
         try:
             if meta_generation is not None:
-                _cancel_remaining_subjobs(
+                cancel_remaining_subjobs(
                     runtime.redis,
-                    parent_job_id,
-                    generation=meta_generation,
+                    _load_subjob_ids(runtime.redis, parent_job_id, meta_generation),
                     exclude=rq_job.id,
                 )
-            _mark_failed(job, runtime.db, reporter, error_msg)
+            mark_failed(job, runtime.db, reporter, error_msg)
         finally:
             cleanup_preprocessed_audio(context)
             ctx_store.delete()
             if meta_generation is not None:
                 _clear_subjob_set(runtime.redis, parent_job_id, meta_generation)
-
-
-def _mark_failed(
-    job: Job,
-    db: JobDatabase,
-    reporter: RedisProgressReporter,
-    error_msg: str,
-) -> None:
-    job.status = JobStatus.FAILED
-    job.error = error_msg[:ERROR_MAX_LENGTH]
-    job.progress_message = f"Failed: {error_msg[:ERROR_DISPLAY_LENGTH]}"
-    db.update_job(job)
-    reporter.fail(error_msg)
-
-
-def _cancel_remaining_subjobs(
-    redis: Redis,
-    parent_job_id: str,
-    *,
-    generation: int,
-    exclude: str,
-) -> None:
-    """Stop every sub-job belonging to the same parent *and same
-    generation*, except the one that just failed (``exclude``).
-
-    Scoping by generation is what prevents a stale attempt-1 callback
-    from cancelling attempt 2's live sub-jobs. ``_load_subjob_ids`` only
-    returns sub-jobs that were enqueued under this exact generation; a
-    retry opens a fresh set under a new generation that stale callbacks
-    cannot see.
-
-    This has to handle two distinct states for each sibling:
-
-    1. **Already running.** ``RQJob.cancel()`` alone does *not* stop a
-       running job — it only removes pending / deferred ones from the
-       queue. For running jobs we fire ``send_stop_job_command`` first,
-       which RQ delivers via a Redis pub/sub channel to the owning
-       worker; the worker then raises a stop exception inside the job
-       process at the next safe point. (See PR #39 review R3: without
-       this, the diarize branch could keep running after transcribe
-       failed and eventually write its result into the Redis context
-       store, polluting a subsequent retry.)
-    2. **Still queued / deferred.** ``send_stop_job_command`` is a no-op
-       for jobs that have not started, so we follow it with ``cancel()``
-       to evict them from the queue registry. Downstream dependent jobs
-       (e.g. assign_speakers waiting on transcribe_align + diarize)
-       would otherwise sit in the deferred registry forever.
-
-    Both calls are best-effort: any failure only debug-logs and the
-    loop keeps going so one stuck sibling cannot block the others.
-
-    Note that even after ``send_stop_job_command`` lands, a worker
-    already inside a native extension call (pyannote / whisperx C++
-    inference) can take a bounded amount of time to actually exit. That
-    residual window is closed by the generation-id gating in the next
-    commit — this layer is the fast-path that minimizes wasted GPU time.
-    """
-    from rq.job import Job as RQJob
-
-    for sub_id in _load_subjob_ids(redis, parent_job_id, generation):
-        if sub_id == exclude:
-            continue
-        # Layer 1a: stop if currently running. Fire-and-forget — the stop
-        # command is delivered over Redis pub/sub, so we cannot
-        # synchronously confirm it took effect.
-        try:
-            send_stop_job_command(redis, sub_id)
-        except Exception:
-            logger.debug(
-                "send_stop_job_command for %s failed (likely not currently running)",
-                sub_id,
-                exc_info=True,
-            )
-        # Layer 1b: cancel queued / deferred siblings so the queue drains.
-        try:
-            sub = RQJob.fetch(sub_id, connection=redis)
-        except Exception:
-            logger.debug("sub-job %s no longer exists, skipping cancel", sub_id)
-            continue
-        try:
-            sub.cancel()
-        except Exception:
-            logger.warning("failed to cancel sub-job %s", sub_id, exc_info=True)
 
 
 __all__ = [

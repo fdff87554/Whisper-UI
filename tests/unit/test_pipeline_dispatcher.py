@@ -588,7 +588,9 @@ def test_cancel_remaining_subjobs_sends_stop_command_to_running_siblings(monkeyp
 
     monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
 
-    with patch.object(pd, "send_stop_job_command") as mock_stop:
+    from whisper_ui.worker import pipeline_callbacks as pc
+
+    with patch.object(pc, "send_stop_job_command") as mock_stop:
         # Leave failing.meta alone — enqueue_pipeline already set the
         # parent_job_id + generation that the callback needs to pass the
         # staleness check for this test's own attempt.
