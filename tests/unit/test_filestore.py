@@ -69,3 +69,19 @@ def test_delete_job_files(filestore: FileStore):
 
     filestore.delete_job_files("job2")
     assert filestore.load_result("job2") is None
+
+
+def test_delete_upload_files_removes_uploads_but_keeps_result(filestore: FileStore):
+    filestore.save_upload("job3", "input.mp3", b"data")
+    result = TranscriptResult(segments=[], language="zh", duration=0.0)
+    filestore.save_result("job3", result)
+
+    removed = filestore.delete_upload_files("job3")
+    assert removed is True
+    # Upload dir is gone; the saved transcript still loads.
+    assert not filestore.get_upload_path("job3", "input.mp3").exists()
+    assert filestore.load_result("job3") is not None
+
+
+def test_delete_upload_files_returns_false_when_nothing_to_remove(filestore: FileStore):
+    assert filestore.delete_upload_files("job-does-not-exist") is False

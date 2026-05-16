@@ -36,8 +36,13 @@ logger = logging.getLogger(__name__)
 _WEB_DIR = Path(__file__).parent
 
 
+_UPLOAD_RETENTION_CHECK_INTERVAL = 3600  # once per hour is enough for a daily-grained policy
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from datetime import UTC, datetime, timedelta
+
     from redis import Redis
     from redis.exceptions import RedisError
 
@@ -67,13 +72,37 @@ async def lifespan(app: FastAPI):
             except Exception:
                 logger.exception("Stale job check failed")
 
-    task = asyncio.create_task(_stale_job_checker())
+    async def _upload_retention_sweep():
+        # Sleep once before the first sweep so a freshly restarted instance
+        # is not immediately deleting files while operators are still
+        # poking at the dashboard.
+        while True:
+            await asyncio.sleep(_UPLOAD_RETENTION_CHECK_INTERVAL)
+            try:
+                threshold = datetime.now(UTC) - timedelta(days=settings.upload_retention_days)
+                ids = app.state.db.list_terminal_job_ids_older_than(threshold.isoformat())
+                removed = sum(1 for jid in ids if app.state.filestore.delete_upload_files(jid))
+                if removed:
+                    logger.info(
+                        "Upload retention sweep reclaimed %d job upload dirs older than %d days",
+                        removed,
+                        settings.upload_retention_days,
+                    )
+            except Exception:
+                logger.exception("Upload retention sweep failed")
+
+    tasks = [asyncio.create_task(_stale_job_checker())]
+    if settings.upload_retention_days > 0:
+        tasks.append(asyncio.create_task(_upload_retention_sweep()))
+        logger.info("Upload retention enabled: %d day(s)", settings.upload_retention_days)
 
     logger.info("Whisper UI started")
     yield
-    task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await task
+    for task in tasks:
+        task.cancel()
+    for task in tasks:
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
     app.state.db.close()
     app.state.redis.close()
     logger.info("Whisper UI stopped")
