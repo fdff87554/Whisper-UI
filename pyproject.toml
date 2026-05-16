@@ -7,7 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
   "pydantic>=2.0,<3",
   "pydantic-settings>=2.0,<3",
-  "redis>=5.0,<8",
+  "redis>=5.0,<7",
   "rq>=2.0,<3",
 ]
 
@@ -17,9 +17,9 @@ worker = [
   # whisperx is installed separately in Dockerfile (--no-deps) to avoid its
   # torch~=2.8.0 constraint conflicting with the base image's torch 2.10.0.
   # The dependencies below cover whisperx's runtime needs (minus torch/torchaudio).
-  "faster-whisper>=1.1.1",
+  "faster-whisper>=1.1.1,<2",
   "ctranslate2>=4.5.0",
-  "transformers>=4.48.0",
+  "transformers>=4.48.0,<5",
   "nltk>=3.9.1",
   "numpy>=2.1.0",
   "omegaconf>=2.3.0",
