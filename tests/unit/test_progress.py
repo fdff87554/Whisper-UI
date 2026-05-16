@@ -7,7 +7,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 
 from whisper_ui.core.models import Job
 from whisper_ui.worker.progress import RedisProgressReporter
-from whisper_ui.worker.tasks import _make_throttled_progress_reporter
+from whisper_ui.worker.runtime import make_throttled_progress_reporter as _make_throttled_progress_reporter
 
 
 def _make_reporter(processing_ttl: int = 7200) -> tuple[MagicMock, RedisProgressReporter]:
