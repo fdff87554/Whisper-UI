@@ -19,6 +19,7 @@ import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from redis import Redis
@@ -82,6 +83,23 @@ def build_worker_runtime(job_id: str) -> Iterator[WorkerRuntime]:
         )
     finally:
         db.close()
+
+
+def cleanup_preprocessed_audio(context: dict) -> None:
+    """Remove the intermediate 16 kHz WAV created by PreprocessStage, if any.
+
+    The DAG dispatcher and the legacy monolithic task both need this on every
+    completion / failure path; keeping the implementation in one place
+    guarantees they never disagree on the cleanup criteria (e.g. what counts
+    as a missing path).
+    """
+    audio_path = context.get("audio_path")
+    if not audio_path:
+        return
+    try:
+        Path(audio_path).unlink(missing_ok=True)
+    except OSError:
+        logger.warning("Failed to clean up preprocessed file: %s", audio_path)
 
 
 def is_llm_active(job: Job, settings: Settings) -> bool:
@@ -219,6 +237,7 @@ def extract_rq_timeout_seconds(exc: BaseException) -> int | str:
 __all__ = [
     "WorkerRuntime",
     "build_worker_runtime",
+    "cleanup_preprocessed_audio",
     "extract_rq_timeout_seconds",
     "is_llm_active",
     "make_throttled_progress_reporter",

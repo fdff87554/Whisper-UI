@@ -21,7 +21,6 @@ intermediate 16 kHz WAV.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from rq import Callback, Queue
@@ -41,7 +40,12 @@ from whisper_ui.core.models import JobStatus
 from whisper_ui.ui.labels import JOBS_TIMEOUT_ERROR
 from whisper_ui.worker.context_store import PipelineContextStore
 from whisper_ui.worker.progress import RedisProgressReporter
-from whisper_ui.worker.runtime import build_worker_runtime, extract_rq_timeout_seconds, is_llm_active
+from whisper_ui.worker.runtime import (
+    build_worker_runtime,
+    cleanup_preprocessed_audio,
+    extract_rq_timeout_seconds,
+    is_llm_active,
+)
 from whisper_ui.worker.stage_tasks import (
     run_assign_speakers,
     run_diarize,
@@ -279,16 +283,6 @@ def _apply_filename_from_video_title(job: Job, context: dict) -> None:
         job.filename = context["video_title"]
 
 
-def _cleanup_preprocessed_audio(context: dict) -> None:
-    audio_path = context.get("audio_path")
-    if not audio_path:
-        return
-    try:
-        Path(audio_path).unlink(missing_ok=True)
-    except OSError:
-        logger.warning("Failed to clean up preprocessed file: %s", audio_path)
-
-
 def finalize_success(rq_job, connection, _result) -> None:
     """RQ ``on_success`` callback for the final sub-job.
 
@@ -356,7 +350,7 @@ def finalize_success(rq_job, connection, _result) -> None:
 
             logger.info("Job %s completed successfully via DAG pipeline", parent_job_id)
         finally:
-            _cleanup_preprocessed_audio(context)
+            cleanup_preprocessed_audio(context)
             ctx_store.delete()
             if meta_generation is not None:
                 _clear_subjob_set(runtime.redis, parent_job_id, meta_generation)
@@ -507,7 +501,7 @@ def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> No
                 )
             _mark_failed(job, runtime.db, reporter, error_msg)
         finally:
-            _cleanup_preprocessed_audio(context)
+            cleanup_preprocessed_audio(context)
             ctx_store.delete()
             if meta_generation is not None:
                 _clear_subjob_set(runtime.redis, parent_job_id, meta_generation)
