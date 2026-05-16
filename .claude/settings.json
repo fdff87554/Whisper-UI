@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "_doc": "Whisper-UI 專案設定，從 dev-guidelines template v3.4.3 複製。包含 attribution 阻擋、permissions allow/ask/deny、敏感檔案 Read deny。架構與 rationale 見 upstream dev-guidelines MAINTAINER.md#設定檔架構。",
+  "_doc": "Whisper-UI 專案設定，從 dev-guidelines template v3.4.3 複製（upstream: organization-internal Kiwissec/dev-guidelines, https://github.com/Kiwissec/dev-guidelines, at commit 945d5b48daaf20b8371a2afa6fbce103c13636e3）。包含 attribution 阻擋、permissions allow/ask/deny、敏感檔案 Read deny。架構與 rationale 見 upstream dev-guidelines MAINTAINER.md#設定檔架構。",
   "attribution": {
     "commit": "",
     "pr": ""
