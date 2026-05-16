@@ -1,3 +1,6 @@
 config:
   line-length: false
   no-duplicate-heading: false
+  # CLAUDE.md starts with template metadata comments and .claude/agents
+  # files start with YAML frontmatter before the first heading.
+  first-line-heading: false
