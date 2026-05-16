@@ -49,6 +49,12 @@ node_modules/
 !CONTRIBUTING.md
 !SECURITY.md
 !LICENSE.md
+!CLAUDE.md
+!.claude/**/*.md
+
+# Claude Code project config (commit shared config, ignore local overrides)
+!.claude/
+.claude/settings.local.json
 
 # CSS build output
 src/whisper_ui/web/static/style.css
