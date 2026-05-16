@@ -50,6 +50,14 @@ YT_DLP_SOCKET_TIMEOUT = 30
 REDIS_COMPLETED_EXPIRY = 86400  # 24 hours
 REDIS_FAILED_EXPIRY = 86400  # 24 hours
 
+# Safety-net TTL for per-pipeline state in Redis (context HSET, generation
+# counter, sub-job sets). A successful or failed pipeline always deletes
+# these keys explicitly; this TTL only matters when a worker is killed
+# between bumping the generation counter and writing the finalizer. It
+# must outlive the longest plausible stage so a late writer can still
+# observe the bumped generation and drop its stale write.
+PIPELINE_STATE_TTL_SECONDS = 86_400  # 24 hours
+
 # Worker queues. Stages are partitioned across these queues by the resource
 # they consume so a long-running IO or network stage (download, llm_correction)
 # never blocks a GPU worker from picking up the next job.

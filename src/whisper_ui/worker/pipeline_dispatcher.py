@@ -31,6 +31,7 @@ from rq.timeouts import BaseTimeoutException
 from whisper_ui.core.constants import (
     ERROR_DISPLAY_LENGTH,
     ERROR_MAX_LENGTH,
+    PIPELINE_STATE_TTL_SECONDS,
     WORKER_QUEUE_CPU,
     WORKER_QUEUE_GPU,
     WORKER_QUEUE_IO,
@@ -93,13 +94,6 @@ def _generation_key(parent_job_id: str) -> str:
     return f"whisper:pipeline:{parent_job_id}:generation"
 
 
-# TTL applied to the generation counter and subjobs sets so an abandoned
-# job eventually frees its keys. Must outlive the longest plausible stage
-# execution so a late writer can still see the bumped generation value
-# (and drop its update) after the finalizer has cleaned up the context.
-_GENERATION_TTL_SECONDS = 86_400
-
-
 def _bump_generation(redis: Redis, parent_job_id: str) -> int:
     """Atomically advance the generation counter for ``parent_job_id``.
 
@@ -109,7 +103,7 @@ def _bump_generation(redis: Redis, parent_job_id: str) -> int:
     to commit their output and silently drop the write.
     """
     new_gen = redis.incr(_generation_key(parent_job_id))
-    redis.expire(_generation_key(parent_job_id), _GENERATION_TTL_SECONDS)
+    redis.expire(_generation_key(parent_job_id), PIPELINE_STATE_TTL_SECONDS)
     return int(new_gen)
 
 
@@ -126,7 +120,7 @@ def _current_generation(redis: Redis, parent_job_id: str) -> int | None:
 def _record_subjob(redis: Redis, parent_job_id: str, generation: int, sub_job_id: str) -> None:
     key = _subjobs_key(parent_job_id, generation)
     redis.sadd(key, sub_job_id)
-    redis.expire(key, _GENERATION_TTL_SECONDS)
+    redis.expire(key, PIPELINE_STATE_TTL_SECONDS)
 
 
 def _load_subjob_ids(redis: Redis, parent_job_id: str, generation: int) -> list[str]:
@@ -201,7 +195,7 @@ def enqueue_pipeline(
     ctx_store.initialize(initial_context)
     # The subjobs set is now per-generation, so we do NOT clear previous
     # attempts' sets here. An attempt 1 sub-job set will be cleaned up by
-    # its own finalize callback (or expire naturally via _GENERATION_TTL_SECONDS),
+    # its own finalize callback (or expire naturally via PIPELINE_STATE_TTL_SECONDS),
     # and attempt 2's callback only ever looks at its own generation's set.
     # This is what keeps a stale attempt 1 callback from cancelling attempt
     # 2's live sub-jobs — the mechanism that broke in Round 2 review.
