@@ -6,29 +6,13 @@ from typing import TYPE_CHECKING, Any
 from rq.timeouts import BaseTimeoutException
 
 from whisper_ui.core.exceptions import PipelineError
-from whisper_ui.pipeline.progress_bands import (
-    STAGE_WEIGHTS,
-    STAGE_WEIGHTS_WITH_DOWNLOAD,
-    STAGE_WEIGHTS_WITH_DOWNLOAD_AND_LLM,
-    STAGE_WEIGHTS_WITH_LLM,
-)
+from whisper_ui.pipeline.progress_bands import DEFAULT_STAGE_WEIGHTS
 
 if TYPE_CHECKING:
     from whisper_ui.core.models import TranscriptResult
     from whisper_ui.pipeline.base import PipelineStage, ProgressCallback
 
 logger = logging.getLogger(__name__)
-
-# Re-exported so existing callers that import weight bands from the
-# orchestrator module continue to work. New code should import from
-# `whisper_ui.pipeline.progress_bands` directly.
-__all__ = [
-    "STAGE_WEIGHTS",
-    "STAGE_WEIGHTS_WITH_DOWNLOAD",
-    "STAGE_WEIGHTS_WITH_DOWNLOAD_AND_LLM",
-    "STAGE_WEIGHTS_WITH_LLM",
-    "PipelineOrchestrator",
-]
 
 
 class PipelineOrchestrator:
@@ -40,7 +24,7 @@ class PipelineOrchestrator:
     ) -> None:
         self._stages = stages
         self._on_progress = on_progress
-        self._stage_weights = stage_weights or STAGE_WEIGHTS
+        self._stage_weights = stage_weights or DEFAULT_STAGE_WEIGHTS
 
     def run(self, context: dict[str, Any]) -> TranscriptResult:
         for stage in self._stages:
@@ -57,8 +41,8 @@ class PipelineOrchestrator:
             try:
                 context = stage.execute(context, on_progress=stage_progress)
             except BaseTimeoutException:
-                # RQ's death penalty must propagate unchanged so the worker
-                # task layer can classify it as a timeout rather than a
+                # RQ's death penalty must propagate unchanged so the
+                # dispatcher can classify it as a timeout rather than a
                 # stage-specific failure.
                 raise
             except PipelineError:

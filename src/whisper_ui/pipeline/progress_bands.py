@@ -1,14 +1,15 @@
 """Stage progress weight bands used by the pipeline orchestrator and worker tasks.
 
-Each mapping declares the global-progress band `(start, end)` assigned to a
-stage name. Stage implementations report local progress in [0, 1] which is
-linearly mapped into its band, so the user-facing progress bar advances
-smoothly across stages without jumps.
+Each band is a ``(start, end)`` tuple that maps a stage's local
+``[0, 1]`` progress into the global progress bar. The bands are
+generated from a single relative-weight table so adding or
+re-ordering an optional stage stays a one-line change: tweak the
+relative weight and ``build_stage_weights`` re-derives every band.
 
-Four distinct layouts are kept instead of computing them dynamically because
-production jobs enqueued under an older layout must continue to report
-progress with the bands they started with — changing a shared dict would make
-their progress bar jump when the worker is redeployed.
+The exact percentages drift a couple of points from the legacy
+hand-tuned tables (because the same relative weights now get
+normalised against the active stage set), but the bands are an
+operator-facing hint not a benchmark, so the drift is acceptable.
 """
 
 from __future__ import annotations
@@ -16,54 +17,71 @@ from __future__ import annotations
 StageWeights = dict[str, tuple[float, float]]
 
 
-STAGE_WEIGHTS: StageWeights = {
-    "preprocess": (0.00, 0.05),
-    "transcribe": (0.05, 0.55),
-    "align": (0.55, 0.65),
-    "diarize": (0.65, 0.90),
-    "assign_speakers": (0.90, 0.95),
-    "postprocess": (0.95, 1.00),
+# Relative weights — higher means the stage occupies a longer slice of the
+# global progress bar. The numbers are picked from the legacy hand-tuned
+# tables and kept here in one place so a maintainer only needs to touch
+# one literal when re-balancing.
+_STAGE_RELATIVE_WEIGHTS = {
+    "download": 15,
+    "preprocess": 5,
+    "transcribe": 50,
+    "align": 10,
+    "diarize": 25,
+    "assign_speakers": 5,
+    "postprocess": 5,
+    "llm_correction": 8,
 }
+# When the LLM correction stage is appended after postprocess, postprocess
+# shrinks so the visible bar still moves during the LLM call. Matches the
+# legacy STAGE_WEIGHTS_WITH_LLM layout where postprocess was 0.90 → 0.92.
+_POSTPROCESS_WEIGHT_WITH_LLM = 2
 
 
-STAGE_WEIGHTS_WITH_DOWNLOAD: StageWeights = {
-    "download": (0.00, 0.15),
-    "preprocess": (0.15, 0.20),
-    "transcribe": (0.20, 0.60),
-    "align": (0.60, 0.70),
-    "diarize": (0.70, 0.90),
-    "assign_speakers": (0.90, 0.95),
-    "postprocess": (0.95, 1.00),
-}
+def build_stage_weights(*, has_download: bool, has_llm: bool) -> StageWeights:
+    """Derive the per-stage ``(start, end)`` bands for a pipeline shape.
+
+    ``has_download`` prepends the download stage; ``has_llm`` shrinks
+    postprocess and appends the llm_correction stage. The returned dict
+    is keyed by stage name (matching ``PipelineStage.name``) so the
+    orchestrator can look up each band by name without caring about
+    pipeline shape.
+    """
+    stages: list[tuple[str, int]] = []
+    if has_download:
+        stages.append(("download", _STAGE_RELATIVE_WEIGHTS["download"]))
+    stages.extend(
+        [
+            ("preprocess", _STAGE_RELATIVE_WEIGHTS["preprocess"]),
+            ("transcribe", _STAGE_RELATIVE_WEIGHTS["transcribe"]),
+            ("align", _STAGE_RELATIVE_WEIGHTS["align"]),
+            ("diarize", _STAGE_RELATIVE_WEIGHTS["diarize"]),
+            ("assign_speakers", _STAGE_RELATIVE_WEIGHTS["assign_speakers"]),
+        ]
+    )
+    postprocess_w = _POSTPROCESS_WEIGHT_WITH_LLM if has_llm else _STAGE_RELATIVE_WEIGHTS["postprocess"]
+    stages.append(("postprocess", postprocess_w))
+    if has_llm:
+        stages.append(("llm_correction", _STAGE_RELATIVE_WEIGHTS["llm_correction"]))
+
+    total = sum(weight for _, weight in stages)
+    bands: StageWeights = {}
+    cursor = 0
+    for name, weight in stages:
+        start = cursor / total
+        end = (cursor + weight) / total
+        bands[name] = (round(start, 4), round(end, 4))
+        cursor += weight
+    return bands
 
 
-STAGE_WEIGHTS_WITH_LLM: StageWeights = {
-    "preprocess": (0.00, 0.05),
-    "transcribe": (0.05, 0.50),
-    "align": (0.50, 0.60),
-    "diarize": (0.60, 0.85),
-    "assign_speakers": (0.85, 0.90),
-    "postprocess": (0.90, 0.92),
-    "llm_correction": (0.92, 1.00),
-}
-
-
-STAGE_WEIGHTS_WITH_DOWNLOAD_AND_LLM: StageWeights = {
-    "download": (0.00, 0.12),
-    "preprocess": (0.12, 0.17),
-    "transcribe": (0.17, 0.55),
-    "align": (0.55, 0.65),
-    "diarize": (0.65, 0.85),
-    "assign_speakers": (0.85, 0.90),
-    "postprocess": (0.90, 0.92),
-    "llm_correction": (0.92, 1.00),
-}
+# Default band layout (no optional stages). Exposed so callers that have
+# no pipeline shape on hand — chiefly the legacy single-process
+# orchestrator default — still get a sensible mapping.
+DEFAULT_STAGE_WEIGHTS: StageWeights = build_stage_weights(has_download=False, has_llm=False)
 
 
 __all__ = [
-    "STAGE_WEIGHTS",
-    "STAGE_WEIGHTS_WITH_DOWNLOAD",
-    "STAGE_WEIGHTS_WITH_DOWNLOAD_AND_LLM",
-    "STAGE_WEIGHTS_WITH_LLM",
+    "DEFAULT_STAGE_WEIGHTS",
     "StageWeights",
+    "build_stage_weights",
 ]
