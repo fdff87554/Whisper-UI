@@ -70,7 +70,7 @@ cp .env.example .env
 docker compose --profile cpu up -d
 ```
 
-Open <http://localhost:8000> in your browser.
+Open <http://localhost:8080> in your browser.
 
 ### Pre-built Images
 
