@@ -29,11 +29,8 @@ from whisper_ui.pipeline.download import DownloadStage
 from whisper_ui.pipeline.postprocess import PostprocessStage
 from whisper_ui.pipeline.preprocess import PreprocessStage
 from whisper_ui.pipeline.progress_bands import (
-    STAGE_WEIGHTS,
-    STAGE_WEIGHTS_WITH_DOWNLOAD,
-    STAGE_WEIGHTS_WITH_DOWNLOAD_AND_LLM,
-    STAGE_WEIGHTS_WITH_LLM,
     StageWeights,
+    build_stage_weights,
 )
 from whisper_ui.pipeline.transcribe import TranscribeStage
 from whisper_ui.worker.context_store import PipelineContextStore
@@ -54,16 +51,11 @@ logger = logging.getLogger(__name__)
 
 
 def pick_stage_weights(job: Job, runtime: WorkerRuntime) -> StageWeights:
-    """Select the stage weight table that matches this job's pipeline shape."""
-    has_download = bool(job.source_url)
-    llm_active = is_llm_active(job, runtime.settings)
-    if has_download and llm_active:
-        return STAGE_WEIGHTS_WITH_DOWNLOAD_AND_LLM
-    if has_download:
-        return STAGE_WEIGHTS_WITH_DOWNLOAD
-    if llm_active:
-        return STAGE_WEIGHTS_WITH_LLM
-    return STAGE_WEIGHTS
+    """Build the stage weight bands matching this job's pipeline shape."""
+    return build_stage_weights(
+        has_download=bool(job.source_url),
+        has_llm=is_llm_active(job, runtime.settings),
+    )
 
 
 def _load_job(runtime: WorkerRuntime, parent_job_id: str) -> Job:

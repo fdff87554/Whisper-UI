@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING, Any
 
 from whisper_ui.core.models import Segment, TranscriptResult
 from whisper_ui.pipeline.llm_correction import LLMCorrectionStage
-from whisper_ui.pipeline.orchestrator import STAGE_WEIGHTS_WITH_LLM, PipelineOrchestrator
+from whisper_ui.pipeline.orchestrator import PipelineOrchestrator
+from whisper_ui.pipeline.progress_bands import build_stage_weights
 
 if TYPE_CHECKING:
     from whisper_ui.pipeline.base import ProgressCallback
@@ -89,10 +90,11 @@ def test_orchestrator_runs_postprocess_then_llm_correction():
     def on_progress(progress: float, message: str) -> None:
         progress_log.append((progress, message))
 
+    weights = build_stage_weights(has_download=False, has_llm=True)
     orchestrator = PipelineOrchestrator(
         [_SeedPostprocessStage(original), llm_stage],
         on_progress=on_progress,
-        stage_weights=STAGE_WEIGHTS_WITH_LLM,
+        stage_weights=weights,
     )
 
     result = orchestrator.run({"language": "zh"})
@@ -106,6 +108,6 @@ def test_orchestrator_runs_postprocess_then_llm_correction():
     values = [p for p, _ in progress_log]
     assert values == sorted(values)
     assert values[-1] == 1.0
-    llm_band = STAGE_WEIGHTS_WITH_LLM["llm_correction"]
+    llm_band = weights["llm_correction"]
     # At least one progress point must lie within the llm_correction band.
     assert any(llm_band[0] <= p <= llm_band[1] for p, _ in progress_log)
