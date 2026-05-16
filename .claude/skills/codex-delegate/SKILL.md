@@ -2,7 +2,7 @@
 name: codex-delegate
 description: 委派實作給外部 codex CLI（gpt-5）。Codex 是 external CLI executor，不是 Claude Code subagent；約定上僅在 manager 詢問使用者並選擇 Codex 後呼叫。需本機已裝 codex 且設有 OPENAI_API_KEY。
 disable-model-invocation: false
-allowed-tools: Bash(codex *), Bash(command -v *), Bash(git worktree *), Bash(git diff *), Bash(git apply *), Bash(git -C *)
+allowed-tools: Bash(command -v *), Bash(git diff *), Bash(git -C *)
 arguments: task_description
 ---
 
@@ -18,13 +18,9 @@ arguments: task_description
 >
 > 約定：manager 必須先用 AskUserQuestion 取得使用者選擇。未確認前不要呼叫。
 >
-> `allowed-tools` 預授權以下具副作用的工具：
+> `allowed-tools` 僅預授權 read-only 環境檢查（`command -v *`、`git diff *`、`git -C *`）；具副作用的 `codex *`、`git worktree *`、`git apply *` **不**預授權，每次執行時需走標準 Claude approval 流程。這是 downstream defense-in-depth：除了 prompt-level「manager 先詢問使用者」的 convention 之外，再加一道 mechanical fallback gate。
 >
-> - `Bash(codex *)`
-> - `Bash(git worktree *)`
-> - `Bash(git apply *)`
->
-> 啟用前請理解：codex CLI 進程本身不受 Claude permissions 約束；本 skill 以 worktree 隔離與人工 review 降低風險。
+> 啟用前請理解：codex CLI 進程本身不受 Claude permissions 約束；本 skill 以 worktree 隔離 + 每命令 approval + 人工 diff review 三層降低風險。
 
 ## 前置條件
 
