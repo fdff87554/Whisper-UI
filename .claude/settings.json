@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "_doc": "Whisper-UI 專案設定，從 dev-guidelines template v3.4.3 複製（upstream: organization-internal Kiwissec/dev-guidelines, https://github.com/Kiwissec/dev-guidelines, at commit 945d5b48daaf20b8371a2afa6fbce103c13636e3）。包含 attribution 阻擋、permissions allow/ask/deny、敏感檔案 Read deny。架構與 rationale 見 upstream dev-guidelines MAINTAINER.md#設定檔架構。",
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
+
+  "permissions": {
+    "allow": [
+      "Bash(git status)",
+      "Bash(git status *)",
+      "Bash(git diff)",
+      "Bash(git diff *)",
+      "Bash(git log)",
+      "Bash(git log *)",
+      "Bash(git branch)",
+      "Bash(git show *)",
+      "Bash(ls)",
+      "Bash(ls *)",
+      "Bash(wc *)",
+      "Bash(mise ls*)",
+      "Bash(mise current*)",
+      "Bash(pre-commit run*)",
+      "Read(**/*.md)",
+      "Read(**/package.json)",
+      "Read(**/package-lock.json)",
+      "Read(**/tsconfig.json)",
+      "Read(**/tsconfig.*.json)",
+      "Read(**/.prettierrc)",
+      "Read(**/.prettierrc.json)",
+      "Read(**/.eslintrc*)",
+      "Read(.claude/settings.json)",
+      "Read(**/*.yaml)",
+      "Read(**/*.yml)",
+      "Read(**/*.toml)"
+    ],
+    "ask": ["Bash(curl *)", "Bash(wget *)"],
+    "deny": [
+      "Bash(sudo *)",
+      "Bash(git push --force*)",
+      "Bash(git push --force-with-lease*)",
+      "Bash(git push --force-if-includes*)",
+      "Bash(git push -f)",
+      "Bash(git push -f *)",
+      "Bash(git push *--force*)",
+      "Bash(git push *--force-with-lease*)",
+      "Bash(git push *--force-if-includes*)",
+      "Bash(git push *-f)",
+      "Bash(git push *-f *)",
+      "Bash(git branch -D*)",
+      "Bash(find * -delete*)",
+      "Bash(find * -exec rm*)",
+      "Read(/.env)",
+      "Read(/.env.*)",
+      "Read(**/secrets/**)",
+      "Read(**/credentials.json)",
+      "Read(**/token.json)",
+      "Read(/.claude/settings.local.json)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Agent(manager)"
+    ]
+  }
+}
