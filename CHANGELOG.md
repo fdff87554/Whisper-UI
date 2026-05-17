@@ -79,7 +79,11 @@ Error` JSON body while logging the full traceback, so an
 - The upload-retention sweep now offloads its SQLite query and
   per-job `shutil.rmtree` calls through `asyncio.to_thread` and caps
   each pass at 200 jobs, so a long-deferred sweep cannot stall the
-  FastAPI event loop or starve incoming requests.
+  FastAPI event loop or starve incoming requests. The offloaded
+  thread opens its own short-lived `JobDatabase` instead of sharing
+  `app.state.db` with the event-loop thread, since CPython's
+  `sqlite3` binding does not serialise concurrent calls on the same
+  connection even with `check_same_thread=False`.
 - README now points at `uv sync --extra dev` / `uv run` for local
   development and warns that production deployments must set
   `REDIS_PASSWORD`. The quick-start URL was corrected to match the

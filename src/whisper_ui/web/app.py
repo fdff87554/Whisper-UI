@@ -44,9 +44,25 @@ _UPLOAD_RETENTION_CHECK_INTERVAL = 3600  # once per hour is enough for a daily-g
 _UPLOAD_RETENTION_BATCH_LIMIT = 200
 
 
-def _reclaim_upload_batch(filestore, job_ids: list[str]) -> int:
-    """Sync helper: delete upload dirs and return the count that actually existed."""
-    return sum(1 for jid in job_ids if filestore.delete_upload_files(jid))
+def _run_retention_sweep(db_path, filestore, threshold_iso: str, limit: int) -> int:
+    """Sync helper run inside ``asyncio.to_thread`` for the retention loop.
+
+    Opens its own short-lived :class:`JobDatabase` instead of reusing
+    ``app.state.db``. The web tier's shared connection is used from the
+    event-loop thread by request handlers; sharing it with this worker
+    thread would put two threads on the same SQLite connection, which
+    Python's sqlite3 binding does not serialise even with
+    ``check_same_thread=False``. A per-sweep connection costs one SQLite
+    open + WAL pragma per hour and isolates the retention path entirely.
+    """
+    from contextlib import closing
+
+    from whisper_ui.storage.database import JobDatabase
+
+    with closing(JobDatabase(db_path)) as db:
+        ids = db.list_terminal_job_ids_older_than(threshold_iso)
+    batch = ids[:limit]
+    return sum(1 for jid in batch if filestore.delete_upload_files(jid))
 
 
 @asynccontextmanager
@@ -85,20 +101,22 @@ async def lifespan(app: FastAPI):
     async def _upload_retention_sweep():
         # Sleep once before the first sweep so a freshly restarted instance
         # is not immediately deleting files while operators are still
-        # poking at the dashboard. Both the SQLite query and the
-        # shutil.rmtree per reclaimed job are sync I/O — offload them to
-        # asyncio.to_thread so a large sweep cannot stall the FastAPI
-        # event loop.
+        # poking at the dashboard. The DB query and the shutil.rmtree per
+        # reclaimed job are sync I/O — offload them to asyncio.to_thread,
+        # and have the thread open its own JobDatabase so this loop never
+        # shares a SQLite connection with the request handlers running
+        # on the event-loop thread.
         while True:
             await asyncio.sleep(_UPLOAD_RETENTION_CHECK_INTERVAL)
             try:
                 threshold = datetime.now(UTC) - timedelta(days=settings.upload_retention_days)
-                ids = await asyncio.to_thread(
-                    app.state.db.list_terminal_job_ids_older_than,
+                removed = await asyncio.to_thread(
+                    _run_retention_sweep,
+                    settings.database_path,
+                    app.state.filestore,
                     threshold.isoformat(),
+                    _UPLOAD_RETENTION_BATCH_LIMIT,
                 )
-                batch = ids[:_UPLOAD_RETENTION_BATCH_LIMIT]
-                removed = await asyncio.to_thread(_reclaim_upload_batch, app.state.filestore, batch)
                 if removed:
                     logger.info(
                         "Upload retention sweep reclaimed %d job upload dirs older than %d days",
