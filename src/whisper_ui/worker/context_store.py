@@ -157,9 +157,10 @@ class PipelineContextStore:
     def load(self) -> dict[str, Any]:
         """Load the full context as a Python dict.
 
-        Returns an empty dict when no context has been initialized yet, which
-        mirrors the legacy in-process behaviour where a stage receives an
-        empty dict before the pipeline has started seeding it.
+        Returns an empty dict when no context has been initialized yet so
+        that the first stage of a fresh attempt sees the same shape it
+        would have received from the in-process orchestrator: an empty
+        mapping to seed during execution.
         """
         raw = self._redis.hgetall(self._key)
         # pickle.loads is safe in this codebase only under the threat model

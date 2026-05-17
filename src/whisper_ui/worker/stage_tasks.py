@@ -93,8 +93,9 @@ def _banded_progress(
 ) -> ProgressCallback:
     """Wrap a throttled reporter so stages can emit local [0, 1] progress.
 
-    Each stage's local progress is linearly mapped into its global band using
-    the same formula the legacy orchestrator applied.
+    Each stage's local progress is linearly mapped into its global band
+    using the same formula the single-process orchestrator applies, so a
+    stage written for either runner reports identically.
     """
     start, end = band
     span = end - start
@@ -115,8 +116,9 @@ def _execute_stage(
 ) -> dict[str, Any]:
     """Run a stage and convert non-timeout failures into ``PipelineError``.
 
-    This mirrors the legacy orchestrator's contract so stage tasks emit the
-    same error shape the worker-tasks layer already knows how to classify.
+    Matches the single-process orchestrator's contract so stage tasks
+    emit the same error shape ``finalize_failure`` already knows how to
+    classify.
     """
     try:
         updated = stage.execute(context, on_progress=on_progress)

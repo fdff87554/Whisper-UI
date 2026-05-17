@@ -84,6 +84,11 @@ Error` JSON body while logging the full traceback, so an
   `app.state.db` with the event-loop thread, since CPython's
   `sqlite3` binding does not serialise concurrent calls on the same
   connection even with `check_same_thread=False`.
+- Docstrings and the worker entrypoint comment that still implied the
+  legacy `process_transcription` path would keep running have been
+  rewritten; historical-fact phrasing about the pre-v2 orchestrator is
+  preserved where it explains why a piece of code looks the way it
+  does.
 - README now points at `uv sync --extra dev` / `uv run` for local
   development and warns that production deployments must set
   `REDIS_PASSWORD`. The quick-start URL was corrected to match the
