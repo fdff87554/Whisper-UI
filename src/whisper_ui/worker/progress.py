@@ -25,9 +25,9 @@ logger = logging.getLogger(__name__)
 _DEFAULT_PROCESSING_TTL = 7200
 
 # Sentinel meaning "no generation check" in the Lua scripts. Callers that
-# did not attach a generation (legacy monolithic path, tests that predate
-# the generation machinery) pass this as caller_gen and the scripts skip
-# every generation-related branch, falling back to their pre-Round-2
+# did not attach a generation (unit tests that fabricate a reporter
+# outside an RQ worker, ad-hoc scripts) pass this as caller_gen and the
+# scripts skip every generation-related branch, falling back to plain
 # max-write / unconditional-replace semantics.
 _NO_GENERATION = -1
 
@@ -36,11 +36,11 @@ _NO_GENERATION = -1
 #
 # Three branches, in priority order:
 #
-# 1. ``caller_gen < 0`` (sentinel) → legacy mode. No generation tracking.
+# 1. ``caller_gen < 0`` (sentinel) → ungated mode. No generation tracking.
 #    Max-write by progress value; message and status always update.
-#    Existing Phase 2 semantics, preserved so the legacy ``tasks.py``
-#    path and any reporter built via ``build_worker_runtime`` without a
-#    generation stays bit-for-bit compatible.
+#    This is the path taken by callers that did not attach a generation
+#    (unit tests outside an RQ worker, ad-hoc scripts), preserved so
+#    they stay bit-for-bit compatible with the pre-generation behaviour.
 #
 # 2. ``caller_gen > stored_gen`` (including stored_gen missing) → reset.
 #    A fresh attempt is taking over the progress hash. Unconditionally
@@ -66,7 +66,7 @@ local ttl = tonumber(ARGV[3])
 local caller_gen = tonumber(ARGV[4])
 
 if caller_gen < 0 then
-  -- Legacy mode: no generation tracking at all. Max-write.
+  -- Ungated mode (no generation set by caller). Plain max-write.
   local current = redis.call('HGET', key, 'progress')
   if (not current) or (new_progress >= tonumber(current)) then
     redis.call('HSET', key, 'progress', tostring(new_progress),
@@ -130,14 +130,35 @@ return 1
 """
 
 
+# Shared snippet for terminal writes: drop the write (return 0 from the
+# enclosing script) if the caller's generation is strictly behind either
+# the central counter or the hash-embedded generation. Inlined into both
+# terminal scripts via f-string interpolation so the two callers cannot
+# drift on the gating logic — PR #39 Round 4 shipped that drift once.
+_LUA_TERMINAL_GENERATION_GATE = """
+local central_gen_raw = redis.call('GET', KEYS[2])
+if central_gen_raw then
+  local central_gen = tonumber(central_gen_raw)
+  if central_gen and caller_gen < central_gen then
+    return 0
+  end
+end
+local stored_gen_raw = redis.call('HGET', key, 'generation')
+if stored_gen_raw then
+  local stored_gen = tonumber(stored_gen_raw)
+  if stored_gen and caller_gen < stored_gen then
+    return 0
+  end
+end
+"""
+
+
 # Atomic generation-aware terminal write for complete().
 #
-# Mirrors the max-write script's generation logic but writes the
-# terminal "completed" hash contents when the generation check passes.
 # Terminal writes are unconditional within the caller's generation: a
 # stage that believes the pipeline is done owns the hash regardless of
 # what progress value was previously stored.
-_PROGRESS_COMPLETE_LUA = """
+_PROGRESS_COMPLETE_LUA = f"""
 local key = KEYS[1]
 local result_path = ARGV[1]
 local pipeline_complete_msg = ARGV[2]
@@ -145,20 +166,7 @@ local ttl = tonumber(ARGV[3])
 local caller_gen = tonumber(ARGV[4])
 
 if caller_gen >= 0 then
-  local central_gen_raw = redis.call('GET', KEYS[2])
-  if central_gen_raw then
-    local central_gen = tonumber(central_gen_raw)
-    if central_gen and caller_gen < central_gen then
-      return 0
-    end
-  end
-  local stored_gen_raw = redis.call('HGET', key, 'generation')
-  if stored_gen_raw then
-    local stored_gen = tonumber(stored_gen_raw)
-    if stored_gen and caller_gen < stored_gen then
-      return 0
-    end
-  end
+  {_LUA_TERMINAL_GENERATION_GATE}
 end
 
 redis.call('HSET', key,
@@ -175,7 +183,7 @@ return 1
 
 
 # Atomic generation-aware terminal write for fail().
-_PROGRESS_FAIL_LUA = """
+_PROGRESS_FAIL_LUA = f"""
 local key = KEYS[1]
 local message = ARGV[1]
 local error_text = ARGV[2]
@@ -183,20 +191,7 @@ local ttl = tonumber(ARGV[3])
 local caller_gen = tonumber(ARGV[4])
 
 if caller_gen >= 0 then
-  local central_gen_raw = redis.call('GET', KEYS[2])
-  if central_gen_raw then
-    local central_gen = tonumber(central_gen_raw)
-    if central_gen and caller_gen < central_gen then
-      return 0
-    end
-  end
-  local stored_gen_raw = redis.call('HGET', key, 'generation')
-  if stored_gen_raw then
-    local stored_gen = tonumber(stored_gen_raw)
-    if stored_gen and caller_gen < stored_gen then
-      return 0
-    end
-  end
+  {_LUA_TERMINAL_GENERATION_GATE}
 end
 
 redis.call('HSET', key,
@@ -219,11 +214,11 @@ class RedisProgressReporter:
     reporter's report/complete/fail calls go through the generation-aware
     Lua scripts above, so a stale writer from a superseded attempt has
     its writes dropped server-side and cannot corrupt the new attempt's
-    progress hash. When left as ``None`` the scripts fall back to legacy
+    progress hash. When left as ``None`` the scripts fall back to ungated
     semantics (max-write for report, unconditional replace for
-    complete/fail) — this keeps the pre-Round-2 behaviour for the
-    legacy ``worker.tasks.process_transcription`` path and for any
-    caller that does not yet know which attempt it belongs to.
+    complete/fail) — the documented escape hatch for unit tests that
+    fabricate a reporter outside an RQ worker context and therefore
+    have no generation to stamp.
     """
 
     def __init__(
@@ -261,7 +256,7 @@ class RedisProgressReporter:
         """Translate the optional generation into the Lua sentinel encoding.
 
         ``None`` in Python becomes ``-1`` in the script, which short-
-        circuits every generation branch and falls back to legacy
+        circuits every generation branch and falls back to ungated
         semantics. Any non-negative integer is passed through as-is.
         """
         return _NO_GENERATION if self._generation is None else int(self._generation)
@@ -270,13 +265,13 @@ class RedisProgressReporter:
         """Attempt a generation-gated max-write.
 
         Returns ``True`` when the Lua script accepted the write (or when
-        ``generation`` is None, meaning legacy max-write semantics always
+        ``generation`` is None, meaning ungated max-write semantics always
         accept), ``False`` when the script explicitly rejected a stale
         write (``caller_gen < stored_gen``).
 
         Transient Redis outages are swallowed and reported as accepted so
-        the legacy throttler path keeps writing to SQLite — SQLite is the
-        source of truth when Redis is unavailable. Only an explicit "Lua
+        the throttler path keeps writing to SQLite — SQLite is the source
+        of truth when Redis is unavailable. Only an explicit "Lua
         returned 0" is surfaced to the caller as a rejection signal, and
         that only happens in exactly one branch of the script: a stage
         attempting to write under a superseded generation. ``runtime.

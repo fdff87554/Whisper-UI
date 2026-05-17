@@ -324,12 +324,17 @@ def test_finalize_success_marks_job_completed(monkeypatch, tmp_path):
     runtime.db.get_job.return_value = job
     runtime.filestore.save_result.return_value = tmp_path / "result.json"
     runtime.settings.redis_processing_expiry = 7200
-    runtime.reporter = MagicMock()
 
     from contextlib import contextmanager
 
+    from whisper_ui.worker.progress import RedisProgressReporter
+
     @contextmanager
-    def _fake_builder(job_id):
+    def _fake_builder(job_id, *, generation=None):
+        # Replicate build_worker_runtime's contract: the bundled reporter
+        # is generation-aware so terminal writes hit Redis through the Lua
+        # gating script. Tests still observe real Redis state.
+        runtime.reporter = RedisProgressReporter(redis, job_id, processing_ttl=7200, generation=generation)
         yield runtime
 
     monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
@@ -379,12 +384,14 @@ def test_finalize_failure_marks_job_failed_and_cancels_siblings(monkeypatch, tmp
     runtime.redis = redis
     runtime.db.get_job.return_value = job
     runtime.settings.redis_processing_expiry = 7200
-    runtime.reporter = MagicMock()
 
     from contextlib import contextmanager
 
+    from whisper_ui.worker.progress import RedisProgressReporter
+
     @contextmanager
-    def _fake_builder(job_id):
+    def _fake_builder(job_id, *, generation=None):
+        runtime.reporter = RedisProgressReporter(redis, job_id, processing_ttl=7200, generation=generation)
         yield runtime
 
     monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
@@ -444,7 +451,7 @@ def test_finalize_failure_uses_chinese_timeout_label_for_rq_timeout(monkeypatch,
     from contextlib import contextmanager
 
     @contextmanager
-    def _fake_builder(job_id):
+    def _fake_builder(job_id, *, generation=None):
         yield runtime
 
     monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
@@ -576,12 +583,14 @@ def test_cancel_remaining_subjobs_sends_stop_command_to_running_siblings(monkeyp
     from contextlib import contextmanager
 
     @contextmanager
-    def _fake_builder(job_id):
+    def _fake_builder(job_id, *, generation=None):
         yield runtime
 
     monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
 
-    with patch.object(pd, "send_stop_job_command") as mock_stop:
+    from whisper_ui.worker import pipeline_callbacks as pc
+
+    with patch.object(pc, "send_stop_job_command") as mock_stop:
         # Leave failing.meta alone — enqueue_pipeline already set the
         # parent_job_id + generation that the callback needs to pass the
         # staleness check for this test's own attempt.
@@ -643,7 +652,7 @@ def test_stale_finalize_failure_short_circuits_after_retry(monkeypatch, tmp_path
     from contextlib import contextmanager
 
     @contextmanager
-    def _fake_builder(job_id):
+    def _fake_builder(job_id, *, generation=None):
         yield runtime
 
     monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
@@ -696,7 +705,7 @@ def test_stale_finalize_success_short_circuits_after_retry(monkeypatch, tmp_path
     from contextlib import contextmanager
 
     @contextmanager
-    def _fake_builder(job_id):
+    def _fake_builder(job_id, *, generation=None):
         yield runtime
 
     monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
@@ -766,7 +775,7 @@ def test_finalize_failure_generic_exception_still_uses_str(monkeypatch, tmp_path
     from contextlib import contextmanager
 
     @contextmanager
-    def _fake_builder(job_id):
+    def _fake_builder(job_id, *, generation=None):
         yield runtime
 
     monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)

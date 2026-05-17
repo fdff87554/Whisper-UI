@@ -29,18 +29,15 @@ from whisper_ui.pipeline.download import DownloadStage
 from whisper_ui.pipeline.postprocess import PostprocessStage
 from whisper_ui.pipeline.preprocess import PreprocessStage
 from whisper_ui.pipeline.progress_bands import (
-    STAGE_WEIGHTS,
-    STAGE_WEIGHTS_WITH_DOWNLOAD,
-    STAGE_WEIGHTS_WITH_DOWNLOAD_AND_LLM,
-    STAGE_WEIGHTS_WITH_LLM,
     StageWeights,
+    build_stage_weights,
 )
 from whisper_ui.pipeline.transcribe import TranscribeStage
 from whisper_ui.worker.context_store import PipelineContextStore
-from whisper_ui.worker.progress import RedisProgressReporter
 from whisper_ui.worker.runtime import (
     WorkerRuntime,
     build_worker_runtime,
+    is_llm_active,
     make_throttled_progress_reporter,
 )
 
@@ -53,28 +50,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _llm_is_active(job: Job, runtime: WorkerRuntime) -> bool:
-    """Return whether LLM correction should be part of this job's pipeline.
-
-    Mirrors the trigger in :mod:`whisper_ui.worker.tasks`: the user must have
-    opted in *and* the deployment must expose an Ollama endpoint. The pair is
-    used both to select the right progress weight table and to decide whether
-    to enqueue a ``run_llm_correction`` sub-job.
-    """
-    return bool(job.llm_correction_enabled) and bool(runtime.settings.ollama_base_url)
-
-
 def pick_stage_weights(job: Job, runtime: WorkerRuntime) -> StageWeights:
-    """Select the stage weight table that matches this job's pipeline shape."""
-    has_download = bool(job.source_url)
-    llm_active = _llm_is_active(job, runtime)
-    if has_download and llm_active:
-        return STAGE_WEIGHTS_WITH_DOWNLOAD_AND_LLM
-    if has_download:
-        return STAGE_WEIGHTS_WITH_DOWNLOAD
-    if llm_active:
-        return STAGE_WEIGHTS_WITH_LLM
-    return STAGE_WEIGHTS
+    """Build the stage weight bands matching this job's pipeline shape."""
+    return build_stage_weights(
+        has_download=bool(job.source_url),
+        has_llm=is_llm_active(job, runtime.settings),
+    )
 
 
 def _load_job(runtime: WorkerRuntime, parent_job_id: str) -> Job:
@@ -87,22 +68,19 @@ def _load_job(runtime: WorkerRuntime, parent_job_id: str) -> Job:
 def _mark_processing_if_queued(runtime: WorkerRuntime, job: Job) -> None:
     """Flip the parent job from QUEUED to PROCESSING on first stage entry.
 
-    The legacy monolithic worker task set PROCESSING at the very top of
-    ``process_transcription``. In the DAG path, multiple sub-jobs can be the
-    "first" one to actually run (e.g. transcribe_align and diarize start in
-    parallel after preprocess), so every stage task idempotently promotes
-    the job when it observes QUEUED. The SQLite write path serialises
-    concurrent writers via WAL mode + busy_timeout, so two parallel branches
-    flipping simultaneously converge on the same PROCESSING state without
-    corrupting the row.
+    Multiple sub-jobs can be the "first" one to actually run (e.g.
+    transcribe_align and diarize start in parallel after preprocess), so
+    every stage task idempotently promotes the job when it observes
+    QUEUED. The SQLite write path serialises concurrent writers via WAL
+    mode + busy_timeout, so two parallel branches flipping simultaneously
+    converge on the same PROCESSING state without corrupting the row.
 
-    This guards three downstream behaviours that depend on the
+    This guards two downstream behaviours that depend on the
     QUEUED → PROCESSING transition:
 
-    - ``recover_stale_jobs`` only scans status = 'processing'; without this
-      flip a crashed DAG leaves the parent stuck in QUEUED forever.
+    - ``recover_stale_jobs`` only scans status = 'processing'; without
+      this flip a crashed DAG leaves the parent stuck in QUEUED forever.
     - Dashboard polling speed and status badges branch on PROCESSING.
-    - Legacy tests asserting a running job's status expect PROCESSING.
     """
     if job.status == JobStatus.QUEUED:
         job.status = JobStatus.PROCESSING
@@ -115,8 +93,9 @@ def _banded_progress(
 ) -> ProgressCallback:
     """Wrap a throttled reporter so stages can emit local [0, 1] progress.
 
-    Each stage's local progress is linearly mapped into its global band using
-    the same formula the legacy orchestrator applied.
+    Each stage's local progress is linearly mapped into its global band
+    using the same formula the single-process orchestrator applies, so a
+    stage written for either runner reports identically.
     """
     start, end = band
     span = end - start
@@ -137,8 +116,9 @@ def _execute_stage(
 ) -> dict[str, Any]:
     """Run a stage and convert non-timeout failures into ``PipelineError``.
 
-    This mirrors the legacy orchestrator's contract so stage tasks emit the
-    same error shape the worker-tasks layer already knows how to classify.
+    Matches the single-process orchestrator's contract so stage tasks
+    emit the same error shape ``finalize_failure`` already knows how to
+    classify.
     """
     try:
         updated = stage.execute(context, on_progress=on_progress)
@@ -173,28 +153,6 @@ def _current_generation() -> int | None:
     except Exception:
         logger.debug("rq.get_current_job() unavailable while reading generation", exc_info=True)
         return None
-
-
-def _build_generation_aware_reporter(runtime: WorkerRuntime, parent_job_id: str) -> RedisProgressReporter:
-    """Build a ``RedisProgressReporter`` that stamps its writes with the
-    current RQ job's generation.
-
-    This closes the Round 2 R2-2 race where a stale attempt-1 writer
-    could pin the progress hash at its old high-water mark after the
-    user retried: a fresh reporter for attempt 2 carries a higher
-    generation, and the Lua script's reset branch unconditionally
-    overwrites the hash on its first call. The runtime's default
-    ``runtime.reporter`` stays generation-less so the legacy
-    ``worker.tasks.process_transcription`` path keeps its original
-    semantics — only the DAG stage task path is upgraded.
-    """
-    generation = _current_generation()
-    return RedisProgressReporter(
-        runtime.redis,
-        parent_job_id,
-        processing_ttl=runtime.settings.redis_processing_expiry,
-        generation=generation,
-    )
 
 
 def _persist_outputs(
@@ -245,7 +203,7 @@ def _run_single_stage(
     the live ``Job`` record (e.g. download preparing ``download_dir``) do so
     without duplicating the runtime setup.
     """
-    with build_worker_runtime(parent_job_id) as runtime:
+    with build_worker_runtime(parent_job_id, generation=_current_generation()) as runtime:
         job = _load_job(runtime, parent_job_id)
         _mark_processing_if_queued(runtime, job)
         ctx_store = PipelineContextStore(runtime.redis, parent_job_id)
@@ -255,8 +213,7 @@ def _run_single_stage(
             pre_context_update(job, runtime, context)
 
         stage = build_stage(job, runtime)
-        reporter = _build_generation_aware_reporter(runtime, parent_job_id)
-        throttled = make_throttled_progress_reporter(reporter, runtime.db, job)
+        throttled = make_throttled_progress_reporter(runtime.reporter, runtime.db, job)
         weights = pick_stage_weights(job, runtime)
         band = weights.get(stage_name, (0.0, 1.0))
         on_progress = _banded_progress(throttled, band)
@@ -325,14 +282,13 @@ def run_transcribe_align(parent_job_id: str) -> str:
     RQ tasks. The global progress bar still advances through the ``transcribe``
     and ``align`` bands independently.
     """
-    with build_worker_runtime(parent_job_id) as runtime:
+    with build_worker_runtime(parent_job_id, generation=_current_generation()) as runtime:
         job = _load_job(runtime, parent_job_id)
         _mark_processing_if_queued(runtime, job)
         ctx_store = PipelineContextStore(runtime.redis, parent_job_id)
         context = ctx_store.load()
 
-        reporter = _build_generation_aware_reporter(runtime, parent_job_id)
-        throttled = make_throttled_progress_reporter(reporter, runtime.db, job)
+        throttled = make_throttled_progress_reporter(runtime.reporter, runtime.db, job)
         weights = pick_stage_weights(job, runtime)
 
         transcribe = TranscribeStage(

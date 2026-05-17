@@ -73,6 +73,14 @@ async def viewer_page(request: Request, db: DbDep, filestore: FileStoreDep, job_
             speaker_colors = _build_speaker_colors(result.segments)
 
     search_disabled = result is not None and len(result.segments) > VIEWER_SEARCH_SEGMENT_LIMIT
+    # The Download Media button is only useful when the URL job's
+    # downloaded media file is still on disk. Retention can reclaim it
+    # while the transcript stays — checking here keeps the template free
+    # of file-system access and avoids the 404 dead-click the button
+    # would otherwise produce.
+    media_available = (
+        job is not None and job.source_url is not None and filestore.get_source_media_path(job_id) is not None
+    )
 
     return templates.TemplateResponse(
         request=request,
@@ -84,6 +92,7 @@ async def viewer_page(request: Request, db: DbDep, filestore: FileStoreDep, job_
             "error": error,
             "speaker_colors": speaker_colors,
             "search_disabled": search_disabled,
+            "media_available": media_available,
         },
     )
 

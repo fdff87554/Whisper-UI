@@ -67,7 +67,7 @@
           {{ fmt|upper }}
         </a>
         {% endfor %}
-        {% if job.source_url %}
+        {% if job.source_url and media_available %}
         <a href="/viewer/{{ job.id }}/media" class="btn btn-sm btn-outline" download>
           {{ icon_download("w-4 h-4") }} {{ labels.VIEWER_DOWNLOAD_MEDIA }}
         </a>
@@ -150,7 +150,7 @@
         {{ fmt|upper }}
       </a>
       {% endfor %}
-      {% if job.source_url %}
+      {% if job.source_url and media_available %}
       <a href="/viewer/{{ job.id }}/media" class="btn btn-sm btn-outline" download>
         {{ icon_download("w-4 h-4") }} {{ labels.VIEWER_DOWNLOAD_MEDIA }}
       </a>

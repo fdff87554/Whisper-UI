@@ -50,6 +50,7 @@ node_modules/
 !SECURITY.md
 !LICENSE.md
 !CLAUDE.md
+!CHANGELOG.md
 !.claude/**/*.md
 
 # Claude Code project config (commit shared config, ignore local overrides)

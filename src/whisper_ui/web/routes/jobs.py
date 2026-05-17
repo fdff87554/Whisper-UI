@@ -49,7 +49,18 @@ def _get_progress_data(redis, jobs: list[Job]) -> dict[str, dict[str, str]]:
     return data
 
 
-def _build_list_context(db: JobDatabase, redis, status: str, page: int) -> dict:
+def _build_media_available_map(filestore, jobs: list[Job]) -> dict[str, bool]:
+    """Pre-compute which URL jobs still have their downloaded media on disk.
+
+    The Download Media button in _job_card.html should hide once retention
+    has reclaimed the source media; doing the stat() up front (rather than
+    inside the template) keeps the template free of FS access and matches
+    the pattern used for `media_available` on the viewer route.
+    """
+    return {job.id: filestore.get_source_media_path(job.id) is not None for job in jobs if job.source_url}
+
+
+def _build_list_context(db: JobDatabase, redis, filestore, status: str, page: int) -> dict:
     status_filter = status or None
     total_count = db.count_jobs(status=status_filter)
     total_pages = max(1, math.ceil(total_count / DEFAULT_JOBS_PER_PAGE))
@@ -63,12 +74,14 @@ def _build_list_context(db: JobDatabase, redis, status: str, page: int) -> dict:
     batch_ids = {key for key, _ in groups if not key.startswith("_single:")}
     batch_info = _get_batch_info(db, batch_ids)
     progress_data = _get_progress_data(redis, jobs)
+    media_available_map = _build_media_available_map(filestore, jobs)
     has_active = db.has_active_jobs()
 
     return {
         "groups": groups,
         "batch_info": batch_info,
         "progress_data": progress_data,
+        "media_available_map": media_available_map,
         "has_active": has_active,
         "status": status,
         "page": page,
@@ -82,13 +95,14 @@ async def jobs_page(
     request: Request,
     db: DbDep,
     redis: RedisDep,
+    filestore: FileStoreDep,
     submitted: int | None = None,
     status: str = "",
     page: int = 0,
 ):
     if status not in _VALID_STATUS_FILTERS:
         status = ""
-    ctx = _build_list_context(db, redis, status, page)
+    ctx = _build_list_context(db, redis, filestore, status, page)
     ctx["active_page"] = "jobs"
     ctx["submitted"] = submitted
     ctx["status_counts"] = db.get_status_counts()
@@ -96,8 +110,15 @@ async def jobs_page(
 
 
 @router.get("/jobs/list", response_class=HTMLResponse)
-async def jobs_list_fragment(request: Request, db: DbDep, redis: RedisDep, status: str = "", page: int = 0):
-    ctx = _build_list_context(db, redis, status, page)
+async def jobs_list_fragment(
+    request: Request,
+    db: DbDep,
+    redis: RedisDep,
+    filestore: FileStoreDep,
+    status: str = "",
+    page: int = 0,
+):
+    ctx = _build_list_context(db, redis, filestore, status, page)
     return templates.TemplateResponse(request=request, name="_job_list.html", context=ctx)
 
 

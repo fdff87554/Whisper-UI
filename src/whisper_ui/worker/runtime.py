@@ -1,14 +1,14 @@
-"""Shared worker runtime helpers used by both the legacy monolithic task and
-the per-stage DAG entrypoints.
+"""Shared worker runtime helpers used by the per-stage DAG entrypoints.
 
 ``build_worker_runtime`` centralises the boilerplate of loading settings,
 opening Redis / SQLite connections, and wiring up a progress reporter, so
-every worker task can access those shared resources the same way. A context
+every stage task can access those shared resources the same way. A context
 manager is used so the caller gets deterministic cleanup (database close)
 regardless of whether the task completes, raises, or is killed.
 
-``make_throttled_progress_reporter`` is re-exported from here so it lives
-alongside the other runtime helpers.
+``make_throttled_progress_reporter`` and ``is_llm_active`` live here too
+so the runtime module is the one place stage tasks pull common helpers
+from.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from redis import Redis
@@ -57,11 +58,17 @@ class WorkerRuntime:
 
 
 @contextmanager
-def build_worker_runtime(job_id: str) -> Iterator[WorkerRuntime]:
+def build_worker_runtime(job_id: str, *, generation: int | None = None) -> Iterator[WorkerRuntime]:
     """Open the shared worker resources tied to a single job execution.
 
     The same ``job_id`` is used as the Redis progress key so all sub-tasks
     belonging to the same parent job converge onto a single progress hash.
+
+    ``generation`` is stamped onto the bundled ``reporter``; pass the RQ
+    job's meta generation so progress writes from a superseded retry get
+    rejected by the Lua gating script. Leave it None when invoked outside
+    an RQ worker context (unit tests, one-off scripts) so the reporter
+    skips generation gating and falls back to plain max-write semantics.
     """
     settings = get_settings()
     redis = Redis.from_url(settings.redis_url)
@@ -69,6 +76,7 @@ def build_worker_runtime(job_id: str) -> Iterator[WorkerRuntime]:
         redis,
         job_id,
         processing_ttl=settings.redis_processing_expiry,
+        generation=generation,
     )
     db = JobDatabase(settings.database_path)
     filestore = FileStore(settings.upload_dir, settings.output_dir)
@@ -82,6 +90,35 @@ def build_worker_runtime(job_id: str) -> Iterator[WorkerRuntime]:
         )
     finally:
         db.close()
+
+
+def cleanup_preprocessed_audio(context: dict) -> None:
+    """Remove the intermediate 16 kHz WAV created by PreprocessStage, if any.
+
+    Called on both the success and failure completion paths so an aborted
+    pipeline does not leave the temporary WAV behind. Centralising the
+    implementation here keeps the success and failure callbacks from
+    drifting on what counts as a missing path.
+    """
+    audio_path = context.get("audio_path")
+    if not audio_path:
+        return
+    try:
+        Path(audio_path).unlink(missing_ok=True)
+    except OSError:
+        logger.warning("Failed to clean up preprocessed file: %s", audio_path)
+
+
+def is_llm_active(job: Job, settings: Settings) -> bool:
+    """Return whether the LLM correction stage should run for ``job``.
+
+    Two conditions must hold: the user opted in on the upload form, and the
+    deployment exposes an Ollama endpoint. Both the dispatcher (to decide
+    whether to enqueue ``run_llm_correction``) and the stage selector (to
+    pick the matching progress weight table) consult this so the two
+    decisions never drift.
+    """
+    return bool(job.llm_correction_enabled) and bool(settings.ollama_base_url)
 
 
 def make_throttled_progress_reporter(
@@ -184,10 +221,11 @@ def extract_rq_timeout_seconds(exc: BaseException) -> int | str:
        out job itself), fall back to parsing the formatted message.
     3. If both fail, return ``"?"`` so the error label still renders.
 
-    Lives in ``runtime`` rather than ``tasks`` because both the legacy
-    monolithic worker and the DAG ``finalize_failure`` callback need to
-    produce the same Chinese timeout label when surfacing the error back
-    to the user — sharing the extractor keeps the two paths in lockstep.
+    Lives in ``runtime`` because the DAG stage tasks (raise the timeout
+    inside the worker) and ``finalize_failure`` (sees the exception from
+    outside the timing-out job) both need to render the same Chinese
+    label, and the helper has to be importable from both without a
+    cross-dependency.
     """
     try:
         from rq import get_current_job
@@ -207,6 +245,8 @@ def extract_rq_timeout_seconds(exc: BaseException) -> int | str:
 __all__ = [
     "WorkerRuntime",
     "build_worker_runtime",
+    "cleanup_preprocessed_audio",
     "extract_rq_timeout_seconds",
+    "is_llm_active",
     "make_throttled_progress_reporter",
 ]

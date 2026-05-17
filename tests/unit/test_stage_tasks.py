@@ -8,12 +8,7 @@ import pytest
 
 from whisper_ui.core.exceptions import PipelineError
 from whisper_ui.core.models import Job, JobStatus
-from whisper_ui.pipeline.progress_bands import (
-    STAGE_WEIGHTS,
-    STAGE_WEIGHTS_WITH_DOWNLOAD,
-    STAGE_WEIGHTS_WITH_DOWNLOAD_AND_LLM,
-    STAGE_WEIGHTS_WITH_LLM,
-)
+from whisper_ui.pipeline.progress_bands import build_stage_weights
 from whisper_ui.worker.context_store import PipelineContextStore
 from whisper_ui.worker.runtime import WorkerRuntime
 from whisper_ui.worker.stage_tasks import (
@@ -44,28 +39,29 @@ def _make_runtime(redis_client) -> WorkerRuntime:
 
 
 @pytest.mark.parametrize(
-    "source_url, llm_enabled, expected",
+    "source_url, llm_enabled, has_download, has_llm",
     [
-        (None, False, STAGE_WEIGHTS),
-        (None, True, STAGE_WEIGHTS_WITH_LLM),
-        ("https://youtu.be/x", False, STAGE_WEIGHTS_WITH_DOWNLOAD),
-        ("https://youtu.be/x", True, STAGE_WEIGHTS_WITH_DOWNLOAD_AND_LLM),
+        (None, False, False, False),
+        (None, True, False, True),
+        ("https://youtu.be/x", False, True, False),
+        ("https://youtu.be/x", True, True, True),
     ],
 )
-def test_pick_stage_weights_matches_job_shape(source_url, llm_enabled, expected):
+def test_pick_stage_weights_matches_job_shape(source_url, llm_enabled, has_download, has_llm):
     job = Job(source_url=source_url, llm_correction_enabled=llm_enabled)
     runtime = _make_runtime(fakeredis.FakeRedis())
-    assert pick_stage_weights(job, runtime) is expected
+    expected = build_stage_weights(has_download=has_download, has_llm=has_llm)
+    assert pick_stage_weights(job, runtime) == expected
 
 
 def test_pick_stage_weights_ignores_llm_when_ollama_url_is_blank():
     """Even if the user opted in, an empty Ollama URL must fall back to the
-    non-LLM table so the dispatcher does not allocate an LLM progress band
+    non-LLM bands so the dispatcher does not allocate an LLM progress band
     for a pipeline that will not run it."""
     job = Job(llm_correction_enabled=True)
     runtime = _make_runtime(fakeredis.FakeRedis())
     runtime.settings.ollama_base_url = ""
-    assert pick_stage_weights(job, runtime) is STAGE_WEIGHTS
+    assert pick_stage_weights(job, runtime) == build_stage_weights(has_download=False, has_llm=False)
 
 
 def test_banded_progress_maps_local_to_global_range():
@@ -129,7 +125,7 @@ def _install_fake_runtime(monkeypatch, fake_redis, job: Job) -> WorkerRuntime:
     from contextlib import contextmanager
 
     @contextmanager
-    def _fake_builder(job_id):
+    def _fake_builder(job_id, *, generation=None):
         yield runtime
 
     monkeypatch.setattr("whisper_ui.worker.stage_tasks.build_worker_runtime", _fake_builder)
@@ -255,7 +251,7 @@ def test_run_diarize_raises_pipeline_error_when_job_missing(monkeypatch):
     from contextlib import contextmanager
 
     @contextmanager
-    def _fake_builder(job_id):
+    def _fake_builder(job_id, *, generation=None):
         yield runtime
 
     monkeypatch.setattr("whisper_ui.worker.stage_tasks.build_worker_runtime", _fake_builder)

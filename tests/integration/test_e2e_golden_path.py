@@ -1,11 +1,13 @@
-"""End-to-end golden-path test for the upload -> worker -> export flow.
+"""End-to-end golden-path test for the upload -> DAG worker -> export flow.
 
 Strategy: fake the model inference layer (whisperx + pyannote) but keep
 every other I/O boundary real — ffmpeg, SQLite, the filestore, and a
-fakeredis stand-in for Redis. This proves that the code we own
-(routes, worker task, orchestrator, postprocess, exporters) wires up
-correctly end-to-end without depending on multi-GB model downloads or
-GPUs in CI.
+fakeredis stand-in for Redis. The dispatcher fans the job out into RQ
+sub-jobs, an in-process ``SimpleWorker`` burst loop drains them, and
+finalize_success marks the parent COMPLETED. This proves that the code
+we own (routes, dispatcher, stage_tasks, orchestrator, postprocess,
+exporters) wires up correctly end-to-end without depending on multi-GB
+model downloads or GPUs in CI.
 
 Skipped when ffmpeg is not on PATH or fakeredis is not installed; mark
 the test as ``integration`` so the default ``pytest`` run leaves it
@@ -14,23 +16,28 @@ alone (see pyproject.toml ``[tool.pytest.ini_options].addopts``).
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 
 from whisper_ui.core.config import Settings
+from whisper_ui.core.constants import (
+    WORKER_QUEUE_CPU,
+    WORKER_QUEUE_GPU,
+    WORKER_QUEUE_IO,
+)
 from whisper_ui.core.models import JobStatus
 from whisper_ui.pipeline.align import AlignStage
 from whisper_ui.pipeline.transcribe import TranscribeStage
 from whisper_ui.storage.database import JobDatabase
 from whisper_ui.storage.filestore import FileStore
 from whisper_ui.web.app import create_app
-from whisper_ui.worker.tasks import process_transcription
+from whisper_ui.worker.runtime import WorkerRuntime
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -156,6 +163,64 @@ def _patch_inference_stages(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(AlignStage, "execute", fake_align)
 
 
+def _install_dag_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_redis: Any,
+    settings: Settings,
+    db: JobDatabase,
+    filestore: FileStore,
+) -> None:
+    """Force every build_worker_runtime call inside the worker modules to
+    return a runtime backed by the test's fakeredis/settings/db/filestore.
+
+    The bundled reporter is generation-aware so terminal writes hit the
+    real Lua scripts on fakeredis (the same path production takes).
+    """
+    from whisper_ui.worker.progress import RedisProgressReporter
+
+    @contextlib.contextmanager
+    def _builder(job_id, *, generation=None):
+        runtime = WorkerRuntime(
+            settings=settings,
+            redis=fake_redis,
+            reporter=RedisProgressReporter(
+                fake_redis,
+                job_id,
+                processing_ttl=settings.redis_processing_expiry,
+                generation=generation,
+            ),
+            db=db,
+            filestore=filestore,
+        )
+        yield runtime
+
+    monkeypatch.setattr("whisper_ui.worker.stage_tasks.build_worker_runtime", _builder)
+    monkeypatch.setattr("whisper_ui.worker.pipeline_dispatcher.build_worker_runtime", _builder)
+
+
+def _drain_queues(fake_redis: Any) -> None:
+    """Run SimpleWorker burst cycles across every pipeline queue until idle.
+
+    Dependent sub-jobs only become eligible after their predecessors finish,
+    so a single burst pass is not enough for a chained DAG. Loop with a hard
+    cap to guarantee termination.
+    """
+    from rq import Queue, SimpleWorker
+
+    queues = {
+        name: Queue(name=name, connection=fake_redis) for name in (WORKER_QUEUE_IO, WORKER_QUEUE_GPU, WORKER_QUEUE_CPU)
+    }
+    for _ in range(50):
+        progressed = False
+        for queue in queues.values():
+            if queue.count == 0:
+                continue
+            SimpleWorker([queue], connection=fake_redis).work(burst=True, with_scheduler=False)
+            progressed = True
+        if not progressed:
+            return
+
+
 @_REQUIRES_FFMPEG
 @_REQUIRES_FAKEREDIS
 def test_upload_to_export_golden_path(
@@ -168,17 +233,19 @@ def test_upload_to_export_golden_path(
 ) -> None:
     _patch_inference_stages(monkeypatch)
 
+    # Wire the worker runtime to the test's resources so the DAG sub-jobs
+    # see the same fakeredis, JobDatabase, and filestore the web app uses.
+    db: JobDatabase = integration_app.state.db
+    filestore: FileStore = integration_app.state.filestore
+    _install_dag_runtime(monkeypatch, fake_redis, integration_settings, db, filestore)
+
     # Step 1: ffmpeg builds a real 1-second sine WAV on disk.
     sample = tmp_path / "sample.wav"
     _generate_sine_wav(sample)
     assert sample.exists() and sample.stat().st_size > 0
 
-    # Step 2: Drive the real upload route. fakeredis stands in for Redis;
-    # we patch rq.Queue so the test does not also try to drive a worker
-    # process — process_transcription is invoked synchronously below.
-    mock_queue = MagicMock()
-    monkeypatch.setattr("rq.Queue", MagicMock(return_value=mock_queue))
-
+    # Step 2: Drive the real upload route. enqueue_pipeline runs against
+    # fakeredis so sub-jobs land in real queues we can drain in-process.
     with sample.open("rb") as fh:
         resp = integration_client.post(
             "/upload",
@@ -196,31 +263,15 @@ def test_upload_to_export_golden_path(
     assert resp.status_code == 303, resp.text
     assert "submitted=1" in resp.headers["location"]
 
-    db: JobDatabase = integration_app.state.db
     jobs = db.list_jobs()
     assert len(jobs) == 1
     job = jobs[0]
     assert job.status == JobStatus.QUEUED
-    assert mock_queue.enqueue.call_count == 1
 
-    # Step 3: Run the real worker task in-process. This exercises real
-    # ffmpeg conversion (PreprocessStage), real SQLite state transitions,
-    # the throttled progress reporter, and the real filestore. The worker
-    # task owns its own JobDatabase handle (closes it in finally), so the
-    # patch returns a fresh handle on the same DB file rather than the
-    # fixture's handle, which the test still needs afterwards.
-    monkeypatch.setattr("whisper_ui.worker.tasks.Redis.from_url", lambda _url: fake_redis)
-    monkeypatch.setattr(
-        "whisper_ui.worker.tasks.JobDatabase",
-        lambda path: JobDatabase(path),
-    )
-    monkeypatch.setattr(
-        "whisper_ui.worker.tasks.get_settings",
-        lambda: integration_settings,
-    )
-
-    result = process_transcription(job.id)
-    assert "completed" in result
+    # Step 3: Drain the DAG. Each sub-job runs the real stage_task body
+    # against the test's runtime, exercising ffmpeg / SQLite / filestore /
+    # context store / generation-gated progress writes.
+    _drain_queues(fake_redis)
 
     # Step 4: Job should now be COMPLETED with a result file on disk.
     refreshed = db.get_job(job.id)
