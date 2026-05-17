@@ -1,14 +1,14 @@
-"""Shared worker runtime helpers used by both the legacy monolithic task and
-the per-stage DAG entrypoints.
+"""Shared worker runtime helpers used by the per-stage DAG entrypoints.
 
 ``build_worker_runtime`` centralises the boilerplate of loading settings,
 opening Redis / SQLite connections, and wiring up a progress reporter, so
-every worker task can access those shared resources the same way. A context
+every stage task can access those shared resources the same way. A context
 manager is used so the caller gets deterministic cleanup (database close)
 regardless of whether the task completes, raises, or is killed.
 
-``make_throttled_progress_reporter`` is re-exported from here so it lives
-alongside the other runtime helpers.
+``make_throttled_progress_reporter`` and ``is_llm_active`` live here too
+so the runtime module is the one place stage tasks pull common helpers
+from.
 """
 
 from __future__ import annotations
@@ -67,8 +67,8 @@ def build_worker_runtime(job_id: str, *, generation: int | None = None) -> Itera
     ``generation`` is stamped onto the bundled ``reporter``; pass the RQ
     job's meta generation so progress writes from a superseded retry get
     rejected by the Lua gating script. Leave it None when invoked outside
-    an RQ worker (unit tests or one-off scripts) to preserve the legacy
-    unconditional-write semantics.
+    an RQ worker context (unit tests, one-off scripts) so the reporter
+    skips generation gating and falls back to plain max-write semantics.
     """
     settings = get_settings()
     redis = Redis.from_url(settings.redis_url)
@@ -95,10 +95,10 @@ def build_worker_runtime(job_id: str, *, generation: int | None = None) -> Itera
 def cleanup_preprocessed_audio(context: dict) -> None:
     """Remove the intermediate 16 kHz WAV created by PreprocessStage, if any.
 
-    The DAG dispatcher and the legacy monolithic task both need this on every
-    completion / failure path; keeping the implementation in one place
-    guarantees they never disagree on the cleanup criteria (e.g. what counts
-    as a missing path).
+    Called on both the success and failure completion paths so an aborted
+    pipeline does not leave the temporary WAV behind. Centralising the
+    implementation here keeps the success and failure callbacks from
+    drifting on what counts as a missing path.
     """
     audio_path = context.get("audio_path")
     if not audio_path:
@@ -221,10 +221,11 @@ def extract_rq_timeout_seconds(exc: BaseException) -> int | str:
        out job itself), fall back to parsing the formatted message.
     3. If both fail, return ``"?"`` so the error label still renders.
 
-    Lives in ``runtime`` rather than ``tasks`` because both the legacy
-    monolithic worker and the DAG ``finalize_failure`` callback need to
-    produce the same Chinese timeout label when surfacing the error back
-    to the user — sharing the extractor keeps the two paths in lockstep.
+    Lives in ``runtime`` because the DAG stage tasks (raise the timeout
+    inside the worker) and ``finalize_failure`` (sees the exception from
+    outside the timing-out job) both need to render the same Chinese
+    label, and the helper has to be importable from both without a
+    cross-dependency.
     """
     try:
         from rq import get_current_job
