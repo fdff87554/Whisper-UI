@@ -83,7 +83,12 @@ Error` JSON body while logging the full traceback, so an
   thread opens its own short-lived `JobDatabase` instead of sharing
   `app.state.db` with the event-loop thread, since CPython's
   `sqlite3` binding does not serialise concurrent calls on the same
-  connection even with `check_same_thread=False`.
+  connection even with `check_same_thread=False`. The batch cap now
+  counts only successful deletions (and the SQL orders results oldest-
+  first), so a backlog larger than the limit drains across consecutive
+  sweeps instead of stalling on the first batch — retention does not
+  touch the DB row, so without this every sweep would re-visit the
+  same already-reclaimed ids.
 - Docstrings and the worker entrypoint comment that still implied the
   legacy `process_transcription` path would keep running have been
   rewritten; historical-fact phrasing about the pre-v2 orchestrator is

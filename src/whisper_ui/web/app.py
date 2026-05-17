@@ -54,6 +54,15 @@ def _run_retention_sweep(db_path, filestore, threshold_iso: str, limit: int) -> 
     Python's sqlite3 binding does not serialise even with
     ``check_same_thread=False``. A per-sweep connection costs one SQLite
     open + WAL pragma per hour and isolates the retention path entirely.
+
+    The id list is iterated lazily and ``limit`` only caps **successful**
+    deletions, not the number of ids inspected. Without this contract a
+    backlog larger than ``limit`` would stall: retention does not touch
+    the DB row, so the next sweep returns the same id list, and slicing
+    ``ids[:limit]`` would re-visit only the (already-reclaimed) first
+    ``limit`` ids and never reach the rest. Counting only ``True``
+    returns from ``delete_upload_files`` lets the loop skip past
+    already-reclaimed dirs and find real work further down the list.
     """
     from contextlib import closing
 
@@ -61,8 +70,13 @@ def _run_retention_sweep(db_path, filestore, threshold_iso: str, limit: int) -> 
 
     with closing(JobDatabase(db_path)) as db:
         ids = db.list_terminal_job_ids_older_than(threshold_iso)
-    batch = ids[:limit]
-    return sum(1 for jid in batch if filestore.delete_upload_files(jid))
+    removed = 0
+    for jid in ids:
+        if removed >= limit:
+            break
+        if filestore.delete_upload_files(jid):
+            removed += 1
+    return removed
 
 
 @asynccontextmanager

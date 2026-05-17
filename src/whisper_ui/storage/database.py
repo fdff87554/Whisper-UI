@@ -229,10 +229,15 @@ class JobDatabase:
         break the retry button. Callers that explicitly want both states
         (e.g. an admin sweep) can opt in by passing
         ``statuses=(JobStatus.COMPLETED.value, JobStatus.FAILED.value)``.
+
+        Ordered by ``updated_at`` ascending so the oldest jobs come first
+        (matching the spirit of a retention sweep) and ``id`` as a stable
+        tie-breaker, which lets callers iterate deterministically across
+        multiple sweeps without needing a reclaim flag column.
         """
         placeholders = ", ".join("?" for _ in statuses)
         rows = self._conn.execute(
-            f"SELECT id FROM jobs WHERE status IN ({placeholders}) AND updated_at < ?",
+            f"SELECT id FROM jobs WHERE status IN ({placeholders}) AND updated_at < ? ORDER BY updated_at ASC, id ASC",
             (*statuses, threshold_iso),
         ).fetchall()
         return [row["id"] for row in rows]
