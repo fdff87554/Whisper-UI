@@ -7,7 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
   "pydantic>=2.0,<3",
   "pydantic-settings>=2.0,<3",
-  "redis>=5.0,<7",
+  "redis>=7.4.0,<8",
   "rq>=2.0,<3",
 ]
 
