@@ -720,6 +720,91 @@ class TestBatchRoutes:
             assert db.get_job(job.id) is None
 
 
+class TestRetentionSweep:
+    """End-to-end checks on _run_retention_sweep's backlog handling.
+
+    Reclaiming an upload dir does not modify the corresponding DB row
+    (the row + result.json are kept so the viewer keeps working). That
+    means the same id list comes back on every sweep; the loop must
+    therefore only count *successful* deletions against the batch limit,
+    otherwise a backlog larger than the limit stalls forever on the
+    first N already-reclaimed ids.
+    """
+
+    def _make_expired_completed_job(self, db, filestore, settings, idx: int, old_iso: str) -> str:
+        from whisper_ui.core.models import Job
+
+        job = Job(filename=f"old-{idx}.mp3", status=JobStatus.COMPLETED, language="zh")
+        db.insert_job(job)
+        # Seed an upload dir so delete_upload_files has something to reclaim.
+        (settings.upload_dir / job.id).mkdir(parents=True)
+        (settings.upload_dir / job.id / "source.mp3").write_bytes(b"x")
+        # Backdate updated_at past the retention threshold.
+        db._conn.execute("UPDATE jobs SET updated_at = ? WHERE id = ?", (old_iso, job.id))
+        db._conn.commit()
+        return job.id
+
+    def test_sweep_progresses_past_batch_limit_across_runs(self, db, filestore, settings, tmp_dir):
+        """Two-sweep walk: a backlog of (limit + 52) drains in one full
+        batch + one partial batch instead of stalling on the first batch.
+        Regression for PR #41 followup F-batch-stall."""
+        from datetime import UTC, datetime, timedelta
+
+        from whisper_ui.web.app import _run_retention_sweep
+
+        limit = 50  # keep the test fast; algorithm is identical at any limit
+        backlog = limit + 20  # one full batch + a partial batch left over
+        now = datetime.now(UTC)
+        old_iso = (now - timedelta(days=30)).isoformat()
+        threshold_iso = (now - timedelta(days=7)).isoformat()
+
+        job_ids = [self._make_expired_completed_job(db, filestore, settings, i, old_iso) for i in range(backlog)]
+
+        # Close the test's fixture-owned connection so the sweep's
+        # short-lived connection sees the committed rows.
+        db.close()
+
+        # Sweep 1: fills its budget with successful deletions.
+        removed_1 = _run_retention_sweep(settings.database_path, filestore, threshold_iso, limit)
+        assert removed_1 == limit
+        remaining_after_1 = sum(1 for jid in job_ids if (settings.upload_dir / jid).exists())
+        assert remaining_after_1 == backlog - limit
+
+        # Sweep 2: must reach the leftover 20 even though the first
+        # `limit` ids in the query result are now already-reclaimed.
+        removed_2 = _run_retention_sweep(settings.database_path, filestore, threshold_iso, limit)
+        assert removed_2 == backlog - limit
+        remaining_after_2 = sum(1 for jid in job_ids if (settings.upload_dir / jid).exists())
+        assert remaining_after_2 == 0
+
+        # Sweep 3: nothing left to do.
+        removed_3 = _run_retention_sweep(settings.database_path, filestore, threshold_iso, limit)
+        assert removed_3 == 0
+
+    def test_list_terminal_job_ids_orders_oldest_first(self, db):
+        """Stable ORDER BY makes the sweep deterministic; assert that
+        the SQL contract returns oldest-first regardless of insert order."""
+        from datetime import UTC, datetime, timedelta
+
+        from whisper_ui.core.models import Job
+
+        now = datetime.now(UTC)
+        # Insert in non-chronological order to detect any reliance on rowid.
+        ts_newer = (now - timedelta(days=10)).isoformat()
+        ts_older = (now - timedelta(days=40)).isoformat()
+        newer = Job(filename="newer.mp3", status=JobStatus.COMPLETED, language="zh")
+        older = Job(filename="older.mp3", status=JobStatus.COMPLETED, language="zh")
+        db.insert_job(newer)
+        db.insert_job(older)
+        db._conn.execute("UPDATE jobs SET updated_at = ? WHERE id = ?", (ts_newer, newer.id))
+        db._conn.execute("UPDATE jobs SET updated_at = ? WHERE id = ?", (ts_older, older.id))
+        db._conn.commit()
+
+        threshold_iso = (now - timedelta(days=1)).isoformat()
+        ids = db.list_terminal_job_ids_older_than(threshold_iso)
+        assert ids == [older.id, newer.id]
+
+
 class TestContentDispositionHelper:
     def test_ascii_filename(self):
         result = make_content_disposition("report.pdf")
