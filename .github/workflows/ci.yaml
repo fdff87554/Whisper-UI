@@ -39,3 +39,26 @@ jobs:
         run: uv sync --extra dev --frozen
       - name: Integration tests
         run: uv run pytest -m integration --tb=short -q
+  # Catch Dockerfile / dependency-pin regressions at PR time. Docker Publish
+  # only runs on push to main, which previously let a Python version mismatch
+  # between pyproject.toml and the GPU base image slip into main.
+  docker-build-check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dockerfile:
+          - docker/Dockerfile.frontend
+          - docker/Dockerfile.worker
+          - docker/Dockerfile.worker.cpu
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v4
+      - name: Build (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.dockerfile }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.dockerfile }}

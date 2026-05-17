@@ -22,8 +22,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `whisper_ui.pipeline.progress_bands.build_stage_weights(
 has_download=..., has_llm=...)`. Exact percentages drift a couple
   of points from the legacy hand-tuned values.
-- `pyproject.toml` now requires Python `>=3.13` (the Docker images,
-  `mise.toml`, and ruff `target-version` were already pinned there).
 
 ### Added
 
