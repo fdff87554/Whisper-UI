@@ -20,9 +20,10 @@ echo "Model cache directory: ${MODEL_DIR}"
 # Queues to listen on. Defaults to the full set so a single container can
 # still run every pipeline stage, which is the common single-host layout.
 # The multi-worker docker-compose topology overrides this via WORKER_QUEUES
-# to specialise containers per resource class (io / gpu / cpu). "default" is
-# kept at the tail so any in-flight jobs from the legacy monolithic
-# process_transcription path still get picked up after an upgrade.
+# to specialise containers per resource class (io / gpu / cpu). "default"
+# is RQ's standard queue name; keeping every worker subscribed lets an
+# operator drop ad-hoc maintenance jobs without learning the resource-
+# class queue names.
 WORKER_QUEUES="${WORKER_QUEUES:-whisper:gpu whisper:io whisper:cpu default}"
 
 # Start RQ worker

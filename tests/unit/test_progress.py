@@ -7,7 +7,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 
 from whisper_ui.core.models import Job
 from whisper_ui.worker.progress import RedisProgressReporter
-from whisper_ui.worker.tasks import _make_throttled_progress_reporter
+from whisper_ui.worker.runtime import make_throttled_progress_reporter as _make_throttled_progress_reporter
 
 
 def _make_reporter(processing_ttl: int = 7200) -> tuple[MagicMock, RedisProgressReporter]:
@@ -138,10 +138,9 @@ def test_report_with_older_generation_is_dropped():
 
 
 def test_report_without_generation_keeps_legacy_max_write_semantics():
-    """Legacy callers (monolithic ``process_transcription`` path, any
-    reporter built via ``build_worker_runtime`` without explicit
-    generation) must keep their pre-Round-2 max-write behaviour so
-    their tests and production behaviour are unchanged.
+    """Reporters constructed outside an RQ worker context (unit tests,
+    one-off scripts) have no generation to stamp; they must keep the
+    pre-Round-2 max-write behaviour so existing test fixtures stay valid.
     """
     fake = fakeredis.FakeRedis()
     legacy = RedisProgressReporter(fake, "legacy-job")

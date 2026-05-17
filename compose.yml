@@ -31,6 +31,10 @@ services:
       # feature globally and greys out the upload-form toggle.
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e2b}
+      # Optional upload retention. 0 (default) keeps every upload until the
+      # job is explicitly deleted. >0 has the web app hourly reclaim the
+      # upload directory of COMPLETED jobs older than that many days.
+      - UPLOAD_RETENTION_DAYS=${UPLOAD_RETENTION_DAYS:-0}
     volumes:
       - app-data:/app/data
     depends_on:

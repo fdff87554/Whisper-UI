@@ -70,7 +70,13 @@ cp .env.example .env
 docker compose --profile cpu up -d
 ```
 
-Open <http://localhost:8000> in your browser.
+Open <http://localhost:8080> in your browser.
+
+> **Production note:** the bundled Redis starts without authentication
+> when `REDIS_PASSWORD` is unset (the compose snippet only adds
+> `--requirepass` when the variable is non-empty). For any deployment
+> reachable beyond the local Docker network — even on a trusted LAN —
+> set `REDIS_PASSWORD` in `.env` before bringing the stack up.
 
 ### Pre-built Images
 
@@ -162,12 +168,20 @@ docker compose --profile gpu up -d --scale worker-gpu=2
 # Or run named services and set WORKER_GPU_DEVICE_ID per container.
 ```
 
-**Upgrading from the monolithic path.** Any jobs already enqueued under
-the legacy `process_transcription` entry point keep working — the
-default queue set on every worker still includes `default`, and the old
-monolithic function still exists in `whisper_ui.worker.tasks` for
-backwards compatibility. Drain in-flight jobs (or simply wait them out)
-before narrowing `WORKER_*_QUEUES` on a scaled topology.
+**Upgrading from v1.x to v2.0 (BREAKING).** The legacy single-task
+`process_transcription` entry point has been removed in v2.0. Any RQ
+sub-jobs enqueued under it from a v1.x worker will fail import when a
+v2.0 worker picks them up. To upgrade:
+
+1. Stop accepting new uploads (e.g. take the frontend offline) or wait
+   for the dashboard to show no active jobs.
+2. Let the existing workers drain whatever is in flight.
+3. Pull the v2.0 images and `docker compose --profile gpu up -d`.
+
+If a queue is non-empty when the worker is upgraded, drop the queues
+manually before restart: `redis-cli -n 0 FLUSHDB` against the
+`REDIS_URL` Redis only clears RQ state (uploads, the SQLite DB, and
+saved transcripts are untouched).
 
 ### Queue / Timeout tuning (advanced)
 
@@ -276,24 +290,54 @@ Override either variable in `.env` if your topology differs.
 | `LLM_CHUNK_CONTEXT`      | `2`          | Neighbor segments attached as read-only context for disambiguation.                    |
 | `LLM_TEMPERATURE`        | `0.1`        | Sampling temperature. Low values keep corrections deterministic.                       |
 
+### Optional upload retention
+
+Long-running deployments accumulate per-job upload directories under
+`data/uploads/`. Set `UPLOAD_RETENTION_DAYS` to have the web app
+hourly reclaim the upload directory of any **COMPLETED** job whose
+last update is older than the threshold. FAILED jobs are intentionally
+preserved so the retry button keeps working — retry reuses the
+original upload path and would otherwise fail at the preprocess step.
+
+The DB row and the saved transcript (`data/outputs/<id>/result.json`)
+are always kept, so viewer and export routes remain functional. The
+"Download Media" button for URL jobs hides itself once the source
+media is reclaimed.
+
+```bash
+# .env
+UPLOAD_RETENTION_DAYS=30
+
+docker compose --profile gpu up -d
+```
+
+| Variable                | Default | Description                                                                                                          |
+| ----------------------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
+| `UPLOAD_RETENTION_DAYS` | `0`     | `0` disables the sweep (legacy behaviour). `>0` reclaims COMPLETED job upload dirs older than that many days hourly. |
+
 ## Local Development
 
 ```bash
-# Install mise (tool manager)
+# Install mise (tool manager); also pulls uv at the pinned version
 mise install
 
-# Install Python dependencies
-pip install -e ".[dev]"
+# Install Python dependencies from uv.lock for a reproducible env
+uv sync --extra dev
 
 # Run tests
-pytest
+uv run pytest
 
 # Run linting
-ruff format . && ruff check .
+uv run ruff format . && uv run ruff check .
 
 # Start FastAPI dev server (requires Redis running)
-uvicorn whisper_ui.web.app:app --reload --reload-dir=src
+uv run uvicorn whisper_ui.web.app:app --reload --reload-dir=src
 ```
+
+> `uv.lock` is committed and is the source of truth for dependency
+> versions in CI and reproducible local installs. After editing
+> `pyproject.toml`, run `uv lock` to refresh it and commit both files
+> together.
 
 ## Tech Stack
 

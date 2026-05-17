@@ -63,3 +63,17 @@ class FileStore:
             job_dir = base / job_id
             if job_dir.exists():
                 shutil.rmtree(job_dir)
+
+    def delete_upload_files(self, job_id: str) -> bool:
+        """Remove only the upload directory for ``job_id``; keep results.
+
+        Returns True when the directory existed and was removed. Used by
+        the optional retention task to reclaim disk on long-finished jobs
+        while preserving the transcript and the DB row so the viewer
+        keeps working.
+        """
+        job_dir = self._upload_dir / job_id
+        if not job_dir.exists():
+            return False
+        shutil.rmtree(job_dir)
+        return True

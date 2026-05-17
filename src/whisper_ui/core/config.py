@@ -10,10 +10,16 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
+    # extra="ignore" because the same .env feeds both Settings (read by the
+    # FastAPI process) and the worker entrypoint shell, which reads its own
+    # WORKER_GPU_QUEUES / WORKER_IO_QUEUES variables that are not Settings
+    # fields. Forbidding extras would refuse to start the web tier whenever
+    # an operator follows the README's "scaled topology" tuning.
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     # Redis
@@ -38,6 +44,13 @@ class Settings(BaseSettings):
 
     # Upload
     max_upload_size: int = 2 * 1024 * 1024 * 1024  # 2 GB
+    # Optional retention: when > 0, the web app's background loop reclaims
+    # the upload directory of any COMPLETED job whose updated_at is older
+    # than this many days. FAILED jobs are preserved so the retry button
+    # keeps working (retry reuses the original upload path). The DB row
+    # and the saved transcript (result.json) are kept so the viewer
+    # keeps working. Default 0 means never auto-reclaim — legacy behaviour.
+    upload_retention_days: int = 0
 
     # YouTube
     youtube_max_duration: int = 14400  # seconds (4 hours)

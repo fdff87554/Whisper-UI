@@ -12,8 +12,30 @@ jobs:
       - name: Install mise
         uses: jdx/mise-action@v4
       - name: Install dependencies
-        run: pip install ".[dev]"
+        run: uv sync --extra dev --frozen
       - name: Lint
         uses: pre-commit/action@v3.0.1
-      - name: Test
-        run: python -m pytest --tb=short -q
+      - name: Unit tests
+        run: uv run pytest --tb=short -q
+      - name: Audit dependencies for known vulnerabilities
+        # --extra dev transitively pulls in the frontend and worker-llm
+        # extras (fastapi / python-docx / httpx) so audit covers the whole
+        # web tier. The worker extra's heavy ML deps (transformers /
+        # pyannote / faster-whisper) are monitored by Dependabot instead
+        # to avoid alert fatigue from upstream-unpatched CVEs.
+        #
+        # --quiet suppresses uv's progress lines so they cannot leak into
+        # stdout and confuse pip-audit's requirements parser.
+        run: uv export --no-emit-project --extra dev --format requirements-txt --quiet | uv tool run pip-audit -r /dev/stdin --strict
+  integration-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install mise
+        uses: jdx/mise-action@v4
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install dependencies
+        run: uv sync --extra dev --frozen
+      - name: Integration tests
+        run: uv run pytest -m integration --tb=short -q

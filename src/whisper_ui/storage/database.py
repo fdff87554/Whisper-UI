@@ -214,3 +214,30 @@ class JobDatabase:
     def delete_job(self, job_id: str) -> None:
         self._conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
         self._conn.commit()
+
+    def list_terminal_job_ids_older_than(
+        self,
+        threshold_iso: str,
+        *,
+        statuses: tuple[str, ...] = (JobStatus.COMPLETED.value,),
+    ) -> list[str]:
+        """Return ids of jobs in ``statuses`` whose updated_at < threshold.
+
+        Defaults to COMPLETED only because FAILED jobs are the ones a user
+        is most likely to retry — and retry currently reuses the original
+        upload path, so reclaiming a FAILED job's upload would silently
+        break the retry button. Callers that explicitly want both states
+        (e.g. an admin sweep) can opt in by passing
+        ``statuses=(JobStatus.COMPLETED.value, JobStatus.FAILED.value)``.
+
+        Ordered by ``updated_at`` ascending so the oldest jobs come first
+        (matching the spirit of a retention sweep) and ``id`` as a stable
+        tie-breaker, which lets callers iterate deterministically across
+        multiple sweeps without needing a reclaim flag column.
+        """
+        placeholders = ", ".join("?" for _ in statuses)
+        rows = self._conn.execute(
+            f"SELECT id FROM jobs WHERE status IN ({placeholders}) AND updated_at < ? ORDER BY updated_at ASC, id ASC",
+            (*statuses, threshold_iso),
+        ).fetchall()
+        return [row["id"] for row in rows]

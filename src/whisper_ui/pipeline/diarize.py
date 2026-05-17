@@ -123,7 +123,7 @@ class DiarizeStage:
             # the misleading "Diarization failed: Task exceeded maximum
             # timeout value (3600 seconds)" message. Re-raise the raw
             # timeout (and any non-Exception BaseException like SystemExit)
-            # so worker.tasks.process_transcription can classify it.
+            # so the dispatcher's finalize_failure can classify it.
             if _is_rq_timeout(e) or not isinstance(e, Exception):
                 raise
             error_str = str(e)
