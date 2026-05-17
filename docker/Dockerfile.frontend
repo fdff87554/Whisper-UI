@@ -9,7 +9,7 @@ RUN npx @tailwindcss/cli -i src/whisper_ui/web/static/css/input.css \
     -o src/whisper_ui/web/static/style.css --minify
 
 # Stage 2: Python app
-FROM python:3.13-slim
+FROM python:3.14-slim
 WORKDIR /app
 
 COPY pyproject.toml ./
