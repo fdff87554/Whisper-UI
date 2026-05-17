@@ -3341,7 +3341,7 @@ worker-llm = [
 requires-dist = [
     { name = "ctranslate2", marker = "extra == 'worker'", specifier = ">=4.5.0" },
     { name = "fakeredis", extras = ["lua"], marker = "extra == 'dev'", specifier = ">=2.30,<3" },
-    { name = "fastapi", extras = ["standard"], marker = "extra == 'frontend'", specifier = ">=0.115,<1" },
+    { name = "fastapi", extras = ["standard"], marker = "extra == 'frontend'", specifier = ">=0.136.1,<1" },
     { name = "faster-whisper", marker = "extra == 'worker'", specifier = ">=1.1.1,<2" },
     { name = "httpx", marker = "extra == 'worker-llm'", specifier = ">=0.27,<1" },
     { name = "nltk", marker = "extra == 'worker'", specifier = ">=3.9.1" },
