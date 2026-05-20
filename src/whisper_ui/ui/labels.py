@@ -137,6 +137,32 @@ THEME_TOGGLE_DARK = "深色模式"
 DIALOG_CANCEL = "取消"
 DIALOG_CONFIRM = "確認"
 
+# -- Authentication --
+AUTH_LOGIN_HEADER = "登入"
+AUTH_LOGIN_DESCRIPTION = "請輸入您的帳號與密碼。"
+AUTH_USERNAME = "使用者名稱"
+AUTH_USERNAME_HELP = "3-32 字元，僅允許英文字母、數字、底線與連字號"
+AUTH_PASSWORD = "密碼"
+AUTH_PASSWORD_HELP = "至少 8 個字元"
+AUTH_LOGIN_BUTTON = "登入"
+AUTH_LOGOUT_BUTTON = "登出"
+AUTH_REGISTER_HEADER = "註冊帳號"
+AUTH_REGISTER_DESCRIPTION = "建立新帳號以開始使用 Whisper UI。"
+AUTH_REGISTER_BUTTON = "建立帳號"
+AUTH_BOOTSTRAP_HEADER = "建立管理員帳號"
+AUTH_BOOTSTRAP_DESCRIPTION = "首次使用，請建立第一個管理員帳號。此帳號將擁有人員管理與檢視所有任務的權限。"
+AUTH_LOGIN_FAILED = "帳號或密碼錯誤，請再試一次。"
+AUTH_ACCOUNT_INACTIVE = "此帳號已停用，請聯絡管理員。"
+AUTH_USERNAME_TAKEN = "此使用者名稱已被使用，請選擇另一個。"
+AUTH_USERNAME_INVALID = "使用者名稱格式無效（3-32 字元，僅英文字母、數字、底線與連字號）。"
+AUTH_PASSWORD_TOO_SHORT = "密碼長度至少 8 個字元。"
+AUTH_LOGIN_LINK = "已有帳號？前往登入"
+AUTH_REGISTER_LINK = "尚未有帳號？前往註冊"
+AUTH_SIGNED_IN_AS = "登入身分：{username}"
+AUTH_ADMIN_BADGE = "管理員"
+AUTH_RATE_LIMITED = "嘗試次數過多，請於 {minutes} 分鐘後再試。"
+
+
 # -- Status display --
 STATUS_LABELS: dict[str, str] = {
     "pending": "等待中",

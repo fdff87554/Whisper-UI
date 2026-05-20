@@ -1,0 +1,236 @@
+"""Login, register, and logout endpoints.
+
+These routes are intentionally on the auth middleware's public whitelist
+(see :data:`whisper_ui.web.auth.PUBLIC_PATHS`) so an unauthenticated visitor
+can reach them. They are still subject to the CSRF check on POST.
+
+Registration has two distinct modes that share the same template and POST
+handler:
+
+* **Bootstrap mode** — the system has zero active admins. Any visitor who
+  reaches ``/register`` is forced into this mode, and the first account
+  created is unconditionally an admin. Triggered automatically by the
+  middleware redirecting to ``/register?bootstrap=1``.
+* **Open registration** — an admin already exists. New accounts default to
+  non-admin / active. This matches the user's "self-service registration"
+  requirement.
+
+The bootstrap branch is server-determined (counted from the DB), not from
+the ``?bootstrap=1`` query param — that param only controls UI wording.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+import sqlite3
+from typing import Annotated
+
+from fastapi import APIRouter, Form, Query, Request, status
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
+
+from whisper_ui.storage import users_repo
+from whisper_ui.ui import labels as ui_labels
+from whisper_ui.web.deps import DbDep, templates
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+
+USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{3,32}$")
+MIN_PASSWORD_LENGTH = 8
+
+
+def _safe_next(next_url: str | None) -> str:
+    """Return ``next_url`` only if it is a same-origin relative path.
+
+    Rejects absolute URLs, protocol-relative (``//evil.example``), and
+    anything not starting with ``/``. This prevents open redirect attacks
+    via the ``?next=`` query param.
+    """
+    if not next_url:
+        return "/"
+    if not next_url.startswith("/") or next_url.startswith("//"):
+        return "/"
+    return next_url
+
+
+def _redirect_after_auth(request: Request, location: str) -> Response:
+    """Return a 302 for normal navigation, or 204 + HX-Redirect for htmx.
+
+    htmx will swap the response body unless told otherwise; using an
+    HX-Redirect header tells the htmx runtime to do a full-page navigation
+    instead, which is what we want after login/register/logout.
+    """
+    if request.headers.get("hx-request") == "true":
+        return Response(status_code=status.HTTP_204_NO_CONTENT, headers={"HX-Redirect": location})
+    return RedirectResponse(location, status_code=status.HTTP_302_FOUND)
+
+
+@router.get("/login", response_class=HTMLResponse)
+async def login_page(
+    request: Request,
+    next_url: Annotated[str, Query(alias="next")] = "/",
+    error: str = "",
+):
+    """Render the login form, or bounce already-logged-in users away."""
+    # If the user is already authenticated (middleware sets request.state.user
+    # on public paths when a valid cookie is present), skip the form.
+    current = getattr(request.state, "user", None)
+    if current is not None:
+        return RedirectResponse(_safe_next(next_url), status_code=status.HTTP_302_FOUND)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context={
+            "active_page": "",
+            "next": _safe_next(next_url),
+            "error_message": _login_error_message(error),
+        },
+    )
+
+
+def _login_error_message(error: str) -> str | None:
+    if error == "invalid":
+        return ui_labels.AUTH_LOGIN_FAILED
+    if error == "inactive":
+        return ui_labels.AUTH_ACCOUNT_INACTIVE
+    return None
+
+
+@router.post("/login")
+async def login_submit(
+    request: Request,
+    db: DbDep,
+    username: Annotated[str, Form()],
+    password: Annotated[str, Form()],
+    next_url: Annotated[str, Form(alias="next")] = "/",
+):
+    """Authenticate a user and start a session.
+
+    Always performs an argon2 verify (dummy when the user is unknown) so the
+    response time does not leak username existence. On failure the response
+    is the same generic message — never "user not found" vs "wrong password".
+    """
+    user_row = users_repo.get_user_by_username(db.conn, username)
+
+    if user_row is None:
+        users_repo.dummy_verify(password)
+        logger.info("login failed: unknown username %r", username)
+        return _login_error_redirect(request, next_url, "invalid")
+
+    if not user_row.is_active:
+        users_repo.dummy_verify(password)  # still even out timing
+        logger.info("login failed: inactive account %r", user_row.username)
+        return _login_error_redirect(request, next_url, "inactive")
+
+    if not users_repo.verify_password(user_row, password):
+        logger.info("login failed: wrong password for %r", user_row.username)
+        return _login_error_redirect(request, next_url, "invalid")
+
+    request.session["uid"] = user_row.id
+    request.session["sv"] = user_row.session_version
+    logger.info("login succeeded for %r (is_admin=%s)", user_row.username, user_row.is_admin)
+    return _redirect_after_auth(request, _safe_next(next_url))
+
+
+def _login_error_redirect(request: Request, next_url: str, error: str) -> Response:
+    safe_next = _safe_next(next_url)
+    target = f"/login?error={error}"
+    if safe_next != "/":
+        from urllib.parse import quote
+
+        target += f"&next={quote(safe_next)}"
+    return _redirect_after_auth(request, target)
+
+
+@router.get("/register", response_class=HTMLResponse)
+async def register_page(request: Request, db: DbDep, error: str = ""):
+    """Render the register form. Bootstrap mode is computed from the DB."""
+    bootstrap = users_repo.count_active_admins(db.conn) == 0
+
+    current = getattr(request.state, "user", None)
+    if current is not None and not bootstrap:
+        # Already logged in and a normal account exists — no reason to be here.
+        return RedirectResponse("/", status_code=status.HTTP_302_FOUND)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="register.html",
+        context={
+            "active_page": "",
+            "bootstrap": bootstrap,
+            "error_message": _register_error_message(error),
+        },
+    )
+
+
+def _register_error_message(error: str) -> str | None:
+    if error == "username_taken":
+        return ui_labels.AUTH_USERNAME_TAKEN
+    if error == "username_invalid":
+        return ui_labels.AUTH_USERNAME_INVALID
+    if error == "password_short":
+        return ui_labels.AUTH_PASSWORD_TOO_SHORT
+    return None
+
+
+@router.post("/register")
+async def register_submit(
+    request: Request,
+    db: DbDep,
+    username: Annotated[str, Form()],
+    password: Annotated[str, Form()],
+):
+    """Create a new account and start a session.
+
+    Validation:
+
+    * username matches :data:`USERNAME_PATTERN`
+    * password length >= :data:`MIN_PASSWORD_LENGTH`
+    * username not already taken (case-insensitively, enforced by the
+      ``COLLATE NOCASE`` unique index)
+
+    Bootstrap behaviour: when no active admin exists in the DB, the first
+    account is forced to ``is_admin=True``. The query-string flag is
+    cosmetic; the real determination is the DB state.
+    """
+    if not USERNAME_PATTERN.fullmatch(username):
+        return _redirect_after_auth(request, "/register?error=username_invalid")
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return _redirect_after_auth(request, "/register?error=password_short")
+
+    bootstrap = users_repo.count_active_admins(db.conn) == 0
+
+    try:
+        user = users_repo.create_user(
+            db.conn,
+            username=username,
+            password=password,
+            is_admin=bootstrap,
+        )
+    except sqlite3.IntegrityError:
+        logger.info("register failed: username %r already taken", username)
+        return _redirect_after_auth(request, "/register?error=username_taken")
+
+    # Flip the bootstrap latch immediately so subsequent requests skip the
+    # admin-count query.
+    if bootstrap:
+        request.app.state.bootstrap_done = True
+        logger.info("bootstrap admin created: %r", user.username)
+    else:
+        logger.info("new user registered: %r", user.username)
+
+    request.session["uid"] = user.id
+    request.session["sv"] = user.session_version
+    return _redirect_after_auth(request, "/")
+
+
+@router.post("/logout")
+async def logout(request: Request):
+    """Clear the session and bounce to the login form."""
+    uid = request.session.get("uid")
+    request.session.clear()
+    if uid is not None:
+        logger.info("logout for uid=%s", uid)
+    return _redirect_after_auth(request, "/login")

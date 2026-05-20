@@ -208,8 +208,9 @@ def create_app() -> FastAPI:
     templates.env.globals["export_formats"] = available_formats()
 
     # Routes
-    from whisper_ui.web.routes import dashboard, jobs, upload, viewer
+    from whisper_ui.web.routes import auth_routes, dashboard, jobs, upload, viewer
 
+    application.include_router(auth_routes.router)
     application.include_router(dashboard.router)
     application.include_router(upload.router)
     application.include_router(jobs.router)

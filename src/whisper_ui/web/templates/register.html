@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-Hant"
+      x-data="{ theme: $persist(
+        window.matchMedia('(prefers-color-scheme: dark)').matches ? 'whisper-dark' : 'whisper-light'
+      ).as('whisper-ui-theme') }"
+      :data-theme="theme">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if bootstrap %}{{ labels.AUTH_BOOTSTRAP_HEADER }}{% else %}{{ labels.AUTH_REGISTER_HEADER }}{% endif %} — Whisper UI</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+  <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/persist@3.14.8/dist/cdn.min.js"
+          integrity="sha384-9SDdYTFEfclsO6c7hnOgCm3X3Dh5gvAcXtVcEtfgDv/kQkhcBbqAOdEVMLskiSfZ"
+          crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"
+          integrity="sha384-X9kJyAubVxnP0hcA+AMMs21U445qsnqhnUF8EBlEpP3a42Kh/JwWjlv2ZcvGfphb"
+          crossorigin="anonymous"></script>
+</head>
+<body class="min-h-screen bg-base-100 text-base-content flex items-center justify-center px-4">
+  <div class="card bg-base-200 border border-base-300 shadow-sm w-full max-w-md">
+    <div class="card-body p-8">
+      {% if bootstrap %}
+      <h1 class="text-2xl font-medium mb-2">{{ labels.AUTH_BOOTSTRAP_HEADER }}</h1>
+      <p class="text-sm opacity-60 mb-6">{{ labels.AUTH_BOOTSTRAP_DESCRIPTION }}</p>
+      {% else %}
+      <h1 class="text-2xl font-medium mb-2">{{ labels.AUTH_REGISTER_HEADER }}</h1>
+      <p class="text-sm opacity-60 mb-6">{{ labels.AUTH_REGISTER_DESCRIPTION }}</p>
+      {% endif %}
+
+      {% if error_message %}
+      <div class="alert alert-error mb-4" role="alert">
+        {{ error_message }}
+      </div>
+      {% endif %}
+
+      <form method="post" action="/register" class="space-y-4">
+        <div>
+          <label class="label" for="username">
+            <span class="label-text">{{ labels.AUTH_USERNAME }}</span>
+          </label>
+          <input id="username" name="username" type="text" required
+                 autocomplete="username"
+                 class="input input-bordered w-full"
+                 minlength="3" maxlength="32"
+                 pattern="[A-Za-z0-9_-]{3,32}">
+          <p class="text-xs opacity-50 mt-1">{{ labels.AUTH_USERNAME_HELP }}</p>
+        </div>
+
+        <div>
+          <label class="label" for="password">
+            <span class="label-text">{{ labels.AUTH_PASSWORD }}</span>
+          </label>
+          <input id="password" name="password" type="password" required
+                 autocomplete="new-password"
+                 class="input input-bordered w-full"
+                 minlength="8">
+          <p class="text-xs opacity-50 mt-1">{{ labels.AUTH_PASSWORD_HELP }}</p>
+        </div>
+
+        <button type="submit" class="btn btn-primary w-full">
+          {% if bootstrap %}{{ labels.AUTH_BOOTSTRAP_HEADER }}{% else %}{{ labels.AUTH_REGISTER_BUTTON }}{% endif %}
+        </button>
+      </form>
+
+      {% if not bootstrap %}
+      <div class="text-center mt-4">
+        <a href="/login" class="link link-hover text-sm opacity-70">
+          {{ labels.AUTH_LOGIN_LINK }}
+        </a>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</body>
+</html>
