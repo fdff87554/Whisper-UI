@@ -12,7 +12,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-frontend = ["fastapi[standard]>=0.115,<1", "python-docx>=1.0,<2"]
+frontend = [
+  "fastapi[standard]>=0.115,<1",
+  "python-docx>=1.0,<2",
+  "argon2-cffi>=23,<24",
+]
 worker = [
   # whisperx is installed separately in Dockerfile (--no-deps) to avoid its
   # torch~=2.8.0 constraint conflicting with the base image's torch 2.10.0.
