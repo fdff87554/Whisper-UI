@@ -20,6 +20,23 @@ def test_insert_and_get(db: JobDatabase):
     assert fetched.status == JobStatus.PENDING
 
 
+def test_insert_and_get_preserves_owner_id(db: JobDatabase):
+    job = Job(filename="owned.mp3", filepath="/tmp/owned.mp3", owner_id=42)
+    db.insert_job(job)
+    fetched = db.get_job(job.id)
+    assert fetched is not None
+    assert fetched.owner_id == 42
+
+
+def test_legacy_job_without_owner_id_is_stored_as_null(db: JobDatabase):
+    """Jobs created without an owner (legacy data) survive the round-trip as None."""
+    job = Job(filename="legacy.mp3", filepath="/tmp/legacy.mp3")
+    db.insert_job(job)
+    fetched = db.get_job(job.id)
+    assert fetched is not None
+    assert fetched.owner_id is None
+
+
 def test_get_nonexistent(db: JobDatabase):
     assert db.get_job("nonexistent") is None
 
@@ -249,6 +266,61 @@ def test_legacy_db_without_llm_column_upgrades(tmp_dir: Path):
         assert fetched is not None
         assert fetched.filename == "old.mp3"
         assert fetched.llm_correction_enabled is False
+    finally:
+        database.close()
+
+
+def test_legacy_db_without_owner_id_column_upgrades(tmp_dir: Path):
+    """A pre-auth deployment's DB does not have owner_id. After init_db
+    migrates the schema, the column exists, existing rows have NULL,
+    and new inserts respect the owner_id value provided.
+    """
+    db_path = tmp_dir / "legacy_owner.db"
+    legacy_schema = """
+    CREATE TABLE IF NOT EXISTS jobs (
+        id TEXT PRIMARY KEY,
+        filename TEXT NOT NULL,
+        filepath TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        progress REAL NOT NULL DEFAULT 0.0,
+        progress_message TEXT DEFAULT '',
+        language TEXT NOT NULL DEFAULT 'zh',
+        model_name TEXT NOT NULL DEFAULT 'large-v3',
+        num_speakers INTEGER,
+        enable_diarization INTEGER NOT NULL DEFAULT 1,
+        convert_to_traditional INTEGER NOT NULL DEFAULT 1,
+        llm_correction_enabled INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        error TEXT,
+        result_path TEXT,
+        duration REAL,
+        batch_id TEXT,
+        source_url TEXT
+    );
+    """
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(legacy_schema)
+    conn.execute(
+        "INSERT INTO jobs (id, filename, filepath, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        ("legacy-2", "old.mp3", "/tmp/old.mp3", "2024-01-01T00:00:00+00:00", "2024-01-01T00:00:00+00:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    database = JobDatabase(db_path)
+    try:
+        # Legacy row still readable and owner_id is None.
+        legacy = database.get_job("legacy-2")
+        assert legacy is not None
+        assert legacy.owner_id is None
+
+        # New inserts with owner_id work.
+        owned = Job(filename="new.mp3", filepath="/tmp/new.mp3", owner_id=7)
+        database.insert_job(owned)
+        fetched = database.get_job(owned.id)
+        assert fetched is not None
+        assert fetched.owner_id == 7
     finally:
         database.close()
 
