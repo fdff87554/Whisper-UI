@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
+import fakeredis
 import pytest
 from fastapi.testclient import TestClient
 
@@ -18,8 +17,9 @@ def app(settings, db, filestore):
     application.state.settings = settings
     application.state.db = db
     application.state.filestore = filestore
-    application.state.redis = MagicMock()
-    application.state.redis.hgetall.return_value = {}
+    # FakeRedis (rather than MagicMock) so rate_limit.is_locked /
+    # check_and_increment exercise the real INCR / EXPIRE / GET path.
+    application.state.redis = fakeredis.FakeRedis()
     application.state.bootstrap_done = True
     return application
 
@@ -280,6 +280,68 @@ def test_session_persists_across_requests_after_login(app, test_user):
     # follow-up request — should be authenticated now
     follow = client.get("/", follow_redirects=False)
     assert follow.status_code == 200
+
+
+def test_login_rate_limit_blocks_after_threshold(app, test_user):
+    """Exceeding settings.max_login_attempts within the window must block
+    further attempts. Default is 5 attempts → the 6th request hits the
+    rate-limit branch regardless of password correctness.
+    """
+    client = _anon_client(app)
+    settings = app.state.settings
+    # Drive the per-user counter over the threshold with deliberate fails.
+    for _ in range(settings.max_login_attempts + 1):
+        client.post("/login", data={"username": "alice", "password": "wrong"})
+
+    # Even the correct password now bounces because the counter is over the limit.
+    resp = client.post(
+        "/login",
+        data={"username": "alice", "password": "password123"},
+    )
+
+    assert resp.status_code == 302
+    assert resp.headers["location"].startswith("/login?error=rate_limited")
+
+
+def test_login_rate_limit_resets_on_successful_login(app, test_user):
+    client = _anon_client(app)
+    settings = app.state.settings
+    # 4 fails (one under the limit).
+    for _ in range(settings.max_login_attempts - 1):
+        client.post("/login", data={"username": "alice", "password": "wrong"})
+
+    # Successful login clears the per-user counter.
+    ok = client.post(
+        "/login",
+        data={"username": "alice", "password": "password123"},
+    )
+    assert ok.status_code == 302
+    assert ok.headers["location"] == "/"
+
+    # After the reset, a fresh fail-burst should still be allowed.
+    fresh = client.post("/login", data={"username": "alice", "password": "wrong"})
+    assert fresh.status_code == 302
+    assert fresh.headers["location"].startswith("/login?error=invalid")
+
+
+def test_login_rate_limit_uses_generic_message(app):
+    """The rate-limit error message must not reveal whether the username
+    exists, so attackers cannot probe usernames via lockout behaviour.
+    """
+    client = _anon_client(app)
+    settings = app.state.settings
+    for _ in range(settings.max_login_attempts + 1):
+        client.post("/login", data={"username": "ghost", "password": "wrong"})
+
+    resp = client.post(
+        "/login",
+        data={"username": "ghost", "password": "wrong"},
+        follow_redirects=True,
+    )
+
+    # Rate-limit message is rendered; same template as any other login error.
+    assert resp.status_code == 200
+    assert "嘗試次數過多" in resp.text
 
 
 def test_change_password_invalidates_existing_session(app, db, test_user):

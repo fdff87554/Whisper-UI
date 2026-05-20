@@ -31,7 +31,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from whisper_ui.storage import users_repo
 from whisper_ui.ui import labels as ui_labels
-from whisper_ui.web.deps import DbDep, templates
+from whisper_ui.web import rate_limit
+from whisper_ui.web.deps import DbDep, RedisDep, SettingsDep, templates
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -69,6 +70,7 @@ def _redirect_after_auth(request: Request, location: str) -> Response:
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(
     request: Request,
+    settings: SettingsDep,
     next_url: Annotated[str, Query(alias="next")] = "/",
     error: str = "",
 ):
@@ -85,23 +87,38 @@ async def login_page(
         context={
             "active_page": "",
             "next": _safe_next(next_url),
-            "error_message": _login_error_message(error),
+            "error_message": _login_error_message(error, settings.login_lockout_seconds),
         },
     )
 
 
-def _login_error_message(error: str) -> str | None:
+def _login_error_message(error: str, lockout_seconds: int = 0) -> str | None:
     if error == "invalid":
         return ui_labels.AUTH_LOGIN_FAILED
     if error == "inactive":
         return ui_labels.AUTH_ACCOUNT_INACTIVE
+    if error == "rate_limited":
+        minutes = max(1, lockout_seconds // 60)
+        return ui_labels.AUTH_RATE_LIMITED.format(minutes=minutes)
     return None
+
+
+def _client_ip(request: Request) -> str:
+    """Best-effort client IP for rate-limit bucketing.
+
+    Falls back to the literal string "unknown" when no peer info is
+    available (test clients, weird ASGI servers) so the rate-limit code
+    can still bucket under a single key — better than crashing.
+    """
+    return request.client.host if request.client else "unknown"
 
 
 @router.post("/login")
 async def login_submit(
     request: Request,
     db: DbDep,
+    redis: RedisDep,
+    settings: SettingsDep,
     username: Annotated[str, Form()],
     password: Annotated[str, Form()],
     next_url: Annotated[str, Form(alias="next")] = "/",
@@ -111,27 +128,63 @@ async def login_submit(
     Always performs an argon2 verify (dummy when the user is unknown) so the
     response time does not leak username existence. On failure the response
     is the same generic message — never "user not found" vs "wrong password".
+
+    Rate limit: when the per-user OR per-IP counter is already over the
+    threshold we short-circuit without doing any DB / argon2 work, so
+    locked accounts cannot be used as a CPU-burn vector.
     """
+    ip = _client_ip(request)
+    if rate_limit.is_locked(
+        redis,
+        username=username,
+        ip=ip,
+        max_attempts=settings.max_login_attempts,
+    ):
+        logger.warning("login rate-limited: username=%r ip=%s", username, ip)
+        return _login_error_redirect(request, next_url, "rate_limited")
+
     user_row = users_repo.get_user_by_username(db.conn, username)
 
     if user_row is None:
         users_repo.dummy_verify(password)
         logger.info("login failed: unknown username %r", username)
+        _record_failure(redis, settings, username=username, ip=ip)
         return _login_error_redirect(request, next_url, "invalid")
 
     if not user_row.is_active:
         users_repo.dummy_verify(password)  # still even out timing
         logger.info("login failed: inactive account %r", user_row.username)
+        _record_failure(redis, settings, username=user_row.username, ip=ip)
         return _login_error_redirect(request, next_url, "inactive")
 
     if not users_repo.verify_password(user_row, password):
         logger.info("login failed: wrong password for %r", user_row.username)
+        _record_failure(redis, settings, username=user_row.username, ip=ip)
         return _login_error_redirect(request, next_url, "invalid")
 
     request.session["uid"] = user_row.id
     request.session["sv"] = user_row.session_version
+    rate_limit.reset_user(redis, user_row.username)
     logger.info("login succeeded for %r (is_admin=%s)", user_row.username, user_row.is_admin)
     return _redirect_after_auth(request, _safe_next(next_url))
+
+
+def _record_failure(redis, settings, *, username: str, ip: str) -> None:
+    """Bump the rate-limit counter for a failed login.
+
+    Wraps :func:`rate_limit.check_and_increment` so the route stays
+    readable and the threshold parameter lives in one place. The return
+    value is intentionally ignored — whether this attempt was the one
+    that crossed the threshold is irrelevant; the next request will see
+    it as locked and short-circuit at the top of the handler.
+    """
+    rate_limit.check_and_increment(
+        redis,
+        username=username,
+        ip=ip,
+        max_attempts=settings.max_login_attempts,
+        window_seconds=settings.login_lockout_seconds,
+    )
 
 
 def _login_error_redirect(request: Request, next_url: str, error: str) -> Response:
