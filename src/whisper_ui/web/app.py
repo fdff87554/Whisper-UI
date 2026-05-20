@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -10,7 +11,9 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 
+from whisper_ui.web.auth import AuthMiddleware
 from whisper_ui.web.deps import templates
 
 
@@ -158,8 +161,40 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    from whisper_ui.core.config import get_settings
+
+    settings = get_settings()
     application = FastAPI(title="Whisper UI", lifespan=lifespan)
+    # bootstrap_done flips True after the first active admin is observed.
+    # Initialised here (not in lifespan) so AuthMiddleware can read it
+    # before the first request completes even on a fresh process.
+    application.state.bootstrap_done = False
+
+    # Session secret: in production this must be set via SESSION_SECRET in
+    # the environment. An empty value generates an ephemeral random secret
+    # so the app still boots in dev, at the cost of invalidating every
+    # session whenever the process restarts.
+    session_secret = settings.session_secret
+    if not session_secret:
+        session_secret = secrets.token_hex(32)
+        logger.warning(
+            "SESSION_SECRET is unset; using an ephemeral random secret. "
+            "All existing sessions will be invalidated on each restart. "
+            "Set SESSION_SECRET in production (e.g. `openssl rand -hex 32`)."
+        )
+
+    # Middleware order: add_middleware is LIFO, so the order below results in
+    # SessionMiddleware (outermost) → AuthMiddleware → SecurityHeadersMiddleware
+    # → route handler on the inbound path. AuthMiddleware needs the session
+    # cookie decoded before it runs, so SessionMiddleware must be outside it.
     application.add_middleware(SecurityHeadersMiddleware)
+    application.add_middleware(AuthMiddleware)
+    application.add_middleware(
+        SessionMiddleware,
+        secret_key=session_secret,
+        same_site="lax",
+        https_only=settings.session_https_only,
+    )
 
     application.mount("/static", StaticFiles(directory=_WEB_DIR / "static"), name="static")
 

@@ -3,8 +3,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
 
+from tests.conftest import authed_test_client
 from whisper_ui.core.models import Job, JobStatus, Segment, TranscriptResult
 from whisper_ui.web.app import create_app
 from whisper_ui.web.deps import _format_relative_time, _format_time, make_content_disposition
@@ -19,12 +19,21 @@ def app(settings, db, filestore):
     application.state.redis = MagicMock()
     # Mock redis.hgetall to return empty dict (no progress data)
     application.state.redis.hgetall.return_value = {}
+    # The middleware skips bootstrap mode once an admin exists. Tests
+    # create users explicitly via fixtures, so flipping this latch up
+    # front avoids /register?bootstrap=1 redirects before the first request.
+    application.state.bootstrap_done = True
     return application
 
 
 @pytest.fixture
-def client(app):
-    return TestClient(app, raise_server_exceptions=False)
+def client(app, test_user):
+    return authed_test_client(app, test_user)
+
+
+@pytest.fixture
+def admin_client(app, test_admin):
+    return authed_test_client(app, test_admin)
 
 
 def _create_completed_job(db, filestore) -> Job:

@@ -1,0 +1,224 @@
+"""Session-cookie authentication, authorization, CSRF and bootstrap latch.
+
+This module wires together five pieces of behaviour that are inseparable
+in practice:
+
+* **Session resolution** — read ``request.session["uid"]`` / ``["sv"]`` set
+  by Starlette's :class:`SessionMiddleware`, look the user up in the DB,
+  drop the row onto ``request.state.user`` for downstream dependencies.
+* **Session-version invalidation** — admin password resets, deactivation,
+  and self-changes bump ``users.session_version``; sessions whose ``sv``
+  differs from the DB are silently cleared and treated as anonymous.
+* **First-run bootstrap latch** — until at least one active admin exists,
+  every non-public path redirects to ``/register?bootstrap=1``. After the
+  first admin is created, an app-level ``bootstrap_done`` flag avoids
+  hitting the DB on every subsequent request.
+* **CSRF defense** — for ``POST/PUT/PATCH/DELETE`` we require ``Origin``
+  (or ``Referer`` as fallback) to match the request's Host header. This
+  is paired with ``SameSite=Lax`` session cookies; htmx requests in the
+  same browser context send a same-origin ``Origin`` header automatically.
+* **Public path whitelist** — ``/login``, ``/register``, ``/logout``,
+  ``/health``, ``/favicon.ico`` and anything under ``/static/`` skip the
+  auth gate so the login form and assets are reachable while signed out.
+
+Dependencies (:data:`CurrentUserDep`, :data:`AdminUserDep`) read what the
+middleware put on ``request.state``; they do not re-query the DB.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Annotated
+from urllib.parse import quote, urlparse
+
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.responses import RedirectResponse, Response
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from whisper_ui.storage import users_repo
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+
+logger = logging.getLogger(__name__)
+
+
+# Paths that never require authentication. Exact match (not prefix), so
+# ``/login/extra`` would still be gated — there's no nested route below
+# any of these so exact match is precise enough and avoids accidental
+# bypass via path traversal.
+PUBLIC_PATHS = frozenset({"/login", "/register", "/logout", "/health", "/favicon.ico"})
+
+# Path prefixes that never require authentication. ``/static/`` covers
+# CSS, vendored JS, and any future static assets.
+PUBLIC_PREFIXES = ("/static/",)
+
+# HTTP methods that require CSRF protection. GET / HEAD / OPTIONS are
+# considered safe; the route handlers must not perform mutating actions
+# on those verbs (and they don't — verified by inspecting routes/*.py).
+MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+@dataclass(frozen=True)
+class CurrentUser:
+    """The minimum slice of :class:`users_repo.User` needed by route handlers.
+
+    Kept frozen so downstream code cannot mutate it and assume that change
+    has been persisted. Routes that need the full row should re-query.
+    """
+
+    id: int
+    username: str
+    is_admin: bool
+
+
+def _is_public(path: str) -> bool:
+    if path in PUBLIC_PATHS:
+        return True
+    return any(path.startswith(prefix) for prefix in PUBLIC_PREFIXES)
+
+
+def _check_csrf(request: Request) -> bool:
+    """Validate that a mutating request originated from the same site.
+
+    Compares ``Origin`` (preferred) or ``Referer`` (fallback) against the
+    request's ``Host`` header. Returns False on any of: missing Host,
+    missing both Origin and Referer, malformed URL, or hostname/port
+    mismatch.
+
+    This is intentionally strict — for a corporate proxy that strips both
+    headers, operators will need to relax this via a reverse-proxy config
+    that preserves them (documented in README).
+    """
+    host = request.headers.get("host")
+    if not host:
+        return False
+
+    candidate = request.headers.get("origin") or request.headers.get("referer")
+    if not candidate:
+        return False
+
+    try:
+        parsed = urlparse(candidate)
+    except ValueError:
+        return False
+    if not parsed.netloc:
+        return False
+    return parsed.netloc.lower() == host.lower()
+
+
+def _unauthenticated_response(request: Request) -> Response:
+    """Send an unauthenticated client to /login.
+
+    htmx requests get ``401 + HX-Redirect`` so the browser follows the
+    redirect via the htmx hook; everything else gets a plain 302 so a
+    bookmarked URL behaves the obvious way.
+    """
+    next_url = quote(request.url.path)
+    if request.headers.get("hx-request") == "true":
+        return Response(status_code=status.HTTP_401_UNAUTHORIZED, headers={"HX-Redirect": f"/login?next={next_url}"})
+    return RedirectResponse(f"/login?next={next_url}", status_code=status.HTTP_302_FOUND)
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    """Mount in front of route handlers, after :class:`SessionMiddleware`.
+
+    Responsibilities are documented at the module level. Ordering rule:
+    must run **after** SessionMiddleware on the inbound path so
+    ``request.session`` is available, and **before** the request reaches
+    the routers so they always see a populated or absent
+    ``request.state.user``.
+    """
+
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        path = request.url.path
+
+        # Static assets and health probes bypass all auth machinery so they
+        # work without a session cookie. /health in particular should answer
+        # even before the bootstrap latch has been resolved, so external
+        # monitors don't see the app as down during initial setup.
+        if path == "/health" or path.startswith(PUBLIC_PREFIXES):
+            return await call_next(request)
+
+        db = request.app.state.db
+
+        # Bootstrap latch: until the first admin exists, hijack every
+        # non-public path and force it to /register?bootstrap=1. The
+        # one-shot latch on app.state avoids hitting the DB on every
+        # request once an admin has been created.
+        if not request.app.state.bootstrap_done:
+            if users_repo.count_active_admins(db.conn) == 0:
+                if not _is_public(path):
+                    return RedirectResponse("/register?bootstrap=1", status_code=status.HTTP_302_FOUND)
+            else:
+                request.app.state.bootstrap_done = True
+
+        # CSRF check on mutating verbs runs before authentication so a
+        # missing-Origin POST is rejected even if an attacker somehow has
+        # a valid session cookie cached.
+        if request.method in MUTATING_METHODS and not _check_csrf(request):
+            logger.warning(
+                "CSRF check failed for %s %s (origin=%r referer=%r host=%r)",
+                request.method,
+                path,
+                request.headers.get("origin"),
+                request.headers.get("referer"),
+                request.headers.get("host"),
+            )
+            return Response("CSRF check failed", status_code=status.HTTP_403_FORBIDDEN)
+
+        # Resolve the session user. session.get returns None for missing
+        # keys, which is the anonymous case.
+        session_uid = request.session.get("uid")
+        session_sv = request.session.get("sv")
+        user: CurrentUser | None = None
+        if session_uid is not None and session_sv is not None:
+            user_row = users_repo.get_user_by_id(db.conn, session_uid)
+            if user_row is not None and user_row.is_active and user_row.session_version == session_sv:
+                user = CurrentUser(id=user_row.id, username=user_row.username, is_admin=user_row.is_admin)
+            else:
+                # Either the user is gone, deactivated, or session_version
+                # has been bumped (password reset, admin force-out). Drop
+                # the stale session entirely so the client gets re-prompted.
+                request.session.clear()
+
+        # Public paths are always allowed, but if the user does happen to
+        # be logged in we still expose `request.state.user` so the templates
+        # can render a "signed in as X" header.
+        if _is_public(path):
+            if user is not None:
+                request.state.user = user
+            return await call_next(request)
+
+        if user is None:
+            return _unauthenticated_response(request)
+
+        request.state.user = user
+        return await call_next(request)
+
+
+def get_current_user(request: Request) -> CurrentUser:
+    """FastAPI dependency: return the request's authenticated user.
+
+    The middleware has already gated unauthenticated traffic on protected
+    routes, so a missing ``request.state.user`` here means the route is
+    in the public whitelist but the dependency was applied anyway —
+    treat it as 401 rather than crashing.
+    """
+    user: CurrentUser | None = getattr(request.state, "user", None)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    return user
+
+
+def require_admin(user: Annotated[CurrentUser, Depends(get_current_user)]) -> CurrentUser:
+    """FastAPI dependency: 403 unless the request's user has the admin flag."""
+    if not user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
+    return user

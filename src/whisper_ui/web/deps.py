@@ -93,3 +93,10 @@ SettingsDep = Annotated[Settings, Depends(get_settings)]
 DbDep = Annotated[JobDatabase, Depends(get_db)]
 FileStoreDep = Annotated[FileStore, Depends(get_filestore)]
 RedisDep = Annotated[Redis, Depends(get_redis)]
+
+# Re-exported from whisper_ui.web.auth so route modules can pull every
+# request-scoped dependency from one place.
+from whisper_ui.web.auth import CurrentUser, get_current_user, require_admin  # noqa: E402
+
+CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
+AdminUserDep = Annotated[CurrentUser, Depends(require_admin)]
