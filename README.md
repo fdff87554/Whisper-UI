@@ -122,6 +122,43 @@ All settings are configured via environment variables (`.env` file):
 > processing times. GPU deployment with `large-v3` and `int8_float16` gives the
 > best accuracy-to-speed ratio.
 
+### Multi-user authentication
+
+The web tier ships with a lightweight session-cookie authentication
+layer so multiple people can share one deployment without seeing each
+other's transcripts. There is no built-in default account; the **first
+visitor** to a freshly-started instance is bounced to a one-shot
+`/register?bootstrap=1` page that creates the system's first admin.
+Every subsequent visit goes through `/login` or self-service `/register`.
+
+**Required env vars:**
+
+| Variable                | Default | Description                                                                                                                                         |
+| ----------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SESSION_SECRET`        | (empty) | Cookie signing key. Generate once with `openssl rand -hex 32` and keep it stable. Empty value falls back to a per-process random secret (dev only). |
+| `SESSION_HTTPS_ONLY`    | `false` | Set to `true` when behind a TLS-terminating reverse proxy so the cookie is `Secure`.                                                                |
+| `MAX_LOGIN_ATTEMPTS`    | `5`     | After this many failed logins (per username **and** per IP) further attempts are rejected for `LOGIN_LOCKOUT_SECONDS`.                              |
+| `LOGIN_LOCKOUT_SECONDS` | `900`   | Window length for the rate limit.                                                                                                                   |
+
+**Roles:** every account is either a regular user or an admin. Admins
+gain access to `/admin/users` (create / deactivate / promote / reset
+password) and `/admin/jobs` (every user's transcripts, including legacy
+rows from pre-auth deployments). All other capabilities — upload,
+transcript view, export — are identical for both roles.
+
+**Operational notes:**
+
+- Admin resets a forgotten password directly (no SMTP required). Pass
+  the new password to the user through any out-of-band channel.
+- A locked-out account auto-clears after the rate-limit window expires.
+  Unblock immediately with `redis-cli DEL auth:rl:user:<username>` or
+  `auth:rl:ip:<address>`.
+- The middleware enforces CSRF by comparing `Origin` (falling back to
+  `Referer`) against the `Host` header. Your reverse proxy must preserve
+  these headers; nginx and Traefik defaults are fine.
+- Existing jobs from pre-auth deployments are stored with `owner_id IS NULL`
+  and remain visible only on the admin `/admin/jobs` view.
+
 ### Worker topology and queues (advanced)
 
 Each upload is dispatched as an RQ **DAG of sub-jobs** (one per pipeline
