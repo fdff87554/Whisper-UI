@@ -17,7 +17,7 @@ from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.pipeline.audio_probe import get_audio_duration_seconds
 from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
 from whisper_ui.ui import labels as ui_labels
-from whisper_ui.web.deps import DbDep, FileStoreDep, RedisDep, SettingsDep, templates
+from whisper_ui.web.deps import CurrentUserDep, DbDep, FileStoreDep, RedisDep, SettingsDep, templates
 from whisper_ui.web.url_validation import PlaylistURLError, YouTubeURLError, validate_youtube_url
 from whisper_ui.worker.pipeline_dispatcher import enqueue_pipeline
 
@@ -63,7 +63,7 @@ async def _stream_to_file(upload: UploadFile, dest: Path, max_size: int) -> bool
 
 
 @router.get("/upload", response_class=HTMLResponse)
-async def upload_page(request: Request, settings: SettingsDep):
+async def upload_page(request: Request, settings: SettingsDep, user: CurrentUserDep):
     return templates.TemplateResponse(
         request=request,
         name="upload.html",
@@ -91,6 +91,7 @@ async def upload_submit(
     filestore: FileStoreDep,
     redis: RedisDep,
     settings: SettingsDep,
+    user: CurrentUserDep,
     files: Annotated[list[UploadFile] | None, File()] = None,
     language: Annotated[str, Form()] = "zh",
     model_name: Annotated[str, Form()] = "large-v3",
@@ -141,6 +142,7 @@ async def upload_submit(
             convert_to_traditional=convert_to_traditional,
             llm_correction_enabled=llm_correction_enabled,
             batch_id=batch_id,
+            owner_id=user.id,
         )
 
         dest = filestore.prepare_upload_path(job.id, display_name)
@@ -185,6 +187,7 @@ async def upload_url_submit(
     filestore: FileStoreDep,
     redis: RedisDep,
     settings: SettingsDep,
+    user: CurrentUserDep,
     url: Annotated[str, Form()],
     language: Annotated[str, Form()] = "zh",
     model_name: Annotated[str, Form()] = "large-v3",
@@ -255,6 +258,7 @@ async def upload_url_submit(
             convert_to_traditional=convert_to_traditional,
             llm_correction_enabled=llm_correction_enabled,
             batch_id=batch_id,
+            owner_id=user.id,
         )
 
         upload_dir = filestore.prepare_upload_path(job.id, "_").parent

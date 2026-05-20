@@ -12,8 +12,17 @@ from whisper_ui.core.constants import DEFAULT_JOBS_PER_PAGE
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.pipeline.audio_probe import get_audio_duration_seconds
 from whisper_ui.ui import labels as ui_labels
+from whisper_ui.web.auth import owner_filter
 from whisper_ui.web.batch_zip import create_batch_zip
-from whisper_ui.web.deps import DbDep, FileStoreDep, RedisDep, SettingsDep, make_content_disposition, templates
+from whisper_ui.web.deps import (
+    CurrentUserDep,
+    DbDep,
+    FileStoreDep,
+    RedisDep,
+    SettingsDep,
+    make_content_disposition,
+    templates,
+)
 from whisper_ui.web.validation import validate_hex_id
 from whisper_ui.worker.pipeline_dispatcher import enqueue_pipeline
 from whisper_ui.worker.progress import RedisProgressReporter
@@ -37,10 +46,6 @@ def _group_jobs_by_batch(jobs: list[Job]) -> list[tuple[str, list[Job]]]:
     return list(groups.items())
 
 
-def _get_batch_info(db: JobDatabase, batch_ids: set[str]) -> dict[str, dict]:
-    return db.get_batch_stats(batch_ids)
-
-
 def _get_progress_data(redis, jobs: list[Job]) -> dict[str, dict[str, str]]:
     data = {}
     for job in jobs:
@@ -60,22 +65,22 @@ def _build_media_available_map(filestore, jobs: list[Job]) -> dict[str, bool]:
     return {job.id: filestore.get_source_media_path(job.id) is not None for job in jobs if job.source_url}
 
 
-def _build_list_context(db: JobDatabase, redis, filestore, status: str, page: int) -> dict:
+def _build_list_context(db: JobDatabase, redis, filestore, status: str, page: int, owner_id: int | None) -> dict:
     status_filter = status or None
-    total_count = db.count_jobs(status=status_filter)
+    total_count = db.count_jobs(status=status_filter, owner_id=owner_id)
     total_pages = max(1, math.ceil(total_count / DEFAULT_JOBS_PER_PAGE))
     page = max(0, page)
     page = min(page, total_pages - 1)
 
     offset = page * DEFAULT_JOBS_PER_PAGE
-    jobs = db.list_jobs_filtered(status=status_filter, limit=DEFAULT_JOBS_PER_PAGE, offset=offset)
+    jobs = db.list_jobs_filtered(status=status_filter, limit=DEFAULT_JOBS_PER_PAGE, offset=offset, owner_id=owner_id)
 
     groups = _group_jobs_by_batch(jobs)
     batch_ids = {key for key, _ in groups if not key.startswith("_single:")}
-    batch_info = _get_batch_info(db, batch_ids)
+    batch_info = db.get_batch_stats(batch_ids, owner_id=owner_id)
     progress_data = _get_progress_data(redis, jobs)
     media_available_map = _build_media_available_map(filestore, jobs)
-    has_active = db.has_active_jobs()
+    has_active = db.has_active_jobs(owner_id=owner_id)
 
     return {
         "groups": groups,
@@ -96,16 +101,18 @@ async def jobs_page(
     db: DbDep,
     redis: RedisDep,
     filestore: FileStoreDep,
+    user: CurrentUserDep,
     submitted: int | None = None,
     status: str = "",
     page: int = 0,
 ):
     if status not in _VALID_STATUS_FILTERS:
         status = ""
-    ctx = _build_list_context(db, redis, filestore, status, page)
+    owner_id = owner_filter(user)
+    ctx = _build_list_context(db, redis, filestore, status, page, owner_id)
     ctx["active_page"] = "jobs"
     ctx["submitted"] = submitted
-    ctx["status_counts"] = db.get_status_counts()
+    ctx["status_counts"] = db.get_status_counts(owner_id=owner_id)
     return templates.TemplateResponse(request=request, name="jobs.html", context=ctx)
 
 
@@ -115,10 +122,11 @@ async def jobs_list_fragment(
     db: DbDep,
     redis: RedisDep,
     filestore: FileStoreDep,
+    user: CurrentUserDep,
     status: str = "",
     page: int = 0,
 ):
-    ctx = _build_list_context(db, redis, filestore, status, page)
+    ctx = _build_list_context(db, redis, filestore, status, page, owner_filter(user))
     return templates.TemplateResponse(request=request, name="_job_list.html", context=ctx)
 
 
@@ -150,10 +158,12 @@ async def retry_job(
     redis: RedisDep,
     settings: SettingsDep,
     filestore: FileStoreDep,
+    user: CurrentUserDep,
 ):
     validate_hex_id(job_id, "job_id")
-    job = db.get_job(job_id)
+    job = db.get_job(job_id, owner_id=owner_filter(user))
     if job is None or job.status != JobStatus.FAILED:
+        # 404 (not 403) so cross-user access does not leak job existence.
         return Response(status_code=404)
 
     try:
@@ -178,9 +188,9 @@ async def retry_job(
 
 
 @router.delete("/jobs/{job_id}")
-async def delete_job(job_id: str, db: DbDep, filestore: FileStoreDep, redis: RedisDep):
+async def delete_job(job_id: str, db: DbDep, filestore: FileStoreDep, redis: RedisDep, user: CurrentUserDep):
     validate_hex_id(job_id, "job_id")
-    job = db.get_job(job_id)
+    job = db.get_job(job_id, owner_id=owner_filter(user))
     if job is None:
         return Response(status_code=404)
     if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
@@ -199,9 +209,10 @@ async def retry_batch(
     redis: RedisDep,
     settings: SettingsDep,
     filestore: FileStoreDep,
+    user: CurrentUserDep,
 ):
     validate_hex_id(batch_id, "batch_id")
-    all_jobs = db.list_jobs_by_batch(batch_id)
+    all_jobs = db.list_jobs_by_batch(batch_id, owner_id=owner_filter(user))
     if not all_jobs:
         return Response(status_code=404)
 
@@ -229,9 +240,9 @@ async def retry_batch(
 
 
 @router.delete("/jobs/batch/{batch_id}")
-async def delete_batch(batch_id: str, db: DbDep, filestore: FileStoreDep, redis: RedisDep):
+async def delete_batch(batch_id: str, db: DbDep, filestore: FileStoreDep, redis: RedisDep, user: CurrentUserDep):
     validate_hex_id(batch_id, "batch_id")
-    all_jobs = db.list_jobs_by_batch(batch_id)
+    all_jobs = db.list_jobs_by_batch(batch_id, owner_id=owner_filter(user))
     if not all_jobs:
         return Response(status_code=404)
 
@@ -246,9 +257,15 @@ async def delete_batch(batch_id: str, db: DbDep, filestore: FileStoreDep, redis:
 
 
 @router.get("/jobs/batch/{batch_id}/download")
-async def batch_download(batch_id: str, db: DbDep, filestore: FileStoreDep, format_name: str = "srt"):
+async def batch_download(
+    batch_id: str,
+    db: DbDep,
+    filestore: FileStoreDep,
+    user: CurrentUserDep,
+    format_name: str = "srt",
+):
     validate_hex_id(batch_id, "batch_id")
-    all_jobs = db.list_jobs_by_batch(batch_id)
+    all_jobs = db.list_jobs_by_batch(batch_id, owner_id=owner_filter(user))
     if not all_jobs:
         raise HTTPException(status_code=404, detail="Batch not found")
 

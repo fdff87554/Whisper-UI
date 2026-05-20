@@ -203,6 +203,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+def owner_filter(user: CurrentUser) -> int | None:
+    """Return the ``owner_id`` value to pass to :mod:`JobDatabase` queries.
+
+    Non-admin users see only their own jobs (filter on ``owner_id = user.id``);
+    admins see everything (``None`` disables the filter at the SQL layer).
+    Returning ``None`` rather than ``user.id`` for admins is what allows
+    admin-only views like ``/admin/jobs`` to surface legacy NULL-owner rows
+    from pre-auth deployments.
+    """
+    return None if user.is_admin else user.id
+
+
 def get_current_user(request: Request) -> CurrentUser:
     """FastAPI dependency: return the request's authenticated user.
 

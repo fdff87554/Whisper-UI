@@ -11,7 +11,7 @@ from whisper_ui.web.deps import _format_relative_time, _format_time, make_conten
 
 
 @pytest.fixture
-def app(settings, db, filestore):
+def app(settings, db, filestore, test_user):
     application = create_app()
     application.state.settings = settings
     application.state.db = db
@@ -23,6 +23,21 @@ def app(settings, db, filestore):
     # create users explicitly via fixtures, so flipping this latch up
     # front avoids /register?bootstrap=1 redirects before the first request.
     application.state.bootstrap_done = True
+
+    # Convenience: existing tests build jobs via db.insert_job(Job(...))
+    # without an owner_id, which would make them invisible to the authed
+    # `client` (alice) after the owner-gate landed. Patch the insert so a
+    # missing owner_id silently defaults to alice — explicit ownership in
+    # new tests still wins. test_database.py uses the bare `db` fixture
+    # from conftest.py and is unaffected.
+    original_insert = db.insert_job
+
+    def insert_with_default_owner(job):
+        if job.owner_id is None:
+            job.owner_id = test_user.id
+        original_insert(job)
+
+    db.insert_job = insert_with_default_owner
     return application
 
 
