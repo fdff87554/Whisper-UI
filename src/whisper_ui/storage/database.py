@@ -64,6 +64,17 @@ class JobDatabase:
         self._conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
         init_db(self._conn)
 
+    @property
+    def conn(self) -> sqlite3.Connection:
+        """Underlying SQLite connection.
+
+        Exposed so sibling repositories (e.g. ``users_repo``) can share the
+        same connection and the same ``row_factory`` / WAL configuration
+        without each one having to open its own. Read-only by convention;
+        callers must not close it — that is :meth:`close`'s job.
+        """
+        return self._conn
+
     def close(self) -> None:
         self._conn.close()
 
