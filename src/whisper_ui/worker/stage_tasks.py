@@ -208,6 +208,11 @@ def _run_single_stage(
         _mark_processing_if_queued(runtime, job)
         ctx_store = PipelineContextStore(runtime.redis, parent_job_id)
         context = ctx_store.load()
+        # Make parent_job_id visible to stages that probe / log on behalf
+        # of this job. The key never reaches the persisted output_keys
+        # set, so adding it here is in-memory only and does not pollute
+        # the Redis context hash.
+        context["parent_job_id"] = parent_job_id
 
         if pre_context_update is not None:
             pre_context_update(job, runtime, context)

@@ -55,7 +55,7 @@ class PreprocessStage:
         except subprocess.TimeoutExpired as err:
             raise PreprocessError("Audio conversion timed out (>5min).") from err
 
-        duration = get_audio_duration_seconds(output_path) or 0.0
+        duration = get_audio_duration_seconds(output_path, job_id=context.get("parent_job_id")) or 0.0
 
         if on_progress:
             on_progress(1.0, PREPROCESS_DONE)

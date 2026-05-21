@@ -145,7 +145,7 @@ def _probe_retry_duration(job: Job) -> float | None:
     if job.source_url:
         return None
     try:
-        return get_audio_duration_seconds(job.filepath)
+        return get_audio_duration_seconds(job.filepath, job_id=job.id)
     except Exception:  # pragma: no cover - defensive, ffprobe helper already swallows
         logger.exception("Failed to probe duration for retry of job %s", job.id)
         return None
