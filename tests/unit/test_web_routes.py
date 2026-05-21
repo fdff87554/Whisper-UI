@@ -524,6 +524,33 @@ class TestUploadPost:
         assert resp.status_code == 303
         assert "error=no_files" in resp.headers["location"]
 
+    def test_upload_logs_batch_start_and_finish(self, client, app, caplog):
+        import logging as _logging
+
+        with (
+            patch("whisper_ui.web.routes.upload.enqueue_pipeline"),
+            caplog.at_level(_logging.INFO, logger="whisper_ui.web.routes.upload"),
+        ):
+            self._upload(client)
+
+        messages = [r.getMessage() for r in caplog.records]
+        assert any("upload batch starting" in m and "files=1" in m for m in messages)
+        assert any("upload job inserted" in m and "filename='test.mp3'" in m for m in messages)
+        assert any("upload batch finished" in m and "submitted=1" in m for m in messages)
+
+    def test_upload_too_large_logs_rejection(self, client, app, caplog):
+        import logging as _logging
+
+        app.state.settings = app.state.settings.model_copy(update={"max_upload_size": 5})
+        files = [("files", ("big.mp3", b"x" * 10, "audio/mpeg"))]
+        with (
+            patch("whisper_ui.web.routes.upload.enqueue_pipeline"),
+            caplog.at_level(_logging.WARNING, logger="whisper_ui.web.routes.upload"),
+        ):
+            self._upload(client, files=files)
+
+        assert any("upload rejected" in r.getMessage() for r in caplog.records)
+
     def test_upload_partial_enqueue_failure_reports_failed_count(self, client, app, db):
         # First file succeeds, second raises — simulate a transient Redis error.
         enqueue_side_effects = [None, Exception("Redis hiccup")]
