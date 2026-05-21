@@ -6,8 +6,17 @@ the handler runs. Mutating handlers additionally guard against the
 
 * Cannot deactivate / demote / delete the last active admin
   (enforced inside ``users_repo`` so future call sites inherit the rule).
-* Cannot act on your own account through the admin UI — separate, deliberate
-  self-service flows belong outside the admin scope (v2).
+* Self-action policy:
+
+  - ``deactivate`` / ``toggle-admin``: blocked, because both could lock
+    the operator out of the admin UI in a single click.
+  - ``activate``: silently allowed — to reach this endpoint at all the
+    admin must already be active, so activating self is a harmless no-op.
+  - ``reset-password``: **deliberately allowed**. A single-admin deployment
+    has no other admin to perform the reset, and the action is harmless
+    (the operator types their own new password and logs back in). Logged
+    at WARNING level for audit. A future self-service "change my
+    password" page would supersede this.
 
 The global jobs page reuses :func:`jobs._build_list_context` with
 ``owner_id=None`` (admin view), so the same UI components render — only
@@ -118,6 +127,9 @@ async def admin_deactivate_user(user_id: int, db: DbDep, admin: AdminUserDep):
 
 @router.post("/users/{user_id}/activate")
 async def admin_activate_user(user_id: int, db: DbDep, admin: AdminUserDep):
+    # No self-action guard: to reach this handler the admin must already
+    # be active (the auth middleware would have cleared a deactivated
+    # session). Activating self is a harmless no-op.
     users_repo.set_active(db.conn, user_id, active=True)
     logger.info("admin %r activated uid=%s", admin.username, user_id)
     return _admin_redirect()
@@ -154,6 +166,11 @@ async def admin_reset_password(
     """Set a user's password directly. Bumps session_version (invalidates
     all that user's sessions). No "old password" required — the admin is
     trusted to verify identity through an out-of-band channel.
+
+    Self-reset is allowed (see module docstring) but logged at WARNING
+    so audit log searches surface every "admin reset their own password"
+    event. The next request from that admin will be rejected by the
+    session-version check and they will be redirected back to /login.
     """
     if len(new_password) < MIN_PASSWORD_LENGTH:
         return _admin_redirect(error="password_short")
@@ -161,7 +178,13 @@ async def admin_reset_password(
     if target is None:
         return _admin_redirect()
     users_repo.set_password(db.conn, user_id, new_password)
-    logger.info("admin %r reset password for %r", admin.username, target.username)
+    if user_id == admin.id:
+        logger.warning(
+            "admin %r reset OWN password — session invalidated, re-login required",
+            admin.username,
+        )
+    else:
+        logger.info("admin %r reset password for %r", admin.username, target.username)
     return _admin_redirect()
 
 

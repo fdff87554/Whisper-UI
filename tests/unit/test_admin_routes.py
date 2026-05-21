@@ -239,6 +239,48 @@ def test_admin_create_user_validates_username_pattern(app, db, test_admin):
     assert resp.headers["location"].startswith("/admin/users?error=username_invalid")
 
 
+def test_admin_can_reset_own_password(app, db, test_admin):
+    """Self-reset is deliberately allowed (see admin.py docstring).
+    The action invalidates the admin's current session via session_version
+    bump; subsequent requests with the old cookie will redirect to /login.
+    """
+    client = authed_test_client(app, test_admin)
+    old_hash = test_admin.password_hash
+    old_sv = test_admin.session_version
+
+    resp = client.post(
+        f"/admin/users/{test_admin.id}/reset-password",
+        data={"new_password": "newsecret42"},
+        follow_redirects=False,
+    )
+
+    assert resp.status_code == 303
+    updated = users_repo.get_user_by_id(db.conn, test_admin.id)
+    assert updated.password_hash != old_hash
+    assert updated.session_version == old_sv + 1
+    assert users_repo.verify_password(updated, "newsecret42") is True
+
+
+def test_admin_self_reset_emits_warning_log(app, db, test_admin, caplog):
+    """Self-reset must surface in audit logs at WARNING level so an admin
+    accidentally (or maliciously) changing their own password is visible
+    on routine log review.
+    """
+    import logging
+
+    caplog.set_level(logging.WARNING, logger="whisper_ui.web.routes.admin")
+    client = authed_test_client(app, test_admin)
+
+    client.post(
+        f"/admin/users/{test_admin.id}/reset-password",
+        data={"new_password": "newsecret42"},
+    )
+
+    matches = [r for r in caplog.records if "OWN password" in r.getMessage()]
+    assert len(matches) == 1
+    assert matches[0].levelno == logging.WARNING
+
+
 def test_admin_reset_password_for_missing_user_is_noop(app, db, test_admin):
     client = authed_test_client(app, test_admin)
 
