@@ -3,8 +3,9 @@
 The limit is structured as two parallel counters per attempt: one keyed on
 the username (so credential stuffing against one account is bounded) and
 one keyed on the client IP (so a single source cannot exhaust attempts
-across many accounts). Hitting the threshold on *either* counter rejects
-the attempt.
+across many accounts). Each counter has its own threshold
+(``max_user_attempts`` and ``max_ip_attempts``); tripping either one
+rejects the next attempt.
 
 The window is implemented as a Redis ``INCR`` with ``EXPIRE NX``: the TTL
 is set only on first increment so the window slides forward exactly once
