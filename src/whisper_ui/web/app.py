@@ -162,6 +162,12 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     from whisper_ui.core.config import get_settings
+    from whisper_ui.core.logging_setup import setup_logging
+
+    # Apply the project-wide dictConfig before anything else logs. Calling
+    # later would leave early startup lines (Settings validation, etc.)
+    # going through Python's default WARNING-only root logger.
+    setup_logging()
 
     settings = get_settings()
     application = FastAPI(title="Whisper UI", lifespan=lifespan)

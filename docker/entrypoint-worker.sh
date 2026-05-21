@@ -26,10 +26,14 @@ echo "Model cache directory: ${MODEL_DIR}"
 # class queue names.
 WORKER_QUEUES="${WORKER_QUEUES:-whisper:gpu whisper:io whisper:cpu default}"
 
-# Start RQ worker
+# Start RQ worker via the whisper_ui.worker wrapper, which calls
+# setup_logging() before delegating to rq.cli so dictConfig (including the
+# request_context filter and the RQ-noise suppression) applies to the same
+# process that RQ runs in. The CLI flags below are passed through to RQ
+# unchanged.
 echo "Starting RQ worker on queues: ${WORKER_QUEUES}"
 # shellcheck disable=SC2086
-exec python -m rq.cli worker \
+exec python -m whisper_ui.worker worker \
 	--url "${REDIS_URL:-redis://redis:6379/0}" \
 	--name "whisper-worker-$(hostname)" \
 	${WORKER_QUEUES}
