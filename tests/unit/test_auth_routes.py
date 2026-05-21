@@ -98,7 +98,11 @@ def test_login_post_with_unknown_username_returns_same_error(app):
     assert resp.headers["location"].startswith("/login?error=invalid")
 
 
-def test_login_post_for_inactive_user_returns_inactive_error(app, db, test_user):
+def test_login_inactive_user_with_correct_password_returns_inactive(app, db, test_user):
+    """A legitimate user whose admin disabled their account sees the
+    "account inactive" message — but only when they prove identity via
+    the correct password.
+    """
     users_repo.set_active(db.conn, test_user.id, active=False)
     client = _anon_client(app)
 
@@ -109,6 +113,56 @@ def test_login_post_for_inactive_user_returns_inactive_error(app, db, test_user)
 
     assert resp.status_code == 302
     assert resp.headers["location"].startswith("/login?error=inactive")
+
+
+def test_login_inactive_user_with_wrong_password_returns_invalid(app, db, test_user):
+    """Account-state must NOT be leaked to anyone who does not know the
+    password. The inactive-account message would otherwise tell an
+    attacker which accounts exist and have been deactivated.
+    """
+    users_repo.set_active(db.conn, test_user.id, active=False)
+    client = _anon_client(app)
+
+    resp = client.post(
+        "/login",
+        data={"username": "alice", "password": "wrongpassword"},
+    )
+
+    assert resp.status_code == 302
+    # Same error code as "unknown user" and "wrong password for active user".
+    assert resp.headers["location"].startswith("/login?error=invalid")
+
+
+def test_login_inactive_with_correct_password_does_not_record_failure(app, db, test_user):
+    """Legitimate inactive users typing their own password are not
+    attackers; counting them as rate-limit failures could lock their IP
+    out for the whole office. The inactive branch deliberately skips
+    record_failure.
+    """
+    users_repo.set_active(db.conn, test_user.id, active=False)
+    client = _anon_client(app)
+    redis = app.state.redis
+
+    # Confirm the counter is clean.
+    assert redis.get("auth:rl:user:alice") in (None, b"0")
+
+    client.post("/login", data={"username": "alice", "password": "password123"})
+
+    # No failure counter bump because the user proved identity.
+    assert redis.get("auth:rl:user:alice") in (None, b"0")
+
+
+def test_login_inactive_with_wrong_password_does_record_failure(app, db, test_user):
+    """Anyone probing wrong passwords against any account is rate-limited,
+    even if the target account happens to be deactivated.
+    """
+    users_repo.set_active(db.conn, test_user.id, active=False)
+    client = _anon_client(app)
+    redis = app.state.redis
+
+    client.post("/login", data={"username": "alice", "password": "wrongpassword"})
+
+    assert int(redis.get("auth:rl:user:alice") or 0) == 1
 
 
 def test_login_next_parameter_only_accepts_relative_path(app, test_user):

@@ -126,10 +126,17 @@ async def login_submit(
     """Authenticate a user and start a session.
 
     Always performs an argon2 verify (dummy when the user is unknown) so the
-    response time does not leak username existence. On failure the response
-    is the same generic message — never "user not found" vs "wrong password".
+    response time does not leak username existence. On wrong-password and
+    unknown-user the response is the same generic message — never "user
+    not found" vs "wrong password".
 
-    Rate limit: when the per-user OR per-IP counter is already over the
+    Account-state leak protection: ``is_active`` is only checked **after**
+    a successful password verification. An attacker probing arbitrary
+    passwords gets a generic ``invalid`` regardless of whether the account
+    exists, is active, or is deactivated. Only a legitimate user who knows
+    their own password ever sees the ``inactive`` message.
+
+    Rate limit: when the per-user OR per-IP counter has reached the
     threshold we short-circuit without doing any DB / argon2 work, so
     locked accounts cannot be used as a CPU-burn vector.
     """
@@ -146,21 +153,31 @@ async def login_submit(
     user_row = users_repo.get_user_by_username(db.conn, username)
 
     if user_row is None:
+        # Unknown user: do a dummy argon2 verify so the unknown-user
+        # branch takes a comparable wall-clock time to the wrong-password
+        # branch below.
         users_repo.dummy_verify(password)
         logger.info("login failed: unknown username %r", username)
         _record_failure(redis, settings, username=username, ip=ip)
         return _login_error_redirect(request, next_url, "invalid")
 
-    if not user_row.is_active:
-        users_repo.dummy_verify(password)  # still even out timing
-        logger.info("login failed: inactive account %r", user_row.username)
-        _record_failure(redis, settings, username=user_row.username, ip=ip)
-        return _login_error_redirect(request, next_url, "inactive")
-
+    # Verify the password BEFORE checking is_active. Reversing this order
+    # would let an attacker submit any password to a known username and
+    # observe whether the account is deactivated, which is an account-
+    # enumeration leak. Verifying first means the inactive branch is only
+    # reachable by someone who can already authenticate as the user.
     if not users_repo.verify_password(user_row, password):
         logger.info("login failed: wrong password for %r", user_row.username)
         _record_failure(redis, settings, username=user_row.username, ip=ip)
         return _login_error_redirect(request, next_url, "invalid")
+
+    if not user_row.is_active:
+        # Legitimate-but-deactivated user. Deliberately NOT recording a
+        # rate-limit failure here: a user with the correct password is
+        # not abusing the form, and counting them as a failure would let
+        # them accidentally lock their own IP.
+        logger.info("login blocked: inactive account %r", user_row.username)
+        return _login_error_redirect(request, next_url, "inactive")
 
     request.session["uid"] = user_row.id
     request.session["sv"] = user_row.session_version
