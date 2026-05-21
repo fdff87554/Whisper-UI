@@ -151,6 +151,8 @@
       if (nav) {
         if (path === '/') nav.activePage = 'dashboard';
         else if (path.startsWith('/upload')) nav.activePage = 'upload';
+        else if (path.startsWith('/admin/users')) nav.activePage = 'admin_users';
+        else if (path.startsWith('/admin/jobs')) nav.activePage = 'admin_jobs';
         else if (path.startsWith('/jobs') || path.startsWith('/viewer')) nav.activePage = 'jobs';
         else nav.activePage = '';
       }

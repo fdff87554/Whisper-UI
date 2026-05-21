@@ -40,7 +40,7 @@
       <li>
         <a href="/admin/users"
            hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true"
-           :class="{ 'menu-active': $store.nav.activePage === 'admin' }"
+           :class="{ 'menu-active': $store.nav.activePage === 'admin_users' }"
            title="{{ labels.ADMIN_NAV_USERS }}">
           {{ icon_list("w-5 h-5 shrink-0") }}
           <span class="sidebar-label sr-only lg:not-sr-only">{{ labels.ADMIN_NAV_USERS }}</span>
@@ -49,7 +49,7 @@
       <li>
         <a href="/admin/jobs"
            hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true"
-           :class="{ 'menu-active': $store.nav.activePage === 'admin' and request.url.path == '/admin/jobs' }"
+           :class="{ 'menu-active': $store.nav.activePage === 'admin_jobs' }"
            title="{{ labels.ADMIN_NAV_JOBS }}">
           {{ icon_list("w-5 h-5 shrink-0") }}
           <span class="sidebar-label sr-only lg:not-sr-only">{{ labels.ADMIN_NAV_JOBS }}</span>

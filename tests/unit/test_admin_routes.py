@@ -45,6 +45,48 @@ def test_admin_can_load_admin_users_page(app, db, test_admin, bob):
     assert test_admin.username in resp.text
 
 
+def test_admin_users_page_uses_admin_users_active_value(app, test_admin):
+    """The sidebar's Alpine :class binding compares activePage to the
+    literal 'admin_users' (not 'admin'), so the route must set that
+    exact value into the Alpine store on initial render.
+    """
+    client = authed_test_client(app, test_admin)
+
+    resp = client.get("/admin/users")
+
+    assert resp.status_code == 200
+    # Alpine.store('nav', { activePage: '{{ active_page }}' }) renders this.
+    assert "activePage: 'admin_users'" in resp.text
+
+
+def test_admin_jobs_page_uses_admin_jobs_active_value(app, test_admin):
+    client = authed_test_client(app, test_admin)
+
+    resp = client.get("/admin/jobs")
+
+    assert resp.status_code == 200
+    assert "activePage: 'admin_jobs'" in resp.text
+
+
+def test_admin_sidebar_renders_well_formed_alpine_expressions(app, test_admin):
+    """Regression: previously the /admin/jobs link contained the broken
+    expression ``$store.nav.activePage === 'admin' and request.url.path
+    == '/admin/jobs'`` which is invalid JavaScript (Python `and`,
+    server-side `request` reference). The fixed version must only
+    compare to the new activePage literal.
+    """
+    client = authed_test_client(app, test_admin)
+
+    resp = client.get("/admin/users")
+
+    assert resp.status_code == 200
+    # The buggy fragment must not appear anywhere.
+    assert "and request.url.path" not in resp.text
+    # Both admin sidebar items use the new keyed literals.
+    assert "$store.nav.activePage === 'admin_users'" in resp.text
+    assert "$store.nav.activePage === 'admin_jobs'" in resp.text
+
+
 def test_admin_can_create_user(app, db, test_admin):
     client = authed_test_client(app, test_admin)
 

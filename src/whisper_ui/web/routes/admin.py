@@ -60,7 +60,7 @@ async def admin_users_page(request: Request, db: DbDep, admin: AdminUserDep, err
         request=request,
         name="admin_users.html",
         context={
-            "active_page": "admin",
+            "active_page": "admin_users",
             "users": users,
             "job_counts": job_counts,
             "current_admin_id": admin.id,
@@ -204,7 +204,7 @@ async def admin_jobs_page(
         status = ""
     # owner_id=None → no owner filter; admin sees everything.
     ctx = _build_list_context(db, redis, filestore, status, page, owner_id=None)
-    ctx["active_page"] = "admin"
+    ctx["active_page"] = "admin_jobs"
     ctx["status_counts"] = db.get_status_counts()
     ctx["DEFAULT_JOBS_PER_PAGE"] = DEFAULT_JOBS_PER_PAGE
 
