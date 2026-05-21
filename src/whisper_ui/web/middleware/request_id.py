@@ -1,24 +1,34 @@
-"""Request-ID middleware that pins a correlation id onto every HTTP request.
+"""Request-ID middleware that owns per-request observability.
 
-Reads the inbound ``X-Request-ID`` header when present (must be 8-64 hex
-characters; anything else is treated as missing) or generates a fresh
-8-character hex id. Exposes the id via the contextvars in
-:mod:`whisper_ui.core.logging_setup`, so every log line emitted during
-the request — including those from downstream middleware and the route
-handler — automatically renders ``[req=<id> user=...]``. Writes the same
-id back on the response as ``X-Request-ID`` so a browser devtools panel
-or upstream nginx access log can join on the same key.
+Two responsibilities, kept in one middleware because they share the same
+request lifecycle and timing window:
 
-Registered as the **outermost** middleware in :func:`whisper_ui.web.app.create_app`
-so the context var is set before SessionMiddleware / AuthMiddleware run.
-The user_id var is initialised to the default ``'-'`` here; AuthMiddleware
-overlays the resolved user later in the chain.
+1. **Correlation id**: read the inbound ``X-Request-ID`` header (8-64 hex
+   chars; anything else is treated as missing) or generate a fresh
+   8-character hex id; publish it on the contextvars from
+   :mod:`whisper_ui.core.logging_setup` so every log line during the
+   request renders ``[req=<id> user=...]``; echo it back as
+   ``X-Request-ID`` for upstream nginx / browser devtools to join on.
+2. **Structured access log**: on response (success **or** exception)
+   emit one INFO line on the ``whisper_ui.web.access`` logger with
+   ``method``, ``path``, ``status``, ``duration_ms``, and ``ip``. This
+   replaces uvicorn's built-in access log (silenced via dictConfig and
+   the ``--no-access-log`` flag on the container CMD) so every access
+   record automatically inherits the request_id / user_id contextvars.
+
+Registered as the **outermost** middleware in
+:func:`whisper_ui.web.app.create_app` so the context var is set before
+SessionMiddleware / AuthMiddleware run and so the duration timer covers
+their work. The user_id var is initialised to the default ``'-'`` here;
+AuthMiddleware overlays the resolved user later in the chain.
 """
 
 from __future__ import annotations
 
+import logging
 import re
 import secrets
+import time
 from typing import TYPE_CHECKING
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -37,6 +47,13 @@ REQUEST_ID_HEADER = "X-Request-ID"
 # faithfully. Reject anything else (path traversal, control chars,
 # absurdly long blobs) and generate a fresh id instead.
 _REQUEST_ID_PATTERN = re.compile(r"^[0-9a-f]{8,64}$", re.IGNORECASE)
+# Status code reported when call_next raises before producing a response.
+# uvicorn / starlette will translate the exception into a real 500 to the
+# client, but our middleware never sees the constructed response, so the
+# access log records the sentinel instead of guessing.
+_UNCAUGHT_STATUS_SENTINEL = 500
+
+_access_logger = logging.getLogger("whisper_ui.web.access")
 
 
 def _generate_request_id() -> str:
@@ -53,8 +70,13 @@ def _normalise_request_id(raw: str | None) -> str:
     return _generate_request_id()
 
 
+def _client_ip(request: Request) -> str:
+    client = request.client
+    return client.host if client is not None else "-"
+
+
 class RequestIdMiddleware(BaseHTTPMiddleware):
-    """Bind a per-request correlation id to the logging contextvars."""
+    """Bind a per-request correlation id and emit a structured access log."""
 
     def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)
@@ -62,12 +84,24 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         request_id = _normalise_request_id(request.headers.get(REQUEST_ID_HEADER))
         tokens = set_request_context(request_id=request_id, user_id="-")
+        start_ns = time.perf_counter_ns()
+        status_code: int = _UNCAUGHT_STATUS_SENTINEL
         try:
             response = await call_next(request)
+            status_code = response.status_code
+            response.headers[REQUEST_ID_HEADER] = request_id
+            return response
         finally:
-            # Reset before adding the header so concurrent requests cannot
-            # observe each other's id even if the response object is later
-            # processed on a different task.
+            duration_ms = (time.perf_counter_ns() - start_ns) // 1_000_000
+            _access_logger.info(
+                "method=%s path=%s status=%s duration_ms=%s ip=%s",
+                request.method,
+                request.url.path,
+                status_code,
+                duration_ms,
+                _client_ip(request),
+            )
+            # Reset after logging so the access record still renders with
+            # this request's id (the filter reads the contextvar at format
+            # time, not at LogRecord creation).
             reset_request_context(tokens)
-        response.headers[REQUEST_ID_HEADER] = request_id
-        return response
