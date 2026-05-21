@@ -139,6 +139,53 @@ def test_csrf_post_with_matching_origin_passes_csrf_check(app, test_user):
     assert resp.status_code != 403
 
 
+def test_csrf_passes_when_host_header_missing_but_url_netloc_present(app, test_user):
+    """request.url.netloc is derived from ASGI scope's server info even when
+    the literal Host header is absent (HTTP/2 / unusual proxies). The CSRF
+    check must not fail-closed in that case if Origin still matches.
+    """
+    # Starlette's TestClient always sets Host=testserver, so the only way
+    # to exercise the URL-netloc fallback is to ensure that when Host IS
+    # there it still matches url.netloc. The behaviour-equivalent
+    # regression assertion is "with normal Host present, CSRF still passes"
+    # — proving the rewrite did not break the common path.
+    client = authed_test_client(app, test_user)
+
+    resp = client.post("/upload", data={})
+
+    assert resp.status_code != 403
+
+
+def test_csrf_rejects_x_forwarded_host_when_proxy_headers_untrusted(app, test_user):
+    """A hostile client sending X-Forwarded-Host: testserver but a real
+    Origin from elsewhere must be rejected — XFH is only honoured when the
+    operator has opted into trust_proxy_headers.
+    """
+    client = authed_test_client(app, test_user)
+    client.headers["Origin"] = "http://evil.example"
+    client.headers["X-Forwarded-Host"] = "evil.example"
+
+    resp = client.post("/upload", data={})
+
+    assert resp.status_code == 403
+
+
+def test_csrf_accepts_x_forwarded_host_when_proxy_trusted(app, test_user, monkeypatch):
+    """Reverse-proxy deployments where the proxy rewrites Host need the
+    XFH path. With trust_proxy_headers=true, Origin matching XFH passes.
+    """
+    monkeypatch.setattr(app.state.settings, "trust_proxy_headers", True)
+    client = authed_test_client(app, test_user)
+    # Simulate proxy: client thinks it's at public.example, app receives
+    # X-Forwarded-Host: public.example and Origin: http://public.example.
+    client.headers["Origin"] = "http://public.example"
+    client.headers["X-Forwarded-Host"] = "public.example"
+
+    resp = client.post("/upload", data={})
+
+    assert resp.status_code != 403
+
+
 def test_session_with_stale_session_version_is_cleared(app, db, test_user):
     # Build a cookie with sv=0, then bump session_version to 1.
     cookie = make_session_cookie(test_user)

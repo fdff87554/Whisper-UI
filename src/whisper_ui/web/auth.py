@@ -84,18 +84,21 @@ def _check_csrf(request: Request) -> bool:
     """Validate that a mutating request originated from the same site.
 
     Compares ``Origin`` (preferred) or ``Referer`` (fallback) against the
-    request's ``Host`` header. Returns False on any of: missing Host,
-    missing both Origin and Referer, malformed URL, or hostname/port
-    mismatch.
+    request's own host. The host source is ``request.url.netloc`` rather
+    than the raw ``Host`` header: Starlette derives ``url.netloc`` from
+    the ASGI scope (``server`` + ``Host``), which is more robust to
+    HTTP/2 ``:authority`` translation and to proxy configurations that
+    arrive without a literal ``Host`` header.
 
-    This is intentionally strict — for a corporate proxy that strips both
-    headers, operators will need to relax this via a reverse-proxy config
-    that preserves them (documented in README).
+    When ``settings.trust_proxy_headers`` is True, ``X-Forwarded-Host``
+    is also accepted as the expected host — required when a reverse
+    proxy terminates TLS and rewrites the Host header to the upstream
+    address (the client's browser sees ``example.com`` but the app sees
+    ``Host: app:8000``).
+
+    Returns False on any of: missing both Origin and Referer, malformed
+    URL, or hostname/port mismatch against every accepted host value.
     """
-    host = request.headers.get("host")
-    if not host:
-        return False
-
     candidate = request.headers.get("origin") or request.headers.get("referer")
     if not candidate:
         return False
@@ -106,7 +109,21 @@ def _check_csrf(request: Request) -> bool:
         return False
     if not parsed.netloc:
         return False
-    return parsed.netloc.lower() == host.lower()
+
+    accepted_hosts: list[str] = []
+    netloc = request.url.netloc
+    if netloc:
+        accepted_hosts.append(netloc.lower())
+
+    settings = getattr(request.app.state, "settings", None)
+    if settings is not None and getattr(settings, "trust_proxy_headers", False):
+        xfh = request.headers.get("x-forwarded-host")
+        if xfh:
+            accepted_hosts.append(xfh.lower())
+
+    if not accepted_hosts:
+        return False
+    return parsed.netloc.lower() in accepted_hosts
 
 
 def _unauthenticated_response(request: Request) -> Response:
