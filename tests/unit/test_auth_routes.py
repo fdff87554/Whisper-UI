@@ -282,18 +282,19 @@ def test_session_persists_across_requests_after_login(app, test_user):
     assert follow.status_code == 200
 
 
-def test_login_rate_limit_blocks_after_threshold(app, test_user):
-    """Exceeding settings.max_login_attempts within the window must block
-    further attempts. Default is 5 attempts → the 6th request hits the
-    rate-limit branch regardless of password correctness.
+def test_login_rate_limit_blocks_at_threshold(app, test_user):
+    """settings.max_login_attempts failed logins must block attempt N+1.
+
+    With default max_attempts=5, after exactly 5 failures the next attempt
+    (even with the correct password) is rejected with rate_limited.
     """
     client = _anon_client(app)
     settings = app.state.settings
-    # Drive the per-user counter over the threshold with deliberate fails.
-    for _ in range(settings.max_login_attempts + 1):
+    # Exactly max_attempts failures — counter ends at max_attempts.
+    for _ in range(settings.max_login_attempts):
         client.post("/login", data={"username": "alice", "password": "wrong"})
 
-    # Even the correct password now bounces because the counter is over the limit.
+    # The next attempt (correct password) must bounce.
     resp = client.post(
         "/login",
         data={"username": "alice", "password": "password123"},
@@ -301,6 +302,23 @@ def test_login_rate_limit_blocks_after_threshold(app, test_user):
 
     assert resp.status_code == 302
     assert resp.headers["location"].startswith("/login?error=rate_limited")
+
+
+def test_login_rate_limit_allows_last_attempt_before_threshold(app, test_user):
+    """The (max_attempts - 1)-th failure must still allow the next try."""
+    client = _anon_client(app)
+    settings = app.state.settings
+    for _ in range(settings.max_login_attempts - 1):
+        client.post("/login", data={"username": "alice", "password": "wrong"})
+
+    # One slot left — correct password should still let alice in.
+    resp = client.post(
+        "/login",
+        data={"username": "alice", "password": "password123"},
+    )
+
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/"
 
 
 def test_login_rate_limit_resets_on_successful_login(app, test_user):
@@ -330,7 +348,7 @@ def test_login_rate_limit_uses_generic_message(app):
     """
     client = _anon_client(app)
     settings = app.state.settings
-    for _ in range(settings.max_login_attempts + 1):
+    for _ in range(settings.max_login_attempts):
         client.post("/login", data={"username": "ghost", "password": "wrong"})
 
     resp = client.post(

@@ -44,11 +44,15 @@ def check_and_increment(
     only on first increment (``EXPIRE NX``) so the window starts ticking
     from the *first* failure of a burst, not from each subsequent failure.
 
-    Returns ``True`` when at least one counter has crossed ``max_attempts``,
+    Returns ``True`` when at least one counter has reached ``max_attempts``,
     meaning the caller should reject the login attempt with a generic
     "too many attempts" message — the same message used regardless of
     which counter triggered, so attackers cannot probe which dimension
     is locked.
+
+    The boundary is ``>=`` (not ``>``) so the semantics match the user-
+    facing documentation: ``max_attempts=5`` means "5 failures allowed,
+    the 6th is blocked", not "6 allowed, the 7th is blocked".
 
     The Redis pipeline groups the four commands into a single round trip
     but does not wrap them in MULTI/EXEC; the counters are independent so
@@ -60,7 +64,7 @@ def check_and_increment(
     pipe.incr(_ip_key(ip))
     pipe.expire(_ip_key(ip), window_seconds, nx=True)
     user_count, _, ip_count, _ = pipe.execute()
-    return user_count > max_attempts or ip_count > max_attempts
+    return user_count >= max_attempts or ip_count >= max_attempts
 
 
 def is_locked(redis: Redis, *, username: str, ip: str, max_attempts: int) -> bool:
@@ -69,10 +73,13 @@ def is_locked(redis: Redis, *, username: str, ip: str, max_attempts: int) -> boo
     Used at the start of the login handler to short-circuit before any
     argon2 work, so a locked account does not pay verification cost on
     every probe. Counters are not modified.
+
+    Threshold is ``>=`` for the same reason as
+    :func:`check_and_increment`: ``max_attempts=5`` blocks at attempt 6.
     """
     user_count = int(redis.get(_user_key(username)) or 0)
     ip_count = int(redis.get(_ip_key(ip)) or 0)
-    return user_count > max_attempts or ip_count > max_attempts
+    return user_count >= max_attempts or ip_count >= max_attempts
 
 
 def reset_user(redis: Redis, username: str) -> None:
