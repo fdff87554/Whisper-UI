@@ -13,14 +13,25 @@ per burst, not on every failed login.
 
 Keys live under ``auth:rl:`` so production operators can clear them with
 ``redis-cli DEL auth:rl:user:alice`` without touching pipeline state.
+
+Logging policy: every check_and_increment writes a DEBUG line with both
+counter values, the thresholds, and which counter (if any) tripped, so
+operators can replay an attack timeline by lifting LOG_LEVEL to DEBUG.
+A WARNING is emitted once on the request that actually trips the limit,
+naming the dimension that hit it ("user" vs "ip" vs "both") so security
+review does not have to cross-reference counter values manually.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from redis import Redis
+
+
+logger = logging.getLogger(__name__)
 
 
 def _user_key(username: str) -> str:
@@ -29,6 +40,25 @@ def _user_key(username: str) -> str:
 
 def _ip_key(ip: str) -> str:
     return f"auth:rl:ip:{ip}"
+
+
+def _describe_trip(
+    *,
+    user_count: int,
+    ip_count: int,
+    max_user_attempts: int,
+    max_ip_attempts: int,
+) -> str | None:
+    """Return 'user', 'ip', 'both', or None depending on which counter tripped."""
+    user_over = user_count >= max_user_attempts
+    ip_over = ip_count >= max_ip_attempts
+    if user_over and ip_over:
+        return "both"
+    if user_over:
+        return "user"
+    if ip_over:
+        return "ip"
+    return None
 
 
 def check_and_increment(
@@ -63,7 +93,35 @@ def check_and_increment(
     pipe.incr(_ip_key(ip))
     pipe.expire(_ip_key(ip), window_seconds, nx=True)
     user_count, _, ip_count, _ = pipe.execute()
-    return user_count >= max_user_attempts or ip_count >= max_ip_attempts
+    tripped = _describe_trip(
+        user_count=user_count,
+        ip_count=ip_count,
+        max_user_attempts=max_user_attempts,
+        max_ip_attempts=max_ip_attempts,
+    )
+
+    logger.debug(
+        "rate-limit attempt username=%r ip=%s user_count=%d/%d ip_count=%d/%d tripped=%s",
+        username,
+        ip,
+        user_count,
+        max_user_attempts,
+        ip_count,
+        max_ip_attempts,
+        tripped or "no",
+    )
+    if tripped is not None:
+        logger.warning(
+            "rate-limit tripped on %s counter: username=%r ip=%s user_count=%d/%d ip_count=%d/%d",
+            tripped,
+            username,
+            ip,
+            user_count,
+            max_user_attempts,
+            ip_count,
+            max_ip_attempts,
+        )
+    return tripped is not None
 
 
 def is_locked(
@@ -82,7 +140,18 @@ def is_locked(
     """
     user_count = int(redis.get(_user_key(username)) or 0)
     ip_count = int(redis.get(_ip_key(ip)) or 0)
-    return user_count >= max_user_attempts or ip_count >= max_ip_attempts
+    locked = user_count >= max_user_attempts or ip_count >= max_ip_attempts
+    if locked:
+        logger.debug(
+            "rate-limit short-circuit: username=%r ip=%s user_count=%d/%d ip_count=%d/%d",
+            username,
+            ip,
+            user_count,
+            max_user_attempts,
+            ip_count,
+            max_ip_attempts,
+        )
+    return locked
 
 
 def reset_user(redis: Redis, username: str) -> None:
@@ -92,4 +161,6 @@ def reset_user(redis: Redis, username: str) -> None:
     one valid credential should not be able to launder their IP through
     that account to keep probing others.
     """
-    redis.delete(_user_key(username))
+    deleted = redis.delete(_user_key(username))
+    if deleted:
+        logger.info("rate-limit per-user counter cleared on successful login: username=%r", username)
