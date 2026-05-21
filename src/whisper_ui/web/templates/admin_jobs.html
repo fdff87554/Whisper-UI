@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block title %}{{ labels.ADMIN_JOBS_HEADER }} — Whisper UI{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-medium mb-2">{{ labels.ADMIN_JOBS_HEADER }}</h1>
+<p class="text-sm opacity-60 mb-6">{{ labels.ADMIN_JOBS_DESCRIPTION }}</p>
+
+{# Status filter chips — same set as /jobs but linked back to /admin/jobs. #}
+<div class="flex flex-wrap gap-2 mb-4">
+  {% for value, label in [('', labels.JOBS_FILTER_ALL)] + labels.STATUS_LABELS.items()|list %}
+  <a href="/admin/jobs?status={{ value }}"
+     class="btn btn-sm {% if status == value %}btn-primary{% else %}btn-ghost border border-base-300{% endif %}">
+    {{ label }}
+    {% if value == '' %}
+    <span class="badge badge-sm">{{ total_count }}</span>
+    {% endif %}
+  </a>
+  {% endfor %}
+</div>
+
+{# Flat table — admin view doesn't bother with batch grouping; the per-row
+   owner label is the primary new piece of information. #}
+<div class="overflow-x-auto">
+  <table class="table table-zebra">
+    <thead>
+      <tr>
+        <th>{{ labels.ADMIN_JOBS_OWNER_LABEL }}</th>
+        <th>檔案</th>
+        <th>狀態</th>
+        <th>更新時間</th>
+        <th class="text-right">操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for batch_key, batch_jobs in groups %}
+      {% for job in batch_jobs %}
+      <tr>
+        <td class="text-xs">
+          {% if job.owner_id and owner_usernames.get(job.owner_id) %}
+          {{ owner_usernames[job.owner_id] }}
+          {% else %}
+          <span class="opacity-50">{{ labels.ADMIN_JOBS_OWNER_UNKNOWN }}</span>
+          {% endif %}
+        </td>
+        <td class="font-medium" title="{{ job.filename }}">
+          {{ job.filename[:60] }}{% if job.filename|length > 60 %}…{% endif %}
+        </td>
+        <td>
+          {% set status_label = labels.STATUS_LABELS.get(job.status.value, job.status.value) %}
+          {% if job.status.value == 'completed' %}
+          <span class="badge badge-success">{{ status_label }}</span>
+          {% elif job.status.value == 'failed' %}
+          <span class="badge badge-error">{{ status_label }}</span>
+          {% elif job.status.value == 'processing' %}
+          <span class="badge badge-info">{{ status_label }}</span>
+          {% else %}
+          <span class="badge badge-ghost">{{ status_label }}</span>
+          {% endif %}
+        </td>
+        <td class="text-xs opacity-70">{{ job.updated_at[:TIMESTAMP_DISPLAY_LENGTH] }}</td>
+        <td class="text-right">
+          {% if job.status.value == 'completed' %}
+          <a class="btn btn-xs" href="/viewer/{{ job.id }}">{{ labels.JOBS_VIEW }}</a>
+          {% endif %}
+          {% if job.status.value == 'failed' %}
+          <form method="post" action="/jobs/{{ job.id }}/retry" class="inline">
+            <button type="submit" class="btn btn-xs btn-warning">{{ labels.JOBS_RETRY }}</button>
+          </form>
+          {% endif %}
+          {% if job.status.value in ('completed', 'failed') %}
+          <form method="post" action="/jobs/{{ job.id }}" class="inline"
+                hx-delete="/jobs/{{ job.id }}" hx-confirm="{{ labels.JOBS_DELETE_CONFIRM }}">
+            <button type="submit" class="btn btn-xs btn-error">{{ labels.JOBS_DELETE }}</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      {% endfor %}
+
+      {% if not groups %}
+      <tr>
+        <td colspan="5" class="text-center opacity-60 py-8">{{ labels.JOBS_EMPTY }}</td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{# Pagination — same shape as /jobs but pointing at /admin/jobs. #}
+{% if total_pages > 1 %}
+<div class="flex items-center justify-between mt-4">
+  <span class="text-sm opacity-70">{{ labels.JOBS_PAGE_INFO.format(current=page + 1, total=total_pages, count=total_count) }}</span>
+  <div class="join">
+    {% if page > 0 %}
+    <a class="join-item btn btn-sm" href="/admin/jobs?status={{ status }}&page={{ page - 1 }}">{{ labels.JOBS_PAGE_PREV }}</a>
+    {% endif %}
+    {% if page + 1 < total_pages %}
+    <a class="join-item btn btn-sm" href="/admin/jobs?status={{ status }}&page={{ page + 1 }}">{{ labels.JOBS_PAGE_NEXT }}</a>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

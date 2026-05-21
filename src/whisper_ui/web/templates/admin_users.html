@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block title %}{{ labels.ADMIN_USERS_HEADER }} — Whisper UI{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-medium mb-2">{{ labels.ADMIN_USERS_HEADER }}</h1>
+<p class="text-sm opacity-60 mb-6">{{ labels.ADMIN_USERS_DESCRIPTION }}</p>
+
+{% if error_message %}
+<div class="alert alert-error mb-4" role="alert">{{ error_message }}</div>
+{% endif %}
+
+<div class="overflow-x-auto mb-8">
+  <table class="table table-zebra">
+    <thead>
+      <tr>
+        <th>{{ labels.ADMIN_USER_COL_USERNAME }}</th>
+        <th>{{ labels.ADMIN_USER_COL_ROLE }}</th>
+        <th>{{ labels.ADMIN_USER_COL_STATUS }}</th>
+        <th>{{ labels.ADMIN_USER_COL_CREATED }}</th>
+        <th class="text-right">{{ labels.ADMIN_USER_COL_JOBS }}</th>
+        <th class="text-right">{{ labels.ADMIN_USER_COL_ACTIONS }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for user in users %}
+      <tr>
+        <td class="font-medium">
+          {{ user.username }}
+          {% if user.id == current_admin_id %}<span class="badge badge-xs ml-2">您</span>{% endif %}
+        </td>
+        <td>
+          {% if user.is_admin %}
+          <span class="badge badge-primary">{{ labels.ADMIN_USER_ROLE_ADMIN }}</span>
+          {% else %}
+          <span class="badge badge-ghost">{{ labels.ADMIN_USER_ROLE_USER }}</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if user.is_active %}
+          <span class="badge badge-success">{{ labels.ADMIN_USER_STATUS_ACTIVE }}</span>
+          {% else %}
+          <span class="badge badge-warning">{{ labels.ADMIN_USER_STATUS_INACTIVE }}</span>
+          {% endif %}
+        </td>
+        <td class="text-xs opacity-70">{{ user.created_at[:TIMESTAMP_DISPLAY_LENGTH] }}</td>
+        <td class="text-right tabular-nums">{{ job_counts.get(user.id, 0) }}</td>
+        <td class="text-right">
+          {% if user.id != current_admin_id %}
+          <div class="flex flex-wrap gap-1 justify-end">
+            {% if user.is_active %}
+            <form method="post" action="/admin/users/{{ user.id }}/deactivate">
+              <button type="submit" class="btn btn-xs btn-warning">{{ labels.ADMIN_ACTION_DEACTIVATE }}</button>
+            </form>
+            {% else %}
+            <form method="post" action="/admin/users/{{ user.id }}/activate">
+              <button type="submit" class="btn btn-xs btn-success">{{ labels.ADMIN_ACTION_ACTIVATE }}</button>
+            </form>
+            {% endif %}
+
+            <form method="post" action="/admin/users/{{ user.id }}/toggle-admin">
+              <button type="submit" class="btn btn-xs">
+                {% if user.is_admin %}{{ labels.ADMIN_ACTION_DEMOTE }}{% else %}{{ labels.ADMIN_ACTION_PROMOTE }}{% endif %}
+              </button>
+            </form>
+
+            <details class="dropdown dropdown-end">
+              <summary class="btn btn-xs">{{ labels.ADMIN_ACTION_RESET_PASSWORD }}</summary>
+              <div class="dropdown-content card card-compact bg-base-100 border border-base-300 shadow w-72 z-10 mt-1 p-3">
+                <form method="post" action="/admin/users/{{ user.id }}/reset-password" class="space-y-2">
+                  <label class="text-xs opacity-70">{{ labels.ADMIN_RESET_PASSWORD_HEADER.format(username=user.username) }}</label>
+                  <input type="password" name="new_password" required minlength="8"
+                         class="input input-bordered input-sm w-full"
+                         placeholder="{{ labels.AUTH_PASSWORD }}">
+                  <button type="submit" class="btn btn-primary btn-xs w-full">
+                    {{ labels.ADMIN_RESET_PASSWORD_SUBMIT }}
+                  </button>
+                </form>
+              </div>
+            </details>
+          </div>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card bg-base-200 border border-base-300">
+  <div class="card-body">
+    <h2 class="card-title text-base">{{ labels.ADMIN_ADD_USER_HEADER }}</h2>
+    <form method="post" action="/admin/users" class="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+      <div class="sm:col-span-1">
+        <label class="label" for="new-username"><span class="label-text">{{ labels.AUTH_USERNAME }}</span></label>
+        <input id="new-username" name="username" type="text" required
+               minlength="3" maxlength="32" pattern="[A-Za-z0-9_-]{3,32}"
+               class="input input-bordered input-sm w-full">
+      </div>
+      <div class="sm:col-span-1">
+        <label class="label" for="new-password"><span class="label-text">{{ labels.AUTH_PASSWORD }}</span></label>
+        <input id="new-password" name="password" type="password" required minlength="8"
+               class="input input-bordered input-sm w-full">
+      </div>
+      <div class="sm:col-span-1 flex items-center">
+        <label class="label cursor-pointer gap-2">
+          <input type="checkbox" name="is_admin" value="true" class="checkbox checkbox-sm">
+          <span class="label-text">{{ labels.ADMIN_USER_ROLE_ADMIN }}</span>
+        </label>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm sm:col-span-1">
+        {{ labels.ADMIN_ADD_USER_SUBMIT }}
+      </button>
+    </form>
+  </div>
+</div>
+{% endblock %}

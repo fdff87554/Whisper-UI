@@ -20,6 +20,23 @@ def test_insert_and_get(db: JobDatabase):
     assert fetched.status == JobStatus.PENDING
 
 
+def test_insert_and_get_preserves_owner_id(db: JobDatabase):
+    job = Job(filename="owned.mp3", filepath="/tmp/owned.mp3", owner_id=42)
+    db.insert_job(job)
+    fetched = db.get_job(job.id)
+    assert fetched is not None
+    assert fetched.owner_id == 42
+
+
+def test_legacy_job_without_owner_id_is_stored_as_null(db: JobDatabase):
+    """Jobs created without an owner (legacy data) survive the round-trip as None."""
+    job = Job(filename="legacy.mp3", filepath="/tmp/legacy.mp3")
+    db.insert_job(job)
+    fetched = db.get_job(job.id)
+    assert fetched is not None
+    assert fetched.owner_id is None
+
+
 def test_get_nonexistent(db: JobDatabase):
     assert db.get_job("nonexistent") is None
 
@@ -251,6 +268,179 @@ def test_legacy_db_without_llm_column_upgrades(tmp_dir: Path):
         assert fetched.llm_correction_enabled is False
     finally:
         database.close()
+
+
+def test_legacy_db_without_owner_id_column_upgrades(tmp_dir: Path):
+    """A pre-auth deployment's DB does not have owner_id. After init_db
+    migrates the schema, the column exists, existing rows have NULL,
+    and new inserts respect the owner_id value provided.
+    """
+    db_path = tmp_dir / "legacy_owner.db"
+    legacy_schema = """
+    CREATE TABLE IF NOT EXISTS jobs (
+        id TEXT PRIMARY KEY,
+        filename TEXT NOT NULL,
+        filepath TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        progress REAL NOT NULL DEFAULT 0.0,
+        progress_message TEXT DEFAULT '',
+        language TEXT NOT NULL DEFAULT 'zh',
+        model_name TEXT NOT NULL DEFAULT 'large-v3',
+        num_speakers INTEGER,
+        enable_diarization INTEGER NOT NULL DEFAULT 1,
+        convert_to_traditional INTEGER NOT NULL DEFAULT 1,
+        llm_correction_enabled INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        error TEXT,
+        result_path TEXT,
+        duration REAL,
+        batch_id TEXT,
+        source_url TEXT
+    );
+    """
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(legacy_schema)
+    conn.execute(
+        "INSERT INTO jobs (id, filename, filepath, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        ("legacy-2", "old.mp3", "/tmp/old.mp3", "2024-01-01T00:00:00+00:00", "2024-01-01T00:00:00+00:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    database = JobDatabase(db_path)
+    try:
+        # Legacy row still readable and owner_id is None.
+        legacy = database.get_job("legacy-2")
+        assert legacy is not None
+        assert legacy.owner_id is None
+
+        # New inserts with owner_id work.
+        owned = Job(filename="new.mp3", filepath="/tmp/new.mp3", owner_id=7)
+        database.insert_job(owned)
+        fetched = database.get_job(owned.id)
+        assert fetched is not None
+        assert fetched.owner_id == 7
+    finally:
+        database.close()
+
+
+def test_get_job_with_owner_id_returns_job_when_owner_matches(db: JobDatabase):
+    job = Job(filename="a.mp3", filepath="/tmp/a.mp3", owner_id=1)
+    db.insert_job(job)
+
+    assert db.get_job(job.id, owner_id=1) is not None
+
+
+def test_get_job_with_owner_id_returns_none_when_owner_differs(db: JobDatabase):
+    job = Job(filename="a.mp3", filepath="/tmp/a.mp3", owner_id=1)
+    db.insert_job(job)
+
+    assert db.get_job(job.id, owner_id=2) is None
+
+
+def test_get_job_with_owner_id_does_not_match_legacy_null_owner(db: JobDatabase):
+    """Legacy jobs (owner_id IS NULL) must not be visible to per-user lookups."""
+    legacy = Job(filename="legacy.mp3", filepath="/tmp/legacy.mp3")  # owner_id defaults to None
+    db.insert_job(legacy)
+
+    assert db.get_job(legacy.id, owner_id=1) is None
+    # Admin view (no owner filter) still sees the legacy job.
+    assert db.get_job(legacy.id) is not None
+
+
+def test_list_jobs_filtered_with_owner_excludes_other_owners(db: JobDatabase):
+    db.insert_job(Job(filename="a.mp3", filepath="/tmp/a.mp3", owner_id=1))
+    db.insert_job(Job(filename="b.mp3", filepath="/tmp/b.mp3", owner_id=2))
+    db.insert_job(Job(filename="c.mp3", filepath="/tmp/c.mp3"))  # legacy NULL
+
+    user1_jobs = db.list_jobs_filtered(limit=10, owner_id=1)
+    admin_jobs = db.list_jobs_filtered(limit=10)
+
+    assert [j.filename for j in user1_jobs] == ["a.mp3"]
+    assert {j.filename for j in admin_jobs} == {"a.mp3", "b.mp3", "c.mp3"}
+
+
+def test_count_jobs_with_owner_excludes_other_owners(db: JobDatabase):
+    db.insert_job(Job(filename="a.mp3", filepath="/tmp/a.mp3", owner_id=1))
+    db.insert_job(Job(filename="b.mp3", filepath="/tmp/b.mp3", owner_id=2))
+
+    assert db.count_jobs(owner_id=1) == 1
+    assert db.count_jobs() == 2
+
+
+def test_count_jobs_combines_status_and_owner_filter(db: JobDatabase):
+    completed = Job(filename="a.mp3", filepath="/tmp/a.mp3", owner_id=1)
+    completed.status = JobStatus.COMPLETED
+    db.insert_job(completed)
+    db.insert_job(Job(filename="b.mp3", filepath="/tmp/b.mp3", owner_id=1))  # PENDING
+
+    assert db.count_jobs(status=JobStatus.COMPLETED.value, owner_id=1) == 1
+    assert db.count_jobs(owner_id=1) == 2
+
+
+def test_get_status_counts_with_owner_only_counts_user_jobs(db: JobDatabase):
+    job_user = Job(filename="a.mp3", filepath="/tmp/a.mp3", owner_id=1)
+    job_user.status = JobStatus.COMPLETED
+    db.insert_job(job_user)
+    job_other = Job(filename="b.mp3", filepath="/tmp/b.mp3", owner_id=2)
+    job_other.status = JobStatus.COMPLETED
+    db.insert_job(job_other)
+
+    assert db.get_status_counts(owner_id=1) == {JobStatus.COMPLETED.value: 1}
+    assert db.get_status_counts()[JobStatus.COMPLETED.value] == 2
+
+
+def test_count_completed_since_with_owner(db: JobDatabase):
+    mine = Job(filename="a.mp3", filepath="/tmp/a.mp3", owner_id=1)
+    mine.status = JobStatus.COMPLETED
+    db.insert_job(mine)
+    theirs = Job(filename="b.mp3", filepath="/tmp/b.mp3", owner_id=2)
+    theirs.status = JobStatus.COMPLETED
+    db.insert_job(theirs)
+
+    long_ago = "2000-01-01T00:00:00+00:00"
+    assert db.count_completed_since(long_ago, owner_id=1) == 1
+    assert db.count_completed_since(long_ago) == 2
+
+
+def test_has_active_jobs_with_owner(db: JobDatabase):
+    user_queued = Job(filename="a.mp3", filepath="/tmp/a.mp3", owner_id=1)
+    user_queued.status = JobStatus.QUEUED
+    db.insert_job(user_queued)
+    other_queued = Job(filename="b.mp3", filepath="/tmp/b.mp3", owner_id=2)
+    other_queued.status = JobStatus.QUEUED
+    db.insert_job(other_queued)
+
+    assert db.has_active_jobs(owner_id=1) is True
+    assert db.has_active_jobs(owner_id=999) is False
+
+
+def test_list_jobs_by_batch_with_owner_filters_out_other_users(db: JobDatabase):
+    db.insert_job(Job(filename="a.mp3", filepath="/tmp/a.mp3", owner_id=1, batch_id="b1"))
+    db.insert_job(Job(filename="b.mp3", filepath="/tmp/b.mp3", owner_id=2, batch_id="b1"))
+
+    user_jobs = db.list_jobs_by_batch("b1", owner_id=1)
+    all_jobs = db.list_jobs_by_batch("b1")
+
+    assert [j.filename for j in user_jobs] == ["a.mp3"]
+    assert len(all_jobs) == 2
+
+
+def test_get_batch_stats_with_owner(db: JobDatabase):
+    mine = Job(filename="a.mp3", filepath="/tmp/a.mp3", owner_id=1, batch_id="b1")
+    mine.status = JobStatus.COMPLETED
+    db.insert_job(mine)
+    theirs = Job(filename="b.mp3", filepath="/tmp/b.mp3", owner_id=2, batch_id="b1")
+    theirs.status = JobStatus.COMPLETED
+    db.insert_job(theirs)
+
+    user_stats = db.get_batch_stats({"b1"}, owner_id=1)
+    admin_stats = db.get_batch_stats({"b1"})
+
+    assert user_stats["b1"]["completed"] == 1
+    assert user_stats["b1"]["total"] == 1
+    assert admin_stats["b1"]["completed"] == 2
 
 
 def test_recover_stale_jobs_ignores_non_processing(db: JobDatabase):

@@ -3,15 +3,15 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
 
+from tests.conftest import authed_test_client
 from whisper_ui.core.models import Job, JobStatus, Segment, TranscriptResult
 from whisper_ui.web.app import create_app
 from whisper_ui.web.deps import _format_relative_time, _format_time, make_content_disposition
 
 
 @pytest.fixture
-def app(settings, db, filestore):
+def app(settings, db, filestore, test_user):
     application = create_app()
     application.state.settings = settings
     application.state.db = db
@@ -19,12 +19,36 @@ def app(settings, db, filestore):
     application.state.redis = MagicMock()
     # Mock redis.hgetall to return empty dict (no progress data)
     application.state.redis.hgetall.return_value = {}
+    # The middleware skips bootstrap mode once an admin exists. Tests
+    # create users explicitly via fixtures, so flipping this latch up
+    # front avoids /register?bootstrap=1 redirects before the first request.
+    application.state.bootstrap_done = True
+
+    # Convenience: existing tests build jobs via db.insert_job(Job(...))
+    # without an owner_id, which would make them invisible to the authed
+    # `client` (alice) after the owner-gate landed. Patch the insert so a
+    # missing owner_id silently defaults to alice — explicit ownership in
+    # new tests still wins. test_database.py uses the bare `db` fixture
+    # from conftest.py and is unaffected.
+    original_insert = db.insert_job
+
+    def insert_with_default_owner(job):
+        if job.owner_id is None:
+            job.owner_id = test_user.id
+        original_insert(job)
+
+    db.insert_job = insert_with_default_owner
     return application
 
 
 @pytest.fixture
-def client(app):
-    return TestClient(app, raise_server_exceptions=False)
+def client(app, test_user):
+    return authed_test_client(app, test_user)
+
+
+@pytest.fixture
+def admin_client(app, test_admin):
+    return authed_test_client(app, test_admin)
 
 
 def _create_completed_job(db, filestore) -> Job:

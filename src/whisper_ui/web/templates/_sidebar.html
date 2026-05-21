@@ -36,6 +36,26 @@
           <span class="sidebar-label sr-only lg:not-sr-only">{{ labels.NAV_JOBS }}</span>
         </a>
       </li>
+      {% if request.state and request.state.user and request.state.user.is_admin %}
+      <li>
+        <a href="/admin/users"
+           hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true"
+           :class="{ 'menu-active': $store.nav.activePage === 'admin_users' }"
+           title="{{ labels.ADMIN_NAV_USERS }}">
+          {{ icon_list("w-5 h-5 shrink-0") }}
+          <span class="sidebar-label sr-only lg:not-sr-only">{{ labels.ADMIN_NAV_USERS }}</span>
+        </a>
+      </li>
+      <li>
+        <a href="/admin/jobs"
+           hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true"
+           :class="{ 'menu-active': $store.nav.activePage === 'admin_jobs' }"
+           title="{{ labels.ADMIN_NAV_JOBS }}">
+          {{ icon_list("w-5 h-5 shrink-0") }}
+          <span class="sidebar-label sr-only lg:not-sr-only">{{ labels.ADMIN_NAV_JOBS }}</span>
+        </a>
+      </li>
+      {% endif %}
     </ul>
   </nav>
 
@@ -52,4 +72,22 @@
       </template>
     </button>
   </div>
+
+  {# Current user + logout — only rendered when a user is on request.state. #}
+  {% if request.state and request.state.user %}
+  <div class="p-4 border-t border-base-300">
+    <div class="hidden lg:block text-xs opacity-70 mb-2 truncate" title="{{ request.state.user.username }}">
+      {{ labels.AUTH_SIGNED_IN_AS.format(username=request.state.user.username) }}
+      {% if request.state.user.is_admin %}
+      <span class="badge badge-sm badge-primary ml-1">{{ labels.AUTH_ADMIN_BADGE }}</span>
+      {% endif %}
+    </div>
+    <form method="post" action="/logout">
+      <button type="submit" class="btn btn-ghost btn-sm w-full justify-start gap-2"
+              title="{{ labels.AUTH_LOGOUT_BUTTON }}">
+        <span class="sidebar-label sr-only lg:not-sr-only">{{ labels.AUTH_LOGOUT_BUTTON }}</span>
+      </button>
+    </form>
+  </div>
+  {% endif %}
 </div>

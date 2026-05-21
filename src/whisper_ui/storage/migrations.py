@@ -25,8 +25,22 @@ CREATE TABLE IF NOT EXISTS jobs (
     result_path TEXT,
     duration REAL,
     batch_id TEXT,
-    source_url TEXT
+    source_url TEXT,
+    owner_id INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    is_admin INTEGER NOT NULL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    session_version INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_active_admin ON users(is_active, is_admin);
 """
 
 _MIGRATIONS: list[str] = [
@@ -36,6 +50,12 @@ _MIGRATIONS: list[str] = [
     "ALTER TABLE jobs ADD COLUMN batch_id TEXT",
     "ALTER TABLE jobs ADD COLUMN source_url TEXT",
     "ALTER TABLE jobs ADD COLUMN llm_correction_enabled INTEGER NOT NULL DEFAULT 0",
+    # owner_id is nullable so existing deployments with pre-auth jobs migrate
+    # cleanly. Legacy rows stay NULL and remain visible only via the admin
+    # /admin/jobs view (route-level filters use `WHERE owner_id = ?`, which
+    # never matches NULL).
+    "ALTER TABLE jobs ADD COLUMN owner_id INTEGER",
+    "CREATE INDEX IF NOT EXISTS idx_jobs_owner_id ON jobs(owner_id)",
 ]
 
 

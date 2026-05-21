@@ -8,7 +8,8 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from whisper_ui.core.constants import VIEWER_SEARCH_SEGMENT_LIMIT
 from whisper_ui.core.models import JobStatus
 from whisper_ui.export.factory import get_exporter
-from whisper_ui.web.deps import DbDep, FileStoreDep, make_content_disposition, templates
+from whisper_ui.web.auth import owner_filter
+from whisper_ui.web.deps import CurrentUserDep, DbDep, FileStoreDep, make_content_disposition, templates
 from whisper_ui.web.validation import validate_hex_id
 
 _MEDIA_MIME_TYPES: dict[str, str] = {
@@ -52,7 +53,7 @@ async def viewer_redirect():
 
 
 @router.get("/viewer/{job_id}", response_class=HTMLResponse)
-async def viewer_page(request: Request, db: DbDep, filestore: FileStoreDep, job_id: str):
+async def viewer_page(request: Request, db: DbDep, filestore: FileStoreDep, user: CurrentUserDep, job_id: str):
     validate_hex_id(job_id, "job_id")
 
     job = None
@@ -60,7 +61,7 @@ async def viewer_page(request: Request, db: DbDep, filestore: FileStoreDep, job_
     error = None
     speaker_colors: dict[str, str] = {}
 
-    job = db.get_job(job_id)
+    job = db.get_job(job_id, owner_id=owner_filter(user))
     if job is None:
         error = "not_found"
     elif job.status != JobStatus.COMPLETED:
@@ -98,9 +99,9 @@ async def viewer_page(request: Request, db: DbDep, filestore: FileStoreDep, job_
 
 
 @router.get("/viewer/{job_id}/export/{format_name}")
-async def export_download(job_id: str, format_name: str, db: DbDep, filestore: FileStoreDep):
+async def export_download(job_id: str, format_name: str, db: DbDep, filestore: FileStoreDep, user: CurrentUserDep):
     validate_hex_id(job_id, "job_id")
-    job = db.get_job(job_id)
+    job = db.get_job(job_id, owner_id=owner_filter(user))
     if job is None or job.status != JobStatus.COMPLETED:
         raise HTTPException(status_code=404)
 
@@ -123,9 +124,9 @@ async def export_download(job_id: str, format_name: str, db: DbDep, filestore: F
 
 
 @router.get("/viewer/{job_id}/media")
-async def media_download(job_id: str, db: DbDep, filestore: FileStoreDep):
+async def media_download(job_id: str, db: DbDep, filestore: FileStoreDep, user: CurrentUserDep):
     validate_hex_id(job_id, "job_id")
-    job = db.get_job(job_id)
+    job = db.get_job(job_id, owner_id=owner_filter(user))
     if job is None or not job.source_url:
         raise HTTPException(status_code=404)
 

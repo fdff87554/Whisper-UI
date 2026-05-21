@@ -122,6 +122,55 @@ All settings are configured via environment variables (`.env` file):
 > processing times. GPU deployment with `large-v3` and `int8_float16` gives the
 > best accuracy-to-speed ratio.
 
+### Multi-user authentication
+
+The web tier ships with a lightweight session-cookie authentication
+layer so multiple people can share one deployment without seeing each
+other's transcripts. There is no built-in default account; the **first
+visitor** to a freshly-started instance is bounced to a one-shot
+`/register?bootstrap=1` page that creates the system's first admin.
+Every subsequent visit goes through `/login` or self-service `/register`.
+
+**Required env vars:**
+
+| Variable                    | Default | Description                                                                                                                                                                                                                                                       |
+| --------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SESSION_SECRET`            | (empty) | Cookie signing key. Generate once with `openssl rand -hex 32` and keep it stable. Empty value falls back to a per-process random secret (dev only).                                                                                                               |
+| `SESSION_HTTPS_ONLY`        | `false` | Set to `true` when behind a TLS-terminating reverse proxy so the cookie is `Secure`.                                                                                                                                                                              |
+| `MAX_LOGIN_ATTEMPTS`        | `5`     | After this many failed logins per username, the next attempt is blocked for `LOGIN_LOCKOUT_SECONDS` regardless of password correctness.                                                                                                                           |
+| `MAX_LOGIN_ATTEMPTS_PER_IP` | `20`    | Separate, higher per-IP threshold. The default is comfortable for a small office sharing one NAT egress IP; raise it for larger NATs, or enable `TRUST_PROXY_HEADERS` so each user is rate-limited by their real address.                                         |
+| `LOGIN_LOCKOUT_SECONDS`     | `900`   | Window length for both per-user and per-IP counters.                                                                                                                                                                                                              |
+| `TRUST_PROXY_HEADERS`       | `false` | When `true`, the app uses the left-most `X-Forwarded-For` entry as the client IP (for rate-limit bucketing) and accepts `X-Forwarded-Host` as a valid CSRF host. **Only enable behind a controlled reverse proxy that resets these headers** — see warning below. |
+
+**Roles:** every account is either a regular user or an admin. Admins
+gain access to `/admin/users` (create / deactivate / promote / reset
+password) and `/admin/jobs` (every user's transcripts, including legacy
+rows from pre-auth deployments). All other capabilities — upload,
+transcript view, export — are identical for both roles.
+
+**Operational notes:**
+
+- Admin resets a forgotten password directly (no SMTP required). Pass
+  the new password to the user through any out-of-band channel.
+- An admin can also reset their own password through the same UI; the
+  action is logged at WARNING level and invalidates their current
+  session, so they must log in again with the new password.
+- A locked-out account auto-clears after the rate-limit window expires.
+  Unblock immediately with `redis-cli DEL auth:rl:user:<username>` or
+  `auth:rl:ip:<address>`.
+- The middleware enforces CSRF by comparing `Origin` (falling back to
+  `Referer`) against `request.url.netloc`. The reverse proxy must
+  preserve the original `Host` header (nginx: `proxy_set_header Host
+$host;`); Traefik does this by default.
+- **Reverse-proxy hardening**: if `TRUST_PROXY_HEADERS=true`, the proxy
+  **must** strip any client-supplied `X-Forwarded-For` and
+  `X-Forwarded-Host` and set them itself — otherwise a hostile client
+  can spoof its IP and the host name to defeat both rate-limit and
+  CSRF protections. nginx example: `proxy_set_header X-Forwarded-For
+$remote_addr;` (overrides any client-sent header).
+- Existing jobs from pre-auth deployments are stored with `owner_id IS NULL`
+  and remain visible only on the admin `/admin/jobs` view.
+
 ### Worker topology and queues (advanced)
 
 Each upload is dispatched as an RQ **DAG of sub-jobs** (one per pipeline

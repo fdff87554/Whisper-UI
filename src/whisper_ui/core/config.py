@@ -42,6 +42,37 @@ class Settings(BaseSettings):
     # HuggingFace
     hf_token: str = ""
 
+    # Authentication
+    # Signing key for session cookies. MUST be set to a stable random value in
+    # production (e.g. ``openssl rand -hex 32``); leaving it empty causes
+    # :func:`whisper_ui.web.app.create_app` to generate an ephemeral secret at
+    # startup, which invalidates every session whenever the process restarts.
+    session_secret: str = ""
+    # Rate-limit window for login failures. Five attempts in fifteen minutes
+    # matches OWASP guidance for "stop credential stuffing without locking
+    # legitimate users out for the rest of the day".
+    max_login_attempts: int = 5
+    login_lockout_seconds: int = 900  # 15 minutes
+    # Separate (higher) threshold for per-IP failures. The per-user counter
+    # stops credential stuffing against one account; the per-IP counter
+    # stops mass enumeration from one source. The defaults assume a small
+    # office sharing one NAT egress IP — 20 failures / 15 minutes is high
+    # enough that legitimate users do not accidentally lock the office out,
+    # but low enough that a scripted attacker is throttled quickly. Larger
+    # NATs should either raise this or enable TRUST_PROXY_HEADERS so the
+    # per-IP key uses each user's real address.
+    max_login_attempts_per_ip: int = 20
+    # When true, the session cookie is only sent over HTTPS. Default False so
+    # the bundled compose profiles work over plain HTTP; production deployments
+    # behind a TLS-terminating proxy should set ``SESSION_HTTPS_ONLY=true``.
+    session_https_only: bool = False
+    # Trust X-Forwarded-For (for rate-limit client IP) and X-Forwarded-Host
+    # (for CSRF host comparison) when computing per-request context. ONLY
+    # enable when a controlled reverse proxy is in front of the app and the
+    # proxy resets these headers — otherwise a hostile client can spoof
+    # them to evade rate limits and CSRF.
+    trust_proxy_headers: bool = False
+
     # Upload
     max_upload_size: int = 2 * 1024 * 1024 * 1024  # 2 GB
     # Optional retention: when > 0, the web app's background loop reclaims

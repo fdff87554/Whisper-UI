@@ -23,7 +23,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from fastapi.testclient import TestClient
 
 from whisper_ui.core.config import Settings
 from whisper_ui.core.constants import (
@@ -41,6 +40,8 @@ from whisper_ui.worker.runtime import WorkerRuntime
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+    from fastapi.testclient import TestClient
 
 pytestmark = pytest.mark.integration
 
@@ -120,13 +121,30 @@ def integration_app(integration_settings: Settings, fake_redis: Any) -> Iterator
     app.state.db = db
     app.state.filestore = filestore
     app.state.redis = fake_redis
+    # Skip the bootstrap-admin redirect; the test creates its own user below.
+    app.state.bootstrap_done = True
     yield app
     db.close()
 
 
 @pytest.fixture
-def integration_client(integration_app: Any) -> TestClient:
-    return TestClient(integration_app, raise_server_exceptions=False)
+def integration_user(integration_app: Any):
+    """Create a logged-in user so the authed routes accept the upload."""
+    from whisper_ui.storage import users_repo
+
+    return users_repo.create_user(
+        integration_app.state.db.conn,
+        "tester",
+        "password123",
+        is_admin=False,
+    )
+
+
+@pytest.fixture
+def integration_client(integration_app: Any, integration_user: Any) -> TestClient:
+    from tests.conftest import authed_test_client
+
+    return authed_test_client(integration_app, integration_user)
 
 
 def _patch_inference_stages(monkeypatch: pytest.MonkeyPatch) -> None:
