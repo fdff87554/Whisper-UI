@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-05-21
+
+### Added
+
+- Multi-user session-cookie authentication. There is no built-in default
+  account; the first visitor to a fresh instance is bounced to a one-shot
+  `/register?bootstrap=1` flow that creates the system's initial admin.
+  Subsequent visits go through `/login` or self-service `/register`.
+  Passwords are hashed with argon2id (`argon2-cffi`); sessions are signed
+  with `itsdangerous` via Starlette's `SessionMiddleware`. Bumping a
+  user's `session_version` (admin reset, deactivation) invalidates every
+  existing session for that account on the next request.
+- Per-user job isolation. `jobs.owner_id` (added by an additive
+  migration) is set on every new upload, and every job-touching route
+  filters by `owner_id = current_user.id`. Cross-user access returns 404
+  rather than 403 so job existence is not leaked.
+- Admin views: `/admin/users` (create / activate / deactivate / promote
+  / demote / reset password) and `/admin/jobs` (every owner's jobs,
+  including pre-auth `owner_id IS NULL` legacy rows). The repo layer
+  enforces "system must have at least one active admin" — deactivating
+  or demoting the last active admin is rejected.
+- Redis-backed login rate limit with two independent counters per
+  attempt: `MAX_LOGIN_ATTEMPTS` per username (default 5) and the higher
+  `MAX_LOGIN_ATTEMPTS_PER_IP` (default 20) per source IP, both in a
+  `LOGIN_LOCKOUT_SECONDS` window (default 900s).
+- CSRF protection on every mutating verb, comparing `Origin` (or
+  `Referer`) against `request.url.netloc`. With `TRUST_PROXY_HEADERS=true`,
+  the per-IP counter reads `X-Forwarded-For` (left-most entry) and the
+  CSRF check also accepts `X-Forwarded-Host`, both gated so a hostile
+  client cannot spoof these headers when no proxy is in front.
+- Six new env vars wired through `compose.yml` and documented in README
+  and `.env.example`: `SESSION_SECRET`, `SESSION_HTTPS_ONLY`,
+  `MAX_LOGIN_ATTEMPTS`, `MAX_LOGIN_ATTEMPTS_PER_IP`,
+  `LOGIN_LOCKOUT_SECONDS`, `TRUST_PROXY_HEADERS`.
+
+### Changed
+
+- The login flow now verifies the password before checking
+  `is_active`, so a deactivated account only reveals its state to
+  someone who already knows the correct password — anyone probing
+  wrong passwords sees the same generic "invalid" message regardless
+  of whether the account exists or is active.
+
+### Migration notes
+
+- Existing deployments: the migration is additive (`ALTER TABLE jobs
+ADD COLUMN owner_id INTEGER` + `CREATE TABLE users IF NOT EXISTS`),
+  so it runs cleanly against a populated database. Pre-2.1.0 jobs keep
+  `owner_id IS NULL` and are visible only on the admin `/admin/jobs`
+  view; per-user routes filter on `owner_id = ?` and never match NULL.
+- Set `SESSION_SECRET=$(openssl rand -hex 32)` in `.env` before
+  starting — leaving it empty falls back to a per-process random
+  secret (with a startup WARNING) that invalidates every session on
+  each restart.
+- On first visit after upgrade, any browser is redirected to
+  `/register?bootstrap=1`; the first account created becomes the
+  initial admin. After that, registration follows the standard
+  self-service flow.
+
 ## [2.0.0] - 2026-05-17
 
 ### BREAKING
