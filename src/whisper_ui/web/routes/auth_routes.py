@@ -103,13 +103,26 @@ def _login_error_message(error: str, lockout_seconds: int = 0) -> str | None:
     return None
 
 
-def _client_ip(request: Request) -> str:
+def _client_ip(request: Request, *, trust_proxy_headers: bool) -> str:
     """Best-effort client IP for rate-limit bucketing.
 
-    Falls back to the literal string "unknown" when no peer info is
-    available (test clients, weird ASGI servers) so the rate-limit code
-    can still bucket under a single key — better than crashing.
+    When ``trust_proxy_headers`` is True (operator opt-in) the **left-most**
+    entry of the ``X-Forwarded-For`` header wins — that is the convention
+    for "original client IP" when a chain of proxies adds itself to the
+    right. The opt-in flag is critical: blindly trusting XFF lets a hostile
+    client spoof any IP they like and trivially evade the rate limit.
+
+    Falls back to ``request.client.host`` otherwise, and to the literal
+    string ``"unknown"`` when even that is unavailable (test clients,
+    unusual ASGI servers) so the rate-limit code can still bucket under
+    a stable key instead of crashing.
     """
+    if trust_proxy_headers:
+        xff = request.headers.get("x-forwarded-for", "")
+        if xff:
+            first = xff.split(",")[0].strip()
+            if first:
+                return first
     return request.client.host if request.client else "unknown"
 
 
@@ -140,12 +153,13 @@ async def login_submit(
     threshold we short-circuit without doing any DB / argon2 work, so
     locked accounts cannot be used as a CPU-burn vector.
     """
-    ip = _client_ip(request)
+    ip = _client_ip(request, trust_proxy_headers=settings.trust_proxy_headers)
     if rate_limit.is_locked(
         redis,
         username=username,
         ip=ip,
-        max_attempts=settings.max_login_attempts,
+        max_user_attempts=settings.max_login_attempts,
+        max_ip_attempts=settings.max_login_attempts_per_ip,
     ):
         logger.warning("login rate-limited: username=%r ip=%s", username, ip)
         return _login_error_redirect(request, next_url, "rate_limited")
@@ -190,7 +204,7 @@ def _record_failure(redis, settings, *, username: str, ip: str) -> None:
     """Bump the rate-limit counter for a failed login.
 
     Wraps :func:`rate_limit.check_and_increment` so the route stays
-    readable and the threshold parameter lives in one place. The return
+    readable and the threshold parameters live in one place. The return
     value is intentionally ignored — whether this attempt was the one
     that crossed the threshold is irrelevant; the next request will see
     it as locked and short-circuit at the top of the handler.
@@ -199,7 +213,8 @@ def _record_failure(redis, settings, *, username: str, ip: str) -> None:
         redis,
         username=username,
         ip=ip,
-        max_attempts=settings.max_login_attempts,
+        max_user_attempts=settings.max_login_attempts,
+        max_ip_attempts=settings.max_login_attempts_per_ip,
         window_seconds=settings.login_lockout_seconds,
     )
 

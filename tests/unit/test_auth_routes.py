@@ -416,6 +416,67 @@ def test_login_rate_limit_uses_generic_message(app):
     assert "嘗試次數過多" in resp.text
 
 
+def test_per_ip_threshold_is_independent_of_per_user_threshold(app, db):
+    """An attacker using different usernames from the same IP must hit the
+    higher per-IP threshold even if no single user counter is full.
+    """
+    client = _anon_client(app)
+    settings = app.state.settings
+
+    # Cycle through synthetic usernames so the per-user counter never fills.
+    for i in range(settings.max_login_attempts_per_ip):
+        client.post("/login", data={"username": f"ghost{i}", "password": "wrong"})
+
+    # An attempt against any *new* username from the same IP must now be
+    # blocked because the per-IP counter has reached the threshold.
+    resp = client.post(
+        "/login",
+        data={"username": "ghost_last", "password": "wrong"},
+    )
+
+    assert resp.status_code == 302
+    assert resp.headers["location"].startswith("/login?error=rate_limited")
+
+
+def test_per_ip_threshold_default_is_higher_than_per_user_threshold(settings):
+    """Regression guard: shared-NAT offices must not lock out the entire
+    office on five failed logins. The default per-IP threshold has to
+    leave room for legitimate users plus the per-user buffer.
+    """
+    assert settings.max_login_attempts_per_ip > settings.max_login_attempts
+
+
+def test_client_ip_ignores_xff_when_proxy_headers_untrusted(app, db, test_user):
+    """Without TRUST_PROXY_HEADERS=true, X-Forwarded-For must be ignored
+    to prevent a hostile client from spoofing its IP and evading rate limits.
+    """
+    client = _anon_client(app)
+    client.headers["X-Forwarded-For"] = "1.2.3.4"
+    redis = app.state.redis
+
+    client.post("/login", data={"username": "alice", "password": "wrong"})
+
+    # The IP counter should be keyed on the test client's real IP
+    # ("testclient" in starlette TestClient), not on the spoofed value.
+    assert redis.get("auth:rl:ip:1.2.3.4") is None
+    keys = [k.decode() for k in redis.keys("auth:rl:ip:*")]
+    assert any("testclient" in k or "127" in k or "unknown" in k for k in keys), keys
+
+
+def test_client_ip_uses_xff_when_proxy_headers_trusted(app, db, test_user, monkeypatch):
+    """With TRUST_PROXY_HEADERS=true the left-most XFF entry becomes the
+    bucket key, so each real client behind a proxy gets their own quota.
+    """
+    monkeypatch.setattr(app.state.settings, "trust_proxy_headers", True)
+    client = _anon_client(app)
+    client.headers["X-Forwarded-For"] = "1.2.3.4, 10.0.0.1"
+    redis = app.state.redis
+
+    client.post("/login", data={"username": "alice", "password": "wrong"})
+
+    assert int(redis.get("auth:rl:ip:1.2.3.4") or 0) == 1
+
+
 def test_change_password_invalidates_existing_session(app, db, test_user):
     """End-to-end equivalent of "admin reset" — bump session_version, then
     confirm an existing session is no longer valid.

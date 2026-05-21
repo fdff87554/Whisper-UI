@@ -35,7 +35,8 @@ def check_and_increment(
     *,
     username: str,
     ip: str,
-    max_attempts: int,
+    max_user_attempts: int,
+    max_ip_attempts: int,
     window_seconds: int,
 ) -> bool:
     """Record a failed-login attempt and return whether further attempts are blocked.
@@ -44,19 +45,16 @@ def check_and_increment(
     only on first increment (``EXPIRE NX``) so the window starts ticking
     from the *first* failure of a burst, not from each subsequent failure.
 
-    Returns ``True`` when at least one counter has reached ``max_attempts``,
-    meaning the caller should reject the login attempt with a generic
-    "too many attempts" message — the same message used regardless of
-    which counter triggered, so attackers cannot probe which dimension
-    is locked.
+    Returns ``True`` when the per-user counter has reached ``max_user_attempts``
+    OR the per-IP counter has reached ``max_ip_attempts``. The two thresholds
+    are independent so an office NAT shared by many legitimate users can
+    safely be assigned a higher IP threshold than the strict per-account one.
 
-    The boundary is ``>=`` (not ``>``) so the semantics match the user-
-    facing documentation: ``max_attempts=5`` means "5 failures allowed,
-    the 6th is blocked", not "6 allowed, the 7th is blocked".
+    The boundary is ``>=`` (not ``>``) so the semantics match the user-facing
+    documentation: ``max=5`` means "5 failures allowed, the 6th is blocked".
 
-    The Redis pipeline groups the four commands into a single round trip
-    but does not wrap them in MULTI/EXEC; the counters are independent so
-    there is no cross-command invariant to protect.
+    Returns the same boolean regardless of which dimension triggered so the
+    caller cannot leak which counter is full.
     """
     pipe = redis.pipeline()
     pipe.incr(_user_key(username))
@@ -64,22 +62,26 @@ def check_and_increment(
     pipe.incr(_ip_key(ip))
     pipe.expire(_ip_key(ip), window_seconds, nx=True)
     user_count, _, ip_count, _ = pipe.execute()
-    return user_count >= max_attempts or ip_count >= max_attempts
+    return user_count >= max_user_attempts or ip_count >= max_ip_attempts
 
 
-def is_locked(redis: Redis, *, username: str, ip: str, max_attempts: int) -> bool:
+def is_locked(
+    redis: Redis,
+    *,
+    username: str,
+    ip: str,
+    max_user_attempts: int,
+    max_ip_attempts: int,
+) -> bool:
     """Return True when an attempt should be rejected without consuming a slot.
 
     Used at the start of the login handler to short-circuit before any
     argon2 work, so a locked account does not pay verification cost on
     every probe. Counters are not modified.
-
-    Threshold is ``>=`` for the same reason as
-    :func:`check_and_increment`: ``max_attempts=5`` blocks at attempt 6.
     """
     user_count = int(redis.get(_user_key(username)) or 0)
     ip_count = int(redis.get(_ip_key(ip)) or 0)
-    return user_count >= max_attempts or ip_count >= max_attempts
+    return user_count >= max_user_attempts or ip_count >= max_ip_attempts
 
 
 def reset_user(redis: Redis, username: str) -> None:
