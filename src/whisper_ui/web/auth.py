@@ -36,10 +36,12 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from whisper_ui.core.logging_setup import reset_user_id, set_user_id
 from whisper_ui.storage import users_repo
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
+    from contextvars import Token
 
 
 logger = logging.getLogger(__name__)
@@ -170,10 +172,16 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # one-shot latch on app.state avoids hitting the DB on every
         # request once an admin has been created.
         if not request.app.state.bootstrap_done:
-            if users_repo.count_active_admins(db.conn) == 0:
+            active_admins = users_repo.count_active_admins(db.conn)
+            if active_admins == 0:
                 if not _is_public(path):
+                    logger.debug("Bootstrap pending: redirecting %s to /register?bootstrap=1", path)
                     return RedirectResponse("/register?bootstrap=1", status_code=status.HTTP_302_FOUND)
             else:
+                logger.info(
+                    "Bootstrap latch flipped: %d active admin(s) observed on first protected request",
+                    active_admins,
+                )
                 request.app.state.bootstrap_done = True
 
         # CSRF check on mutating verbs runs before authentication so a
@@ -197,27 +205,60 @@ class AuthMiddleware(BaseHTTPMiddleware):
         user: CurrentUser | None = None
         if session_uid is not None and session_sv is not None:
             user_row = users_repo.get_user_by_id(db.conn, session_uid)
-            if user_row is not None and user_row.is_active and user_row.session_version == session_sv:
-                user = CurrentUser(id=user_row.id, username=user_row.username, is_admin=user_row.is_admin)
-            else:
-                # Either the user is gone, deactivated, or session_version
-                # has been bumped (password reset, admin force-out). Drop
-                # the stale session entirely so the client gets re-prompted.
+            if user_row is None:
+                # Cookie references a row that no longer exists (admin
+                # hard-delete or DB rebuild). Log at INFO so a security
+                # reviewer can distinguish this from the more common
+                # "session_version bump" path.
+                logger.info(
+                    "Session invalidated: cookie uid=%s no longer exists in users table",
+                    session_uid,
+                )
                 request.session.clear()
+            elif not user_row.is_active:
+                logger.info(
+                    "Session invalidated: user %r (uid=%s) is deactivated",
+                    user_row.username,
+                    session_uid,
+                )
+                request.session.clear()
+            elif user_row.session_version != session_sv:
+                logger.info(
+                    "Session invalidated: user %r (uid=%s) session_version mismatch (cookie=%s db=%s)",
+                    user_row.username,
+                    session_uid,
+                    session_sv,
+                    user_row.session_version,
+                )
+                request.session.clear()
+            else:
+                user = CurrentUser(id=user_row.id, username=user_row.username, is_admin=user_row.is_admin)
 
-        # Public paths are always allowed, but if the user does happen to
-        # be logged in we still expose `request.state.user` so the templates
-        # can render a "signed in as X" header.
-        if _is_public(path):
-            if user is not None:
-                request.state.user = user
+        user_token: Token[str] | None = None
+        if user is not None:
+            # Publish the resolved username on the contextvar so the
+            # structured access log and every downstream logger.info /
+            # logger.warning gets [user=<name>] without each call site
+            # having to thread the user through manually.
+            user_token = set_user_id(user.username)
+        try:
+            # Public paths are always allowed, but if the user does happen
+            # to be logged in we still expose `request.state.user` so the
+            # templates can render a "signed in as X" header.
+            if _is_public(path):
+                if user is not None:
+                    request.state.user = user
+                return await call_next(request)
+
+            if user is None:
+                logger.debug("Redirecting unauthenticated request to /login: path=%s", path)
+                return _unauthenticated_response(request)
+
+            request.state.user = user
             return await call_next(request)
-
-        if user is None:
-            return _unauthenticated_response(request)
-
-        request.state.user = user
-        return await call_next(request)
+        finally:
+            if user_token is not None:
+                reset_user_id(user_token)
 
 
 def owner_filter(user: CurrentUser) -> int | None:
@@ -249,5 +290,10 @@ def get_current_user(request: Request) -> CurrentUser:
 def require_admin(user: Annotated[CurrentUser, Depends(get_current_user)]) -> CurrentUser:
     """FastAPI dependency: 403 unless the request's user has the admin flag."""
     if not user.is_admin:
+        logger.warning(
+            "require_admin rejected: user %r (uid=%s) is not an admin",
+            user.username,
+            user.id,
+        )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
     return user

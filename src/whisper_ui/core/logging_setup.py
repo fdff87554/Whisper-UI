@@ -58,6 +58,22 @@ def reset_request_context(tokens: tuple[Token[str], Token[str]]) -> None:
     _user_id_var.reset(uid_token)
 
 
+def set_user_id(user_id: str) -> Token[str]:
+    """Overlay just the user_id on the current context.
+
+    Used by AuthMiddleware after the session resolves to a known user, so
+    every downstream log line (including the eventual access log) renders
+    that user instead of the ``'-'`` placeholder the request-id middleware
+    initialised. Pairs with :func:`reset_user_id` in a ``finally`` block.
+    """
+    return _user_id_var.set(user_id)
+
+
+def reset_user_id(token: Token[str]) -> None:
+    """Reset the user_id context var using the token from :func:`set_user_id`."""
+    _user_id_var.reset(token)
+
+
 def current_request_id() -> str:
     """Return the request_id for the current context (or '-' if unset)."""
     return _request_id_var.get()
