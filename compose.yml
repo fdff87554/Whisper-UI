@@ -35,6 +35,17 @@ services:
       # job is explicitly deleted. >0 has the web app hourly reclaim the
       # upload directory of COMPLETED jobs older than that many days.
       - UPLOAD_RETENTION_DAYS=${UPLOAD_RETENTION_DAYS:-0}
+      # Auth / session — see README "Multi-user authentication". Leaving
+      # SESSION_SECRET empty makes the app fall back to a per-process
+      # random secret (logs WARNING) which invalidates every session on
+      # restart; set it to a stable value in production:
+      #   SESSION_SECRET=$(openssl rand -hex 32)
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - SESSION_HTTPS_ONLY=${SESSION_HTTPS_ONLY:-false}
+      - MAX_LOGIN_ATTEMPTS=${MAX_LOGIN_ATTEMPTS:-5}
+      - MAX_LOGIN_ATTEMPTS_PER_IP=${MAX_LOGIN_ATTEMPTS_PER_IP:-20}
+      - LOGIN_LOCKOUT_SECONDS=${LOGIN_LOCKOUT_SECONDS:-900}
+      - TRUST_PROXY_HEADERS=${TRUST_PROXY_HEADERS:-false}
     volumes:
       - app-data:/app/data
     depends_on:
