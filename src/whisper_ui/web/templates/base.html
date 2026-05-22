@@ -87,40 +87,84 @@
   {# Toast notifications #}
   {% include "_toast.html" %}
 
-  {# Toast from URL params (for post-redirect scenarios) #}
+  {# Toast from URL params (for post-redirect scenarios), persisted to
+     localStorage so a single reload can recover it. The flash entry
+     expires after 60 seconds to avoid stale toasts on long-idle reloads. #}
   <div x-data x-init="
+    const FLASH_KEY = 'whisper-ui-upload-flash';
+    const FLASH_TTL_MS = 60000;
+    const buildSubmittedMessage = (n, failed, skipped, deduped) => {
+      let msg = '{{ labels.TOAST_UPLOAD_SUCCESS }}'.replace('{count}', n);
+      if (failed > 0) msg += '{{ labels.TOAST_UPLOAD_FAILED }}'.replace('{count}', failed);
+      if (skipped > 0) msg += '{{ labels.TOAST_URL_SKIPPED }}'.replace('{count}', skipped);
+      if (deduped > 0) msg += '{{ labels.TOAST_URL_DEDUPED }}'.replace('{count}', deduped);
+      const toastType = failed > 0 ? 'warning' : (skipped > 0 ? 'warning' : 'success');
+      return { message: msg, type: toastType };
+    };
+    const readFlash = () => {
+      try {
+        const raw = localStorage.getItem(FLASH_KEY);
+        if (!raw) return null;
+        const data = JSON.parse(raw);
+        if (!data.savedAt || Date.now() - data.savedAt > FLASH_TTL_MS) {
+          localStorage.removeItem(FLASH_KEY);
+          return null;
+        }
+        return data;
+      } catch { return null; }
+    };
+    const writeFlash = (toast) => {
+      try { localStorage.setItem(FLASH_KEY, JSON.stringify({ toast, savedAt: Date.now() })); } catch {}
+    };
+    const clearFlash = () => {
+      try { localStorage.removeItem(FLASH_KEY); } catch {}
+    };
+
     const params = new URLSearchParams(window.location.search);
+    let toastShown = false;
+    let dirty = false;
+
     const toast = params.get('toast');
     const message = params.get('message');
-    let dirty = false;
     if (toast && message) {
-      $store.toasts.add({ message: decodeURIComponent(message), type: toast });
+      const payload = { message: decodeURIComponent(message), type: toast };
+      $store.toasts.add(payload);
+      writeFlash(payload);
+      toastShown = true;
       params.delete('toast');
       params.delete('message');
       dirty = true;
     }
+
     const submitted = params.get('submitted');
     if (submitted) {
       const n = parseInt(submitted, 10);
       const failed = parseInt(params.get('failed') || '0', 10);
       const skipped = parseInt(params.get('skipped') || '0', 10);
       const deduped = parseInt(params.get('deduped') || '0', 10);
-      let msg = '{{ labels.TOAST_UPLOAD_SUCCESS }}'.replace('{count}', n);
-      if (failed > 0) msg += '{{ labels.TOAST_UPLOAD_FAILED }}'.replace('{count}', failed);
-      if (skipped > 0) msg += '{{ labels.TOAST_URL_SKIPPED }}'.replace('{count}', skipped);
-      if (deduped > 0) msg += '{{ labels.TOAST_URL_DEDUPED }}'.replace('{count}', deduped);
-      const toastType = failed > 0 ? 'warning' : (skipped > 0 ? 'warning' : 'success');
-      $store.toasts.add({ message: msg, type: toastType });
+      const payload = buildSubmittedMessage(n, failed, skipped, deduped);
+      $store.toasts.add(payload);
+      writeFlash(payload);
+      toastShown = true;
       params.delete('submitted');
       params.delete('failed');
       params.delete('skipped');
       params.delete('deduped');
       dirty = true;
     }
+
     if (dirty) {
       const url = new URL(window.location);
       url.search = params.toString();
       history.replaceState({}, '', url);
+    }
+
+    if (!toastShown) {
+      const recovered = readFlash();
+      if (recovered && recovered.toast) {
+        $store.toasts.add(recovered.toast);
+        clearFlash();
+      }
     }
   "></div>
 
