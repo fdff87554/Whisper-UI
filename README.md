@@ -465,6 +465,15 @@ src/whisper_ui/
     static/           # CSS and static assets
 ```
 
+**Layer dependencies** (each layer may only import from layers above it):
+
+```text
+core <- pipeline <- worker <- web
+core <- storage  <- worker <- web
+core <- export              <- web
+ui                          <- web
+```
+
 ## Troubleshooting
 
 ### Speaker diarization not working
