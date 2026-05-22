@@ -309,10 +309,32 @@
     </div>
   </section>
 
-  <button type="submit" class="btn btn-primary btn-lg w-full mt-6" :disabled="uploading">
-    {{ icon_upload("w-5 h-5") }}
-    {{ labels.UPLOAD_START }}
-  </button>
+  {# Sticky submit footer — keeps the primary action close to the user's
+     cursor regardless of how far they've scrolled (Fitts's Law). The status
+     line previews how many files / URLs the current selection will submit. #}
+  <div class="sticky bottom-0 -mx-4 sm:-mx-6 lg:-mx-8 mt-8 bg-base-100/95 backdrop-blur border-t border-base-300 px-4 sm:px-6 lg:px-8 py-3 z-10"
+       x-data="{
+         get statusLine() {
+           if (this.tab === 'url') {
+             const urlInput = this.$root.querySelector('textarea[name=&quot;url&quot;]');
+             const lines = urlInput ? urlInput.value.split('\\n').map(s => s.trim()).filter(Boolean) : [];
+             if (!lines.length) return '{{ labels.UPLOAD_SUBMIT_STATUS_EMPTY }}';
+             return '{{ labels.UPLOAD_SUBMIT_STATUS_URLS }}'.replace('{count}', lines.length);
+           }
+           if (this.selectedFiles && this.selectedFiles.length) {
+             return '{{ labels.UPLOAD_SUBMIT_STATUS_FILES }}'.replace('{count}', this.selectedFiles.length);
+           }
+           return '{{ labels.UPLOAD_SUBMIT_STATUS_EMPTY }}';
+         }
+       }">
+    <div class="flex items-center gap-3">
+      <span class="text-sm opacity-70 flex-1 min-w-0 truncate" x-text="statusLine"></span>
+      <button type="submit" class="btn btn-primary btn-lg gap-2" :disabled="uploading">
+        {{ icon_upload("w-5 h-5") }}
+        {{ labels.UPLOAD_START }}
+      </button>
+    </div>
+  </div>
 </form>
 {% endblock %}
 
