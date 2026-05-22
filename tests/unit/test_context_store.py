@@ -133,3 +133,26 @@ def test_delete_keeps_generation_counter_visible_to_late_writers():
 
     assert store.load() == {}
     assert store.get_generation() == 5
+
+
+def test_update_if_generation_matches_when_key_missing_accepts_write():
+    """When the generation counter has expired (PIPELINE_STATE_TTL_SECONDS
+    is a 24h safety net), the Lua script treats a missing counter as
+    "no gating" and accepts the write. This regression pin documents
+    that intentional behaviour: any production-relevant attempt has the
+    counter set well within the TTL, so reaching this branch implies a
+    pathological delay (worker hung > 24h after the parent finalised).
+    """
+    redis = fakeredis.FakeRedis()
+    store = PipelineContextStore(redis, "job-ttl-expired")
+    store.initialize({"audio_path": "/tmp/a.wav"})
+    # No SET on generation_key — simulates TTL having already elapsed.
+    assert redis.exists(store.generation_key) == 0
+
+    committed = store.update_if_generation_matches(
+        {"transcription_result": {"segments": []}},
+        expected_generation=3,
+    )
+
+    assert committed is True
+    assert "transcription_result" in store.load()
