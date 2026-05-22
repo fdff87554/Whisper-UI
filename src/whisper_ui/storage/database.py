@@ -17,9 +17,15 @@ logger = logging.getLogger(__name__)
 
 # Cap on how many recovered job ids the stale-recovery WARNING line
 # embeds. Picked so an operator can scan the list without horizontal
-# scroll and so memory stays bounded regardless of backlog size — the
-# RETURNING cursor is iterated row-by-row instead of materialised
-# entirely in memory, and the rest is reported as "(+N more)".
+# scroll. The Python sample buffer in recover_stale_jobs is bounded
+# to this many ids regardless of backlog size; note that SQLite's
+# RETURNING clause itself still materialises every recovered row in
+# temporary storage server-side before streaming them to the cursor
+# (https://sqlite.org/lang_returning.html), so the practical upper
+# bound on stale recovery's transient memory is set by N * sizeof(id)
+# at the engine layer — fine for the UUID-only id column we request
+# (~1MB at N=10K worst case), but worth knowing if the SELECT list
+# ever grows beyond a single column.
 _STALE_RECOVERY_LOG_SAMPLE = 20
 
 _JOB_COLUMNS = [
@@ -194,11 +200,17 @@ class JobDatabase:
         # available; a too-old deploy raises before init_db returns.
         #
         # The RETURNING cursor is iterated row-by-row (instead of
-        # ``fetchall()``) so log memory stays bounded by
-        # ``_STALE_RECOVERY_LOG_SAMPLE`` regardless of backlog size. A
-        # post-outage worst case where N runs into the thousands would
-        # otherwise materialise every UUID into a list just to drop all
-        # but the first 20.
+        # ``fetchall()``) so the Python-side sample buffer stays bounded
+        # by ``_STALE_RECOVERY_LOG_SAMPLE``. SQLite still buffers every
+        # recovered row server-side before any value is sent to the
+        # cursor (see https://sqlite.org/lang_returning.html), so a
+        # post-outage worst case where N runs into the thousands does
+        # consume proportional temporary memory inside the engine —
+        # but each row carries only the UUID id column we request, so
+        # the practical upper bound stays well under any sane SQLite
+        # cache limit. Tighter bounding would require batching the
+        # UPDATE (e.g. SELECT id LIMIT N then UPDATE WHERE id IN ...)
+        # and is not justified at current row sizes.
         cursor = self._conn.execute(
             "UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE status = ? AND updated_at < ? RETURNING id",
             (
