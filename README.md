@@ -401,7 +401,6 @@ three of those, which is why it is silenced.
 | Variable    | Default | Description                                                                       |
 | ----------- | ------- | --------------------------------------------------------------------------------- |
 | `LOG_LEVEL` | `INFO`  | One of `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`; invalid values fall back. |
-| `LOG_JSON`  | unused  | Reserved for a future JSON-output mode; currently ignored.                        |
 
 The worker container starts via `python -m whisper_ui.worker`, which
 calls `setup_logging()` before delegating to RQ so the dictConfig (and
