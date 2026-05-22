@@ -426,6 +426,54 @@ class TestViewerRoutes:
         assert resp.status_code == 200
         assert "下載影片" not in resp.text
 
+    def test_viewer_segment_copy_button_is_keyboard_reachable(self, client, db, filestore):
+        """Regression for WCAG 2.1.1 + 1.4.13 (plan §4 P0): the per-segment
+        copy button must be visible without hover and expose an aria-label."""
+        segments = [Segment(start=0.0, end=1.0, text="hello")]
+        result = TranscriptResult(segments=segments, language="zh", duration=1.0)
+        job = Job(filename="copy.mp3", status=JobStatus.COMPLETED, language="zh")
+        result_path = filestore.save_result(job.id, result)
+        job.result_path = str(result_path)
+        db.insert_job(job)
+
+        resp = client.get(f"/viewer/{job.id}")
+
+        assert resp.status_code == 200
+        assert "opacity-0 group-hover:opacity-100" not in resp.text
+        assert 'aria-label="複製此段"' in resp.text
+
+    def test_viewer_renders_speaker_glyph_when_speaker_assigned(self, client, db, filestore):
+        """Non-color cue for speakers (WCAG 1.4.1): segments with a speaker
+        should render one of the eight glyphs alongside the speaker label."""
+        segments = [Segment(start=0.0, end=1.0, text="hello", speaker="SPEAKER_00")]
+        result = TranscriptResult(segments=segments, language="zh", duration=1.0)
+        job = Job(filename="diar.mp3", status=JobStatus.COMPLETED, language="zh")
+        result_path = filestore.save_result(job.id, result)
+        job.result_path = str(result_path)
+        db.insert_job(job)
+
+        resp = client.get(f"/viewer/{job.id}")
+
+        assert resp.status_code == 200
+        assert "[SPEAKER_00]" in resp.text
+        assert any(glyph in resp.text for glyph in "●▲■◆★✦◉♦")
+
+    def test_viewer_includes_keyboard_shortcut_hint(self, client, db, filestore):
+        """Viewer should expose its keyboard shortcuts so they are
+        discoverable (Nielsen #7 + 6)."""
+        segments = [Segment(start=0.0, end=1.0, text="hello")]
+        result = TranscriptResult(segments=segments, language="zh", duration=1.0)
+        job = Job(filename="hint.mp3", status=JobStatus.COMPLETED, language="zh")
+        result_path = filestore.save_result(job.id, result)
+        job.result_path = str(result_path)
+        db.insert_job(job)
+
+        resp = client.get(f"/viewer/{job.id}")
+
+        assert resp.status_code == 200
+        assert "鍵盤捷徑" in resp.text
+        assert "聚焦搜尋" in resp.text
+
     def test_viewer_hides_download_media_in_no_segments_branch(self, client, db, filestore):
         """No-segments fallback toolbar must also gate Download Media on
         media_available (regression for PR #41 followup F1)."""

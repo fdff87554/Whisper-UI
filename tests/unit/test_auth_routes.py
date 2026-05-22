@@ -212,6 +212,29 @@ def test_register_page_renders_bootstrap_when_no_admin(app, db):
     assert "管理員" in resp.text
 
 
+def test_register_page_renders_bootstrap_warning_banner_when_no_admin(app, db):
+    """Bootstrap mode must render a visible warning banner (plan §4 P1)
+    so the user knows they are creating a privileged account."""
+    client = _anon_client(app)
+
+    resp = client.get("/register")
+
+    assert resp.status_code == 200
+    assert "alert-warning" in resp.text
+    assert "你正在建立系統第一個管理員帳號" in resp.text
+
+
+def test_register_page_omits_bootstrap_warning_when_admin_exists(app, db, test_admin):
+    """The warning banner is for bootstrap only; the normal register flow
+    should not surface it."""
+    client = _anon_client(app)
+
+    resp = client.get("/register")
+
+    assert resp.status_code == 200
+    assert "你正在建立系統第一個管理員帳號" not in resp.text
+
+
 def test_register_page_renders_normal_mode_when_admin_exists(app, db, test_admin):
     client = _anon_client(app)
 
