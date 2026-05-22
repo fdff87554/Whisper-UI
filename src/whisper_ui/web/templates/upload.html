@@ -197,8 +197,10 @@
   </div>
 
   {# Settings #}
+  {# Basic settings — always visible, the two controls every user adjusts. #}
   <section class="mt-8 pt-6 border-t border-base-300">
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+    <h2 class="text-sm font-medium opacity-80 mb-3">{{ labels.UPLOAD_SECTION_BASIC }}</h2>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
       <fieldset class="fieldset w-full">
         <legend class="fieldset-legend text-sm">{{ labels.UPLOAD_LANGUAGE }}</legend>
         <select name="language" class="select w-full">
@@ -218,8 +220,34 @@
         </select>
       </fieldset>
     </div>
+  </section>
 
-    <div class="space-y-3">
+  {# Advanced settings — collapsed by default. The "已啟用 N 項" pill is a
+     summary so users never have to expand the panel just to see whether
+     diarization / 繁體 / LLM are on. #}
+  <section class="mt-6 pt-6 border-t border-base-300"
+           x-data="{
+             open: false,
+             get enabledCount() {
+               const form = this.$root;
+               return ['enable_diarization', 'convert_to_traditional', 'llm_correction_enabled']
+                 .map(name => form.querySelector(`[name=&quot;${name}&quot;]`))
+                 .filter(field => field && !field.disabled && field.checked).length;
+             }
+           }">
+    <button type="button"
+            class="w-full flex items-center justify-between gap-3 text-left focus-visible:outline-none"
+            :aria-expanded="open.toString()"
+            :aria-label="open ? '{{ labels.UPLOAD_ADVANCED_TOGGLE_COLLAPSE }}' : '{{ labels.UPLOAD_ADVANCED_TOGGLE_EXPAND }}'"
+            @click="open = !open">
+      <h2 class="text-sm font-medium opacity-80">{{ labels.UPLOAD_SECTION_ADVANCED }}</h2>
+      <span class="flex items-center gap-2 text-xs">
+        <span class="badge badge-ghost badge-sm" x-text="`{{ labels.UPLOAD_ADVANCED_ENABLED_COUNT }}`.replace('{count}', enabledCount)"></span>
+        <span class="opacity-50" x-text="open ? '−' : '+'"></span>
+      </span>
+    </button>
+
+    <div x-show="open" x-transition class="space-y-3 mt-4" x-cloak>
       <div class="fieldset"
            x-data="{ diarEnabled: {{ 'true' if settings.hf_token else 'false' }} }">
         <label class="fieldset-label gap-3">
@@ -227,11 +255,15 @@
                  class="toggle toggle-primary toggle-sm"
                  x-model="diarEnabled"
                  {% if not settings.hf_token %}disabled{% endif %}>
-          <div>
-            <span>{{ labels.UPLOAD_ENABLE_DIARIZATION }}</span>
-            {% if not settings.hf_token %}
-            <p class="text-xs opacity-40">{{ labels.UPLOAD_DIARIZATION_UNAVAILABLE }}</p>
-            {% endif %}
+          <div class="flex-1">
+            <span class="inline-flex items-center gap-1">
+              {{ labels.UPLOAD_ENABLE_DIARIZATION }}
+              {% if not settings.hf_token %}
+              <span class="tooltip tooltip-right" data-tip="{{ labels.UPLOAD_DIARIZATION_UNAVAILABLE }}">
+                <span class="text-xs opacity-60 cursor-help" tabindex="0" aria-label="{{ labels.UPLOAD_INFOTIP_LABEL }}">ⓘ</span>
+              </span>
+              {% endif %}
+            </span>
           </div>
         </label>
         <div x-show="diarEnabled" x-transition class="ml-12 mt-2">
@@ -247,9 +279,13 @@
         <label class="fieldset-label gap-3">
           <input type="checkbox" name="convert_to_traditional" value="true"
                  class="toggle toggle-primary toggle-sm" checked>
-          <div>
-            <span>{{ labels.UPLOAD_CONVERT_TRADITIONAL }}</span>
-            <p class="text-xs opacity-40">{{ labels.UPLOAD_CONVERT_TRADITIONAL_HELP }}</p>
+          <div class="flex-1">
+            <span class="inline-flex items-center gap-1">
+              {{ labels.UPLOAD_CONVERT_TRADITIONAL }}
+              <span class="tooltip tooltip-right" data-tip="{{ labels.UPLOAD_CONVERT_TRADITIONAL_HELP }}">
+                <span class="text-xs opacity-60 cursor-help" tabindex="0" aria-label="{{ labels.UPLOAD_INFOTIP_LABEL }}">ⓘ</span>
+              </span>
+            </span>
           </div>
         </label>
       </div>
@@ -259,13 +295,14 @@
           <input type="checkbox" name="llm_correction_enabled" value="true"
                  class="toggle toggle-primary toggle-sm"
                  {% if not settings.ollama_base_url %}disabled{% endif %}>
-          <div>
-            <span>{{ labels.UPLOAD_ENABLE_LLM_CORRECTION }}</span>
-            {% if settings.ollama_base_url %}
-            <p class="text-xs opacity-40">{{ labels.UPLOAD_LLM_CORRECTION_HELP }}</p>
-            {% else %}
-            <p class="text-xs opacity-40">{{ labels.UPLOAD_LLM_CORRECTION_UNAVAILABLE }}</p>
-            {% endif %}
+          <div class="flex-1">
+            <span class="inline-flex items-center gap-1">
+              {{ labels.UPLOAD_ENABLE_LLM_CORRECTION }}
+              <span class="tooltip tooltip-right"
+                    data-tip="{% if settings.ollama_base_url %}{{ labels.UPLOAD_LLM_CORRECTION_HELP }}{% else %}{{ labels.UPLOAD_LLM_CORRECTION_UNAVAILABLE }}{% endif %}">
+                <span class="text-xs opacity-60 cursor-help" tabindex="0" aria-label="{{ labels.UPLOAD_INFOTIP_LABEL }}">ⓘ</span>
+              </span>
+            </span>
           </div>
         </label>
       </div>
