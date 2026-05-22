@@ -139,6 +139,9 @@ return 1
 # the central counter or the hash-embedded generation. Inlined into both
 # terminal scripts via f-string interpolation so the two callers cannot
 # drift on the gating logic — PR #39 Round 4 shipped that drift once.
+# Keep semantics in sync with worker/pipeline_callbacks.py
+# ``is_stale_callback`` and worker/context_store.py
+# ``_GENERATION_GATED_HSET_LUA``.
 _LUA_TERMINAL_GENERATION_GATE = """
 local central_gen_raw = redis.call('GET', KEYS[2])
 if central_gen_raw then

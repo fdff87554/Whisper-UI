@@ -58,6 +58,12 @@ def is_stale_callback(current_generation: int | None, meta_generation: int | Non
     no generation or the current counter is missing, the callback is treated
     as still valid. Only a strictly-older meta than the current counter
     triggers the stale short-circuit.
+
+    Generation gating lives in three places that must agree on this rule:
+    here (Python, callback path), worker/progress.py
+    ``_LUA_TERMINAL_GENERATION_GATE`` (Lua, terminal HSET path),
+    and worker/context_store.py ``_GENERATION_GATED_HSET_LUA``
+    (Lua, stage-output HSET path). Change one, change the others.
     """
     if meta_generation is None or current_generation is None:
         return False
