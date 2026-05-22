@@ -5,14 +5,15 @@ Thank you for considering contributing to Whisper-UI!
 ## Development Setup
 
 ```bash
-# Install mise (tool manager)
+# Install mise (tool manager). Prefer your system package manager;
+# the curl installer is a fallback for hosts without one.
 curl https://mise.run | sh
 
-# Install project tools and Python
+# Install project runtimes (Python, Node, etc.) declared in mise.toml
 mise install
 
-# Install dependencies (dev includes frontend + test tools)
-pip install -e ".[dev]"
+# Install dependencies (dev extra pulls in frontend + worker-llm + test tools)
+uv sync --extra dev
 
 # Install pre-commit hooks
 pre-commit install
@@ -31,7 +32,8 @@ pre-commit install
 4. Run tests:
 
    ```bash
-   pytest
+   uv run pytest                  # unit tests (integration excluded by default)
+   uv run pytest -m integration   # integration tests (require ffmpeg on PATH)
    ```
 
 5. Submit a pull request with a clear description of:
@@ -50,25 +52,10 @@ All checks are enforced via pre-commit hooks.
 
 ## Architecture
 
-```text
-src/whisper_ui/
-  core/       # Config, models, exceptions, shared constants
-  pipeline/   # STT processing stages (preprocess -> transcribe -> align -> diarize -> postprocess)
-  worker/     # RQ task queue definitions
-  storage/    # SQLite database + file I/O
-  export/     # SRT/VTT/TXT/JSON/DOCX exporters
-  ui/         # Shared labels
-  web/        # FastAPI application (routes, templates, static)
-```
-
-**Layer dependencies** (each layer may only import from layers above it):
-
-```text
-core <- pipeline <- worker <- web
-core <- storage  <- worker <- web
-core <- export              <- web
-ui                          <- web
-```
+See the "Project Structure" section in [README.md](README.md) for the
+authoritative module layout. New code should respect the layered
+dependency direction documented there (core / pipeline / worker /
+storage / export / ui flow upward into web).
 
 ## Pull Request Guidelines
 
