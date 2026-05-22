@@ -52,6 +52,16 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    # Cap the json-file driver so unbounded structured logs cannot fill
+    # /var/lib/docker on long-running deployments. 20 MB x 5 files per
+    # service is enough headroom for a few days of forensic context on
+    # the small-office deployments this profile targets; larger
+    # operations should plug a centralised log driver via .env override.
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
   redis:
     image: redis:7-alpine
     command: redis-server --appendonly yes ${REDIS_PASSWORD:+--requirepass "${REDIS_PASSWORD}"}
@@ -63,6 +73,11 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
   worker-gpu:
     profiles: [gpu]
     image: ghcr.io/fdff87554/whisper-ui-worker:${WHISPER_UI_VERSION:-latest}
@@ -119,6 +134,11 @@ services:
               device_ids: ["${WORKER_GPU_DEVICE_ID:-0}"]
               capabilities: [gpu]
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
   worker-cpu:
     profiles: [cpu]
     image: ghcr.io/fdff87554/whisper-ui-worker-cpu:${WHISPER_UI_VERSION:-latest}
@@ -166,6 +186,11 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
   # Optional IO-dedicated worker for multi-worker topologies. Use it when
   # you want the GPU worker(s) to stay focused on whisper:gpu while a
   # lightweight CPU container handles download / preprocess / llm_correction.
@@ -216,6 +241,11 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
   # Optional bundled Ollama server for LLM text correction. Enable with:
   #   docker compose --profile gpu --profile llm up -d
   # Users who already run Ollama elsewhere should skip this profile and
@@ -241,6 +271,11 @@ services:
               device_ids: ["${OLLAMA_GPU_DEVICE_ID:-1}"]
               capabilities: [gpu]
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
   # One-shot init sidecar: waits until Ollama is healthy, pulls the
   # configured model, then exits. Idempotent — pulling an already-present
   # model is a fast no-op.
