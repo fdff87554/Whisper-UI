@@ -291,9 +291,17 @@ def test_run_transcribe_align_logs_stage_start_and_finish(monkeypatch, caplog):
     start = next(r.getMessage() for r in caplog.records if "Stage transcribe_align starting" in r.getMessage())
     assert "job-ta-log" in start
     assert "timeout=" in start  # even outside an RQ context the log line is well-formed
-    finish = next(r.getMessage() for r in caplog.records if "Stage transcribe_align finished" in r.getMessage())
-    assert "elapsed_ms=" in finish
-    assert "job-ta-log" in finish
+    # Regression guard for PR #53 Round 2 G1: a single stage-finish event
+    # must produce exactly one log line. The previous version left a legacy
+    # `logger.info("Stage transcribe_align finished for job ...")` next to
+    # the new `_log_stage_finish` helper, so success paths emitted two
+    # finish lines while failure paths emitted only one.
+    finish_messages = [r.getMessage() for r in caplog.records if "Stage transcribe_align finished" in r.getMessage()]
+    assert len(finish_messages) == 1, (
+        f"expected exactly one finish log for transcribe_align, got {len(finish_messages)}: {finish_messages}"
+    )
+    assert "elapsed_ms=" in finish_messages[0]
+    assert "job-ta-log" in finish_messages[0]
 
 
 def test_run_diarize_raises_pipeline_error_when_job_missing(monkeypatch):

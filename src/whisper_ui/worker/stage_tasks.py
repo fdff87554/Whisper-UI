@@ -385,7 +385,6 @@ def run_transcribe_align(parent_job_id: str) -> str:
         finally:
             _log_stage_finish("transcribe_align", parent_job_id, start_ns)
 
-        logger.info("Stage transcribe_align finished for job %s", parent_job_id)
         return f"transcribe_align:{parent_job_id}"
 
 
