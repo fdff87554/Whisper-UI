@@ -101,3 +101,28 @@ def test_create_batch_zip_colliding_filenames(filestore: FileStore):
 def test_create_batch_zip_empty_jobs(filestore: FileStore):
     data = create_batch_zip([], filestore, "txt")
     assert data is None
+
+
+def test_create_batch_zip_url_job_uses_job_id_filename(filestore: FileStore):
+    """URL jobs store the canonical YouTube URL as ``filename``; that produces
+    ZIP entries like ``watch?v=abc.srt`` (broken on Windows tools). The
+    helper must fall back to ``job.id`` for any job with ``source_url``."""
+    url_job = Job(
+        filename="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        filepath="/tmp/url-job",
+        source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        status=JobStatus.COMPLETED,
+        batch_id="batch-url",
+    )
+    _save_result(filestore, url_job)
+
+    data = create_batch_zip([url_job], filestore, "srt")
+    assert data is not None
+
+    with zipfile.ZipFile(BytesIO(data)) as zf:
+        names = zf.namelist()
+        assert len(names) == 1
+        entry = names[0]
+        assert entry == f"{url_job.id}.srt"
+        for forbidden in ("?", "/", ":", "="):
+            assert forbidden not in entry
