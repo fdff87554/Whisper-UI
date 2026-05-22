@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import math
 from collections import OrderedDict
@@ -149,6 +150,140 @@ def _probe_retry_duration(job: Job) -> float | None:
     except Exception:  # pragma: no cover - defensive, ffprobe helper already swallows
         logger.exception("Failed to probe duration for retry of job %s", job.id)
         return None
+
+
+_BULK_ACTIONS = frozenset({"retry", "delete", "export"})
+
+
+def _parse_bulk_job_ids(form_value: str) -> list[str]:
+    """Parse the job_ids form field as a comma-separated list, trimmed and de-duplicated.
+
+    Order-preserving so the caller's selection order survives the round-trip,
+    which matters for the export ZIP file listing.
+    """
+    seen: set[str] = set()
+    job_ids: list[str] = []
+    for raw in form_value.split(","):
+        candidate = raw.strip()
+        if candidate and candidate not in seen:
+            seen.add(candidate)
+            job_ids.append(candidate)
+    return job_ids
+
+
+# Registered before /jobs/{job_id}/retry so that "/jobs/bulk/retry" does
+# not get matched by the per-job route with job_id="bulk".
+@router.post("/jobs/bulk/{action}")
+async def bulk_job_action(
+    request: Request,
+    action: str,
+    db: DbDep,
+    redis: RedisDep,
+    settings: SettingsDep,
+    filestore: FileStoreDep,
+    user: CurrentUserDep,
+):
+    """Apply `action` to every job_id in the form payload owned by the user.
+
+    Supported actions: retry (FAILED → QUEUED + enqueue), delete (COMPLETED
+    or FAILED only), export (zip COMPLETED results in the requested format).
+    Per-job ownership is enforced via owner_filter; jobs the user does not
+    own are reported as failed and do not leak existence.
+
+    Partial failures do not abort the whole operation. The response carries
+    an HX-Trigger-After-Settle "bulkPartial" event so the client can surface
+    a toast covering both the success count and the failure count.
+    """
+    if action not in _BULK_ACTIONS:
+        raise HTTPException(status_code=400, detail="Unknown bulk action")
+    form = await request.form()
+    job_ids_raw = form.get("job_ids", "")
+    if not isinstance(job_ids_raw, str):
+        raise HTTPException(status_code=400, detail="Invalid job_ids payload")
+    job_ids = _parse_bulk_job_ids(job_ids_raw)
+    if not job_ids:
+        raise HTTPException(status_code=400, detail="No job ids provided")
+    for job_id in job_ids:
+        validate_hex_id(job_id, "job_id")
+
+    owner_id = owner_filter(user)
+    if action == "export":
+        format_name = form.get("format_name", "srt") or "srt"
+        if not isinstance(format_name, str):
+            raise HTTPException(status_code=400, detail="Invalid format_name payload")
+        jobs = [job for job_id in job_ids if (job := db.get_job(job_id, owner_id=owner_id)) is not None]
+        if not jobs:
+            raise HTTPException(status_code=404, detail="No matching jobs")
+        try:
+            zip_data = create_batch_zip(jobs, filestore, format_name)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from None
+        if zip_data is None:
+            raise HTTPException(status_code=404, detail="No completed results in selection")
+        filename = f"selection_{format_name}.zip"
+        return Response(
+            content=zip_data,
+            media_type="application/zip",
+            headers={"Content-Disposition": make_content_disposition(filename)},
+        )
+
+    succeeded = 0
+    failed = 0
+    for job_id in job_ids:
+        job = db.get_job(job_id, owner_id=owner_id)
+        if job is None:
+            failed += 1
+            continue
+        if action == "retry":
+            if job.status != JobStatus.FAILED:
+                failed += 1
+                continue
+            try:
+                retry_duration = _probe_retry_duration(job)
+                job.status = JobStatus.QUEUED
+                job.error = None
+                job.progress = 0.0
+                job.progress_message = ""
+                job.result_path = None
+                job.duration = retry_duration
+                db.update_job(job)
+                redis.delete(f"job:{job.id}")
+                enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+                succeeded += 1
+            except Exception:
+                logger.exception("bulk retry failed for job %s", job.id)
+                job.status = JobStatus.FAILED
+                job.error = ui_labels.UPLOAD_ENQUEUE_FAILED
+                db.update_job(job)
+                failed += 1
+        else:  # delete
+            if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
+                failed += 1
+                continue
+            try:
+                filestore.delete_job_files(job.id)
+            except OSError:
+                logger.exception("bulk delete: filestore reclaim failed for job %s", job.id)
+                failed += 1
+                continue
+            db.delete_job(job.id)
+            redis.delete(f"job:{job.id}")
+            succeeded += 1
+
+    logger.info(
+        "bulk action complete: action=%s user_id=%s succeeded=%d failed=%d total=%d",
+        action,
+        user.id,
+        succeeded,
+        failed,
+        len(job_ids),
+    )
+    headers = {"HX-Trigger": "refreshJobList"}
+    if failed > 0:
+        headers["HX-Trigger-After-Settle"] = json.dumps({"bulkPartial": {"ok": succeeded, "failed": failed}})
+    elif succeeded > 0:
+        headers["HX-Trigger-After-Settle"] = json.dumps({"bulkComplete": {"ok": succeeded}})
+    return Response(status_code=204, headers=headers)
 
 
 @router.post("/jobs/{job_id}/retry")

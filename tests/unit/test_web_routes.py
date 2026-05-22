@@ -322,6 +322,73 @@ class TestJobsRoutes:
         assert job.id in msg
         assert "previous_error=" in msg
 
+    def test_bulk_retry_requeues_failed_jobs_and_emits_trigger(self, client, db):
+        """Two failed jobs → bulk retry → both transition to QUEUED and the
+        response carries HX-Trigger: refreshJobList (plan §5.6)."""
+        failed_a = _create_failed_job(db)
+        failed_b = _create_failed_job(db)
+
+        with (
+            patch("whisper_ui.web.routes.jobs.enqueue_pipeline"),
+            patch("whisper_ui.web.routes.jobs.get_audio_duration_seconds", return_value=None),
+        ):
+            resp = client.post("/jobs/bulk/retry", data={"job_ids": f"{failed_a.id},{failed_b.id}"})
+
+        assert resp.status_code == 204
+        assert resp.headers.get("hx-trigger") == "refreshJobList"
+        # After-settle event carries the success summary so the client can
+        # surface a single toast for the operation.
+        after_settle = resp.headers.get("hx-trigger-after-settle", "")
+        assert "bulkComplete" in after_settle
+        for original in (failed_a, failed_b):
+            refreshed = db.get_job(original.id)
+            assert refreshed.status == JobStatus.QUEUED
+
+    def test_bulk_delete_keeps_active_jobs_and_reports_partial_failure(self, client, db, filestore):
+        """COMPLETED jobs delete; PROCESSING jobs are reported failed so the
+        active worker is not interrupted (status enum is the gate). Partial
+        failure surfaces as bulkPartial in HX-Trigger-After-Settle."""
+        completed = _create_completed_job(db, filestore)
+        active = Job(filename="active.mp3", status=JobStatus.PROCESSING, language="zh")
+        db.insert_job(active)
+
+        resp = client.post(
+            "/jobs/bulk/delete",
+            data={"job_ids": f"{completed.id},{active.id}"},
+        )
+
+        assert resp.status_code == 204
+        assert resp.headers.get("hx-trigger") == "refreshJobList"
+        after_settle = resp.headers.get("hx-trigger-after-settle", "")
+        assert "bulkPartial" in after_settle
+        assert db.get_job(completed.id) is None
+        assert db.get_job(active.id) is not None
+
+    def test_bulk_action_rejects_unknown_action(self, client, db):
+        failed = _create_failed_job(db)
+
+        resp = client.post("/jobs/bulk/banana", data={"job_ids": failed.id})
+
+        assert resp.status_code == 400
+
+    def test_bulk_action_isolates_jobs_owned_by_other_users(self, client, db, filestore, test_admin):
+        """Bulk routes must respect owner_filter — passing another user's
+        job_id should be reported as failed, not silently succeed."""
+        their_job = Job(filename="theirs.mp3", status=JobStatus.FAILED, owner_id=test_admin.id + 999)
+        db.insert_job(their_job)
+
+        resp = client.post("/jobs/bulk/retry", data={"job_ids": their_job.id})
+
+        assert resp.status_code == 204
+        # No partial-complete trigger because the job was not owned by the
+        # current user → the failed counter went up, succeeded stayed at 0.
+        after_settle = resp.headers.get("hx-trigger-after-settle", "")
+        assert "bulkPartial" in after_settle
+        assert "bulkComplete" not in after_settle
+        # The stranger's job is unchanged.
+        refreshed = db.get_job(their_job.id)
+        assert refreshed.status == JobStatus.FAILED
+
     def test_delete_job_returns_500_and_preserves_db_row_when_filestore_fails(self, client, db, filestore, caplog):
         """PR #53 review F2: a filesystem failure must NOT lead to a
         DB-deleted-but-files-still-on-disk inconsistency. The route must
