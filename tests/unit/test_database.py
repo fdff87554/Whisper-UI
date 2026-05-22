@@ -4,6 +4,8 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
+import pytest
+
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.storage.database import JobDatabase
 
@@ -175,6 +177,113 @@ def test_recover_stale_jobs(db: JobDatabase):
     fresh_fetched = db.get_job(fresh.id)
     assert fresh_fetched is not None
     assert fresh_fetched.status == JobStatus.PROCESSING
+
+
+def test_recover_stale_jobs_logs_warning_with_ids(db: JobDatabase, caplog):
+    import logging as _logging
+
+    stale = Job(filename="stale.mp3", filepath="/tmp/stale.mp3")
+    stale.status = JobStatus.PROCESSING
+    db.insert_job(stale)
+    db._conn.execute(
+        "UPDATE jobs SET updated_at = '2000-01-01T00:00:00+00:00' WHERE id = ?",
+        (stale.id,),
+    )
+    db._conn.commit()
+
+    with caplog.at_level(_logging.WARNING, logger="whisper_ui.storage.database"):
+        db.recover_stale_jobs(timeout_seconds=60, error_message="timeout")
+
+    msg = next(r.getMessage() for r in caplog.records if "stale recovery marked" in r.getMessage())
+    assert stale.id in msg
+    assert "1 job(s)" in msg
+
+
+def test_recover_stale_jobs_silent_when_no_candidates(db: JobDatabase, caplog):
+    import logging as _logging
+
+    with caplog.at_level(_logging.WARNING, logger="whisper_ui.storage.database"):
+        recovered = db.recover_stale_jobs(timeout_seconds=60, error_message="timeout")
+
+    assert recovered == 0
+    assert not any("stale recovery" in r.getMessage() for r in caplog.records)
+
+
+def test_recover_stale_jobs_log_caps_id_list_at_sample_size(db: JobDatabase, caplog):
+    """PR #53 Round 2 G2: a large backlog must produce a bounded log line
+    (20 ids embedded + '(+N-20 more)' tail) so an apocalyptic recovery
+    sweep does not balloon the WARNING into a multi-megabyte string.
+    The accurate total still goes into the message prefix.
+    """
+    import logging as _logging
+
+    from whisper_ui.storage.database import _STALE_RECOVERY_LOG_SAMPLE
+
+    backlog = _STALE_RECOVERY_LOG_SAMPLE + 5
+    stale_ids: list[str] = []
+    for i in range(backlog):
+        job = Job(filename=f"stale-{i}.mp3", filepath=f"/tmp/{i}.mp3")
+        job.status = JobStatus.PROCESSING
+        db.insert_job(job)
+        stale_ids.append(job.id)
+    db._conn.execute(
+        "UPDATE jobs SET updated_at = '2000-01-01T00:00:00+00:00' WHERE status = ?",
+        (JobStatus.PROCESSING.value,),
+    )
+    db._conn.commit()
+
+    with caplog.at_level(_logging.WARNING, logger="whisper_ui.storage.database"):
+        recovered = db.recover_stale_jobs(timeout_seconds=60, error_message="timeout")
+
+    assert recovered == backlog
+    msg = next(r.getMessage() for r in caplog.records if "stale recovery marked" in r.getMessage())
+    assert f"{backlog} job(s)" in msg
+    overflow = backlog - _STALE_RECOVERY_LOG_SAMPLE
+    assert f"(+{overflow} more)" in msg
+    # The ids embedded in the message are a subset of the original stale
+    # set (SQLite ordering is implementation-defined for an UPDATE without
+    # ORDER BY, so we only assert membership + count, not order).
+    embedded = [sid for sid in stale_ids if sid in msg]
+    assert len(embedded) == _STALE_RECOVERY_LOG_SAMPLE
+
+
+def test_init_db_raises_when_sqlite_version_lacks_returning(monkeypatch, tmp_path):
+    """PR #53 review F5: recover_stale_jobs relies on UPDATE ... RETURNING
+    for race-free id capture, so a too-old libsqlite must fail at init_db
+    time instead of producing an OperationalError 60 seconds later when
+    the first stale recovery fires.
+    """
+    import sqlite3 as _sqlite3
+
+    from whisper_ui.storage import migrations
+
+    monkeypatch.setattr(migrations.sqlite3, "sqlite_version", "3.34.0")
+    monkeypatch.setattr(migrations.sqlite3, "sqlite_version_info", (3, 34, 0))
+
+    conn = _sqlite3.connect(tmp_path / "wont-init.db")
+    try:
+        with pytest.raises(RuntimeError, match=r"requires SQLite >= 3\.35\.0"):
+            migrations.init_db(conn)
+    finally:
+        conn.close()
+
+
+def test_init_db_accepts_sqlite_3_35(monkeypatch, tmp_path):
+    """Boundary: exactly 3.35.0 is acceptable (RETURNING introduced)."""
+    import sqlite3 as _sqlite3
+
+    from whisper_ui.storage import migrations
+
+    monkeypatch.setattr(migrations.sqlite3, "sqlite_version", "3.35.0")
+    monkeypatch.setattr(migrations.sqlite3, "sqlite_version_info", (3, 35, 0))
+
+    conn = _sqlite3.connect(tmp_path / "ok.db")
+    try:
+        # Should not raise; the underlying real sqlite is much newer so
+        # the schema execution itself still works fine.
+        migrations.init_db(conn)
+    finally:
+        conn.close()
 
 
 def test_has_active_jobs_empty(db: JobDatabase):

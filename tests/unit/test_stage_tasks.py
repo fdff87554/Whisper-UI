@@ -165,6 +165,27 @@ def test_run_diarize_only_persists_declared_output_keys(monkeypatch):
     assert stored["audio_path"] == "/tmp/16k.wav"
 
 
+def test_run_preprocess_logs_stage_start_and_finish(monkeypatch, caplog):
+    import logging as _logging
+
+    fake_redis = fakeredis.FakeRedis()
+    job = Job(id="job-log", status=JobStatus.PROCESSING, filepath="/tmp/audio.mp3")
+    _install_fake_runtime(monkeypatch, fake_redis, job)
+
+    fake_stage = _RecordingStage({"audio_path": "/tmp/16k.wav", "duration": 1.0})
+    with (
+        patch("whisper_ui.worker.stage_tasks.PreprocessStage", return_value=fake_stage),
+        caplog.at_level(_logging.INFO, logger="whisper_ui.worker.stage_tasks"),
+    ):
+        run_preprocess("job-log")
+
+    start = next(r.getMessage() for r in caplog.records if "Stage preprocess starting" in r.getMessage())
+    assert "job-log" in start
+    finish = next(r.getMessage() for r in caplog.records if "Stage preprocess finished" in r.getMessage())
+    assert "elapsed_ms=" in finish
+    assert "job-log" in finish
+
+
 def test_run_postprocess_persists_transcript_result(monkeypatch):
     fake_redis = fakeredis.FakeRedis()
     job = Job(id="job-p", status=JobStatus.PROCESSING, convert_to_traditional=False)
@@ -241,6 +262,46 @@ def test_run_transcribe_align_also_transitions_queued_to_processing(monkeypatch)
         run_transcribe_align("job-ta")
 
     assert job.status == JobStatus.PROCESSING
+
+
+def test_run_transcribe_align_logs_stage_start_and_finish(monkeypatch, caplog):
+    """PR #53 review F3: transcribe_align bypasses _run_single_stage so it
+    used to miss the start / elapsed_ms log pair. The shared helper now
+    keeps both drivers in lockstep.
+    """
+    import logging as _logging
+
+    fake_redis = fakeredis.FakeRedis()
+    job = Job(id="job-ta-log", status=JobStatus.PROCESSING, filepath="/tmp/a.mp3")
+    _install_fake_runtime(monkeypatch, fake_redis, job)
+    PipelineContextStore(fake_redis, "job-ta-log").initialize({"audio_path": "/tmp/16k.wav"})
+
+    fake_transcribe = _RecordingStage({"transcription_result": {"segments": []}})
+    fake_align = _RecordingStage({"aligned_result": {"segments": []}})
+
+    from whisper_ui.worker.stage_tasks import run_transcribe_align
+
+    with (
+        patch("whisper_ui.worker.stage_tasks.TranscribeStage", return_value=fake_transcribe),
+        patch("whisper_ui.worker.stage_tasks.AlignStage", return_value=fake_align),
+        caplog.at_level(_logging.INFO, logger="whisper_ui.worker.stage_tasks"),
+    ):
+        run_transcribe_align("job-ta-log")
+
+    start = next(r.getMessage() for r in caplog.records if "Stage transcribe_align starting" in r.getMessage())
+    assert "job-ta-log" in start
+    assert "timeout=" in start  # even outside an RQ context the log line is well-formed
+    # Regression guard for PR #53 Round 2 G1: a single stage-finish event
+    # must produce exactly one log line. The previous version left a legacy
+    # `logger.info("Stage transcribe_align finished for job ...")` next to
+    # the new `_log_stage_finish` helper, so success paths emitted two
+    # finish lines while failure paths emitted only one.
+    finish_messages = [r.getMessage() for r in caplog.records if "Stage transcribe_align finished" in r.getMessage()]
+    assert len(finish_messages) == 1, (
+        f"expected exactly one finish log for transcribe_align, got {len(finish_messages)}: {finish_messages}"
+    )
+    assert "elapsed_ms=" in finish_messages[0]
+    assert "job-ta-log" in finish_messages[0]
 
 
 def test_run_diarize_raises_pipeline_error_when_job_missing(monkeypatch):

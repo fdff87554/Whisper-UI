@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from pathlib import Path
 
 from whisper_ui.core.models import TranscriptResult
+
+logger = logging.getLogger(__name__)
 
 
 class FileStore:
@@ -59,10 +62,29 @@ class FileStore:
         return None
 
     def delete_job_files(self, job_id: str) -> None:
-        for base in (self._upload_dir, self._output_dir):
+        """Remove both upload and output dirs for ``job_id``; raise on any failure.
+
+        Manual delete routes (``DELETE /jobs/{id}``, ``DELETE /jobs/batch/{id}``)
+        rely on this strict 'either both gone or both kept' contract: if a
+        filesystem error leaves files behind, the route MUST NOT delete the
+        DB row, otherwise the UI / audit log shows the job as deleted while
+        the storage is still occupied — the regression PR #53 review F2
+        flagged. Best-effort cleanup (which suits the retention sweep)
+        belongs in :meth:`delete_upload_files`, not here.
+        """
+        removed: list[str] = []
+        for base, label in ((self._upload_dir, "upload"), (self._output_dir, "output")):
             job_dir = base / job_id
-            if job_dir.exists():
-                shutil.rmtree(job_dir)
+            if not job_dir.exists():
+                continue
+            shutil.rmtree(job_dir)
+            removed.append(label)
+        if removed:
+            logger.info(
+                "filestore deleted job dirs for job_id=%s (%s)",
+                job_id,
+                "+".join(removed),
+            )
 
     def delete_upload_files(self, job_id: str) -> bool:
         """Remove only the upload directory for ``job_id``; keep results.
@@ -75,5 +97,14 @@ class FileStore:
         job_dir = self._upload_dir / job_id
         if not job_dir.exists():
             return False
-        shutil.rmtree(job_dir)
+        try:
+            shutil.rmtree(job_dir)
+        except OSError as exc:
+            logger.warning(
+                "filestore upload-dir reclaim failed for job_id=%s: %s",
+                job_id,
+                exc.__class__.__name__,
+            )
+            return False
+        logger.debug("filestore reclaimed upload dir for job_id=%s", job_id)
         return True

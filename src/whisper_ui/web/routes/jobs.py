@@ -145,7 +145,7 @@ def _probe_retry_duration(job: Job) -> float | None:
     if job.source_url:
         return None
     try:
-        return get_audio_duration_seconds(job.filepath)
+        return get_audio_duration_seconds(job.filepath, job_id=job.id)
     except Exception:  # pragma: no cover - defensive, ffprobe helper already swallows
         logger.exception("Failed to probe duration for retry of job %s", job.id)
         return None
@@ -166,6 +166,7 @@ async def retry_job(
         # 404 (not 403) so cross-user access does not leak job existence.
         return Response(status_code=404)
 
+    previous_error = job.error
     try:
         retry_duration = _probe_retry_duration(job)
         job.status = JobStatus.QUEUED
@@ -178,6 +179,13 @@ async def retry_job(
         redis.delete(f"job:{job.id}")
 
         enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+        logger.info(
+            "job retried: job_id=%s user_id=%s filename=%r previous_error=%r",
+            job.id,
+            user.id,
+            job.filename,
+            previous_error or "(none)",
+        )
     except Exception:
         logger.exception("Failed to enqueue retry for job %s", job.id)
         job.status = JobStatus.FAILED
@@ -196,9 +204,28 @@ async def delete_job(job_id: str, db: DbDep, filestore: FileStoreDep, redis: Red
     if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
         return Response(status_code=409)
 
-    filestore.delete_job_files(job.id)
+    try:
+        filestore.delete_job_files(job.id)
+    except OSError as exc:
+        # Keep the DB row + Redis state + audit log silent so retrying the
+        # delete is a no-op-then-real-delete instead of "DB row gone but
+        # files still on disk". See PR #53 review F2.
+        logger.error(
+            "job delete aborted: filestore reclaim failed for job_id=%s user_id=%s: %s",
+            job.id,
+            user.id,
+            exc.__class__.__name__,
+        )
+        return Response(status_code=500)
     db.delete_job(job.id)
     redis.delete(f"job:{job.id}")
+    logger.info(
+        "job deleted: job_id=%s user_id=%s filename=%r status_at_delete=%s",
+        job.id,
+        user.id,
+        job.filename,
+        job.status,
+    )
     return Response(status_code=204, headers={"HX-Trigger": "refreshJobList"})
 
 
@@ -216,6 +243,7 @@ async def retry_batch(
     if not all_jobs:
         return Response(status_code=404)
 
+    retried = 0
     for job in all_jobs:
         if job.status != JobStatus.FAILED:
             continue
@@ -230,12 +258,20 @@ async def retry_batch(
             db.update_job(job)
             redis.delete(f"job:{job.id}")
             enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+            retried += 1
         except Exception:
             logger.exception("Failed to retry job %s", job.id)
             job.status = JobStatus.FAILED
             job.error = "Failed to enqueue retry"
             db.update_job(job)
 
+    logger.info(
+        "batch retry finished: batch_id=%s user_id=%s retried=%d total=%d",
+        batch_id,
+        user.id,
+        retried,
+        len(all_jobs),
+    )
     return Response(status_code=204, headers={"HX-Trigger": "refreshJobList"})
 
 
@@ -246,13 +282,38 @@ async def delete_batch(batch_id: str, db: DbDep, filestore: FileStoreDep, redis:
     if not all_jobs:
         return Response(status_code=404)
 
+    deleted = 0
+    failed = 0
     for job in all_jobs:
         if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
             continue
-        filestore.delete_job_files(job.id)
+        try:
+            filestore.delete_job_files(job.id)
+        except OSError as exc:
+            # Per-job atomicity: keep the failing job's DB row + Redis
+            # state so the user can retry just that one. Other jobs in
+            # the batch still get cleaned. See PR #53 review F2.
+            logger.error(
+                "batch delete skipped one job: job_id=%s batch_id=%s user_id=%s: %s",
+                job.id,
+                batch_id,
+                user.id,
+                exc.__class__.__name__,
+            )
+            failed += 1
+            continue
         db.delete_job(job.id)
         redis.delete(f"job:{job.id}")
+        deleted += 1
 
+    logger.info(
+        "batch deleted: batch_id=%s user_id=%s deleted=%d failed=%d total=%d",
+        batch_id,
+        user.id,
+        deleted,
+        failed,
+        len(all_jobs),
+    )
     return Response(status_code=204, headers={"HX-Trigger": "refreshJobList"})
 
 

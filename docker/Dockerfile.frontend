@@ -31,4 +31,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
-CMD ["uvicorn", "whisper_ui.web.app:app", "--host", "0.0.0.0", "--port", "8000"]
+# --no-access-log: silences uvicorn's stock access log; replaced by the
+# structured access log emitted from whisper_ui.web.middleware.request_id,
+# which includes user_id, request_id, and duration_ms (the stock log has
+# none of those).
+CMD ["uvicorn", "whisper_ui.web.app:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

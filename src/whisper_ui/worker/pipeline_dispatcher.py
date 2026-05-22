@@ -264,10 +264,19 @@ def enqueue_pipeline(
     else:
         tail_id = postprocess_job.id
 
+    stage_summary = ",".join(s.description.split("(")[0].rsplit(".", 1)[-1] for s in enqueued)
     logger.info(
-        "Enqueued pipeline DAG for job %s with %d sub-jobs",
+        "Enqueued pipeline DAG for job %s (generation=%d sub_jobs=%d stages=[%s] "
+        "model=%s language=%s diarize=%s llm=%s timeout=%ss)",
         job.id,
+        generation,
         len(enqueued),
+        stage_summary,
+        job.model_name,
+        job.language,
+        job.enable_diarization,
+        llm_active,
+        timeout,
     )
     return tail_id
 
@@ -377,6 +386,18 @@ def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> No
 
     meta_generation = extract_meta_generation(rq_job)
     error_msg = format_failure_message(_exc_type, exc_value)
+    # Surface the raw exception class — distinct from the localised
+    # error_msg the UI shows — so operators can grep finalize_failure
+    # entries to count timeouts vs preprocess errors vs pyannote OOMs
+    # without having to translate the Chinese error labels.
+    logger.error(
+        "Pipeline failure for job %s (sub_job=%s generation=%s exception=%s message=%r)",
+        parent_job_id,
+        rq_job.id,
+        meta_generation if meta_generation is not None else "-",
+        _exc_type.__name__ if _exc_type is not None else "?",
+        error_msg,
+    )
 
     # Pass meta_generation into build_worker_runtime so runtime.reporter is
     # gated by the Lua fail script even if the Python short-circuit below

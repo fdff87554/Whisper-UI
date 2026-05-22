@@ -15,6 +15,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from whisper_ui.web.auth import AuthMiddleware
 from whisper_ui.web.deps import templates
+from whisper_ui.web.middleware.request_id import RequestIdMiddleware
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -162,6 +163,12 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     from whisper_ui.core.config import get_settings
+    from whisper_ui.core.logging_setup import setup_logging
+
+    # Apply the project-wide dictConfig before anything else logs. Calling
+    # later would leave early startup lines (Settings validation, etc.)
+    # going through Python's default WARNING-only root logger.
+    setup_logging()
 
     settings = get_settings()
     application = FastAPI(title="Whisper UI", lifespan=lifespan)
@@ -184,9 +191,13 @@ def create_app() -> FastAPI:
         )
 
     # Middleware order: add_middleware is LIFO, so the order below results in
-    # SessionMiddleware (outermost) → AuthMiddleware → SecurityHeadersMiddleware
-    # → route handler on the inbound path. AuthMiddleware needs the session
-    # cookie decoded before it runs, so SessionMiddleware must be outside it.
+    # RequestIdMiddleware (outermost) → SessionMiddleware → AuthMiddleware →
+    # SecurityHeadersMiddleware → route handler on the inbound path.
+    # RequestIdMiddleware must run first so the request_id context var is
+    # already populated when SessionMiddleware / AuthMiddleware emit their
+    # own log lines (CSRF rejection, session invalidation, etc.).
+    # AuthMiddleware needs the session cookie decoded before it runs, so
+    # SessionMiddleware must be outside it.
     application.add_middleware(SecurityHeadersMiddleware)
     application.add_middleware(AuthMiddleware)
     application.add_middleware(
@@ -195,6 +206,7 @@ def create_app() -> FastAPI:
         same_site="lax",
         https_only=settings.session_https_only,
     )
+    application.add_middleware(RequestIdMiddleware)
 
     application.mount("/static", StaticFiles(directory=_WEB_DIR / "static"), name="static")
 

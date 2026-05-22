@@ -364,6 +364,55 @@ docker compose --profile gpu up -d
 | ----------------------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
 | `UPLOAD_RETENTION_DAYS` | `0`     | `0` disables the sweep (legacy behaviour). `>0` reclaims COMPLETED job upload dirs older than that many days hourly. |
 
+### Logging and request tracing
+
+The frontend and worker both initialise stdlib logging from
+[`whisper_ui.core.logging_setup`][logging_setup]. Every log line renders
+through one formatter so an operator can pipe `docker compose logs` into
+`grep` without parsing two different layouts:
+
+```text
+2026-05-22T03:14:01+0000 INFO whisper_ui.web.access [req=a3f12bc4 user=alice] method=POST path=/upload status=204 duration_ms=1342 ip=192.168.50.200
+```
+
+[logging_setup]: ./src/whisper_ui/core/logging_setup.py
+
+**Request correlation.** `RequestIdMiddleware` reads `X-Request-ID` from
+the inbound request (8-64 hex chars; anything else is regenerated) or
+generates a fresh 8-char id, then publishes it on contextvars. Every
+log line emitted during the request — middleware, route handler,
+filestore, exception handler — carries the same `req=<id>` tag. The
+response echoes the id back as `X-Request-ID` so an upstream nginx or
+browser devtools can join on the same key. When investigating "where
+did this upload go?", grep one id and read the full trace.
+
+**Authenticated user tag.** `AuthMiddleware` overlays the resolved
+username into the `user=` tag once the session is decoded; pre-auth
+and worker-side lines render `user=-`.
+
+**Access log replacement.** The frontend Dockerfile passes
+`--no-access-log` to uvicorn; the structured access log emitted from
+`RequestIdMiddleware` covers method / path / status / duration_ms / ip
+plus the `req=` / `user=` tags. The stock uvicorn access log lacks all
+three of those, which is why it is silenced.
+
+**Tunables.**
+
+| Variable    | Default | Description                                                                       |
+| ----------- | ------- | --------------------------------------------------------------------------------- |
+| `LOG_LEVEL` | `INFO`  | One of `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`; invalid values fall back. |
+| `LOG_JSON`  | unused  | Reserved for a future JSON-output mode; currently ignored.                        |
+
+The worker container starts via `python -m whisper_ui.worker`, which
+calls `setup_logging()` before delegating to RQ so the dictConfig (and
+the RQ-noise suppression) applies inside the worker process.
+
+**Log rotation.** Every service in `compose.yml` pins
+`logging.driver=json-file` with `max-size: 20m` and `max-file: 5`
+(100 MB per container). Larger deployments should plug a centralised
+driver (Loki, Splunk, Datadog) via a compose override; the file-driver
+ceiling is sized for small-office deployments only.
+
 ## Local Development
 
 ```bash

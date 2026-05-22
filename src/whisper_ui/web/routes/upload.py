@@ -129,6 +129,13 @@ async def upload_submit(
     submitted_count = 0
     failed_count = 0
 
+    logger.info(
+        "upload batch starting: user_id=%s files=%d batch_id=%s",
+        user.id,
+        len(valid_files),
+        batch_id or "-",
+    )
+
     max_size = settings.max_upload_size
     for uploaded_file in valid_files:
         display_name = PurePosixPath(uploaded_file.filename or "unknown").name
@@ -150,6 +157,12 @@ async def upload_submit(
         if not within_limit:
             dest.unlink(missing_ok=True)
             limit_str = _format_size(max_size)
+            logger.warning(
+                "upload rejected: user_id=%s filename=%r exceeds max_size=%d",
+                user.id,
+                display_name,
+                max_size,
+            )
             msg = ui_labels.UPLOAD_FILE_TOO_LARGE.format(name=display_name, limit=limit_str)
             return _error_redirect_or_fragment(
                 request,
@@ -158,9 +171,19 @@ async def upload_submit(
             )
 
         job.filepath = str(dest)
-        job.duration = get_audio_duration_seconds(dest)
+        job.duration = get_audio_duration_seconds(dest, job_id=job.id)
         job.status = JobStatus.QUEUED
         db.insert_job(job)
+        logger.info(
+            "upload job inserted: job_id=%s user_id=%s filename=%r duration=%s model=%s diarize=%s llm=%s",
+            job.id,
+            user.id,
+            display_name,
+            f"{job.duration:.1f}" if job.duration else "unknown",
+            model_name,
+            enable_diarization,
+            llm_correction_enabled,
+        )
 
         try:
             enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
@@ -171,6 +194,14 @@ async def upload_submit(
             job.error = ui_labels.UPLOAD_ENQUEUE_FAILED
             db.update_job(job)
             failed_count += 1
+
+    logger.info(
+        "upload batch finished: user_id=%s submitted=%d failed=%d batch_id=%s",
+        user.id,
+        submitted_count,
+        failed_count,
+        batch_id or "-",
+    )
 
     redirect_url = f"/jobs?submitted={submitted_count}"
     if failed_count:
@@ -247,6 +278,14 @@ async def upload_url_submit(
 
     submitted_count = 0
     failed_count = 0
+    logger.info(
+        "url upload batch starting: user_id=%s urls=%d skipped=%d deduped=%d batch_id=%s",
+        user.id,
+        len(unique_urls),
+        len(invalid_line_nums),
+        duplicates_removed,
+        batch_id or "-",
+    )
     for clean_url in unique_urls:
         job = Job(
             filename=clean_url,
@@ -265,6 +304,14 @@ async def upload_url_submit(
         job.filepath = str(upload_dir)
         job.status = JobStatus.QUEUED
         db.insert_job(job)
+        logger.info(
+            "url upload job inserted: job_id=%s user_id=%s model=%s diarize=%s llm=%s",
+            job.id,
+            user.id,
+            model_name,
+            enable_diarization,
+            llm_correction_enabled,
+        )
 
         try:
             enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
@@ -275,6 +322,14 @@ async def upload_url_submit(
             job.error = ui_labels.UPLOAD_ENQUEUE_FAILED
             db.update_job(job)
             failed_count += 1
+
+    logger.info(
+        "url upload batch finished: user_id=%s submitted=%d failed=%d batch_id=%s",
+        user.id,
+        submitted_count,
+        failed_count,
+        batch_id or "-",
+    )
 
     # Even when every enqueue failed we fall through to the /jobs redirect so
     # the per-URL FAILED rows we just inserted are visible to the user. The

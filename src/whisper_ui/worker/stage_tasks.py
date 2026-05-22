@@ -16,6 +16,7 @@ GPU worker when multiple cards are available.
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from rq.timeouts import BaseTimeoutException
@@ -155,6 +156,62 @@ def _current_generation() -> int | None:
         return None
 
 
+def _current_job_timeout() -> int | None:
+    """Return the RQ ``job_timeout`` configured at enqueue time, or None.
+
+    Returns None outside an RQ worker context (unit tests that invoke
+    stage tasks directly) and on any unexpected error so the log line
+    just renders '-' rather than crashing the stage.
+    """
+    try:
+        from rq import get_current_job
+
+        current = get_current_job()
+        if current is None or not current.timeout:
+            return None
+        return int(current.timeout)
+    except Exception:
+        logger.debug("rq.get_current_job() unavailable while reading timeout", exc_info=True)
+        return None
+
+
+def _log_stage_start(stage_name: str, parent_job_id: str) -> int:
+    """Emit the INFO stage-start line and return ``start_ns`` for the finish line.
+
+    Shared between :func:`_run_single_stage` and :func:`run_transcribe_align`
+    (which has its own driver but still wants identical observability
+    coverage — PR #53 review F3) so the two paths cannot drift on log
+    format or which context fields are included.
+    """
+    timeout_seconds = _current_job_timeout()
+    generation = _current_generation()
+    logger.info(
+        "Stage %s starting for job %s (generation=%s timeout=%ss)",
+        stage_name,
+        parent_job_id,
+        generation if generation is not None else "-",
+        timeout_seconds if timeout_seconds is not None else "-",
+    )
+    return time.perf_counter_ns()
+
+
+def _log_stage_finish(stage_name: str, parent_job_id: str, start_ns: int) -> None:
+    """Emit the INFO stage-finish line with ``elapsed_ms`` taken from ``start_ns``.
+
+    Called from the ``finally`` of both stage drivers so even a timeout
+    still produces the elapsed counter — operators can tell whether the
+    stage exited because it finished or because the configured timeout
+    fired by comparing elapsed_ms to the timeout from the start log.
+    """
+    elapsed_ms = (time.perf_counter_ns() - start_ns) // 1_000_000
+    logger.info(
+        "Stage %s finished for job %s (elapsed_ms=%d)",
+        stage_name,
+        parent_job_id,
+        elapsed_ms,
+    )
+
+
 def _persist_outputs(
     ctx_store: PipelineContextStore,
     updated: dict[str, Any],
@@ -208,6 +265,11 @@ def _run_single_stage(
         _mark_processing_if_queued(runtime, job)
         ctx_store = PipelineContextStore(runtime.redis, parent_job_id)
         context = ctx_store.load()
+        # Make parent_job_id visible to stages that probe / log on behalf
+        # of this job. The key never reaches the persisted output_keys
+        # set, so adding it here is in-memory only and does not pollute
+        # the Redis context hash.
+        context["parent_job_id"] = parent_job_id
 
         if pre_context_update is not None:
             pre_context_update(job, runtime, context)
@@ -218,10 +280,12 @@ def _run_single_stage(
         band = weights.get(stage_name, (0.0, 1.0))
         on_progress = _banded_progress(throttled, band)
 
-        updated = _execute_stage(stage, context.copy(), on_progress, stage_name=stage_name)
-        _persist_outputs(ctx_store, updated, output_keys, stage_name=stage_name)
-
-        logger.info("Stage %s finished for job %s", stage_name, parent_job_id)
+        start_ns = _log_stage_start(stage_name, parent_job_id)
+        try:
+            updated = _execute_stage(stage, context.copy(), on_progress, stage_name=stage_name)
+            _persist_outputs(ctx_store, updated, output_keys, stage_name=stage_name)
+        finally:
+            _log_stage_finish(stage_name, parent_job_id, start_ns)
         return f"{stage_name}:{parent_job_id}"
 
 
@@ -301,17 +365,26 @@ def run_transcribe_align(parent_job_id: str) -> str:
         transcribe_progress = _banded_progress(throttled, weights.get("transcribe", (0.0, 1.0)))
         align_progress = _banded_progress(throttled, weights.get("align", (0.0, 1.0)))
 
-        after_transcribe = _execute_stage(transcribe, context.copy(), transcribe_progress, stage_name="transcribe")
-        after_align = _execute_stage(align, after_transcribe, align_progress, stage_name="align")
+        # Wrap transcribe + align in a single "transcribe_align" log span:
+        # they share a numpy buffer and always run back-to-back on the
+        # same task, so a single start/finish pair matches what an
+        # operator cares about (did the GPU stage make progress?). The
+        # internal throttled progress reporter still differentiates
+        # transcribe vs align via the banded progress percentages.
+        start_ns = _log_stage_start("transcribe_align", parent_job_id)
+        try:
+            after_transcribe = _execute_stage(transcribe, context.copy(), transcribe_progress, stage_name="transcribe")
+            after_align = _execute_stage(align, after_transcribe, align_progress, stage_name="align")
 
-        _persist_outputs(
-            ctx_store,
-            after_align,
-            output_keys=("transcription_result", "aligned_result"),
-            stage_name="transcribe_align",
-        )
+            _persist_outputs(
+                ctx_store,
+                after_align,
+                output_keys=("transcription_result", "aligned_result"),
+                stage_name="transcribe_align",
+            )
+        finally:
+            _log_stage_finish("transcribe_align", parent_job_id, start_ns)
 
-        logger.info("Stage transcribe_align finished for job %s", parent_job_id)
         return f"transcribe_align:{parent_job_id}"
 
 

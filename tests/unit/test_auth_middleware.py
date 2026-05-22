@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import MagicMock
 
 import pytest
@@ -241,3 +242,102 @@ def test_unknown_session_uid_treated_as_anonymous(app, db, test_user):
 
     assert resp.status_code == 302
     assert resp.headers["location"].startswith("/login?next=")
+
+
+# --- Session-lifecycle log coverage (C6) ---------------------------------
+
+
+def test_session_version_mismatch_emits_info_log(app, db, test_user, caplog):
+    cookie = make_session_cookie(test_user)
+    db.conn.execute("UPDATE users SET session_version = 1 WHERE id = ?", (test_user.id,))
+    db.conn.commit()
+
+    client = TestClient(app, follow_redirects=False)
+    client.cookies.set("session", cookie)
+
+    with caplog.at_level(logging.INFO, logger="whisper_ui.web.auth"):
+        client.get("/")
+
+    msg = next(r.getMessage() for r in caplog.records if "session_version mismatch" in r.getMessage())
+    assert "cookie=0" in msg
+    assert "db=1" in msg
+
+
+def test_deactivated_user_session_emits_info_log(app, db, test_user, caplog):
+    cookie = make_session_cookie(test_user)
+    users_repo.set_active(db.conn, test_user.id, active=False)
+
+    client = TestClient(app, follow_redirects=False)
+    client.cookies.set("session", cookie)
+
+    with caplog.at_level(logging.INFO, logger="whisper_ui.web.auth"):
+        client.get("/")
+
+    assert any("is deactivated" in r.getMessage() for r in caplog.records)
+
+
+def test_unknown_uid_session_emits_info_log(app, caplog):
+    fake_user = type("U", (), {"id": 9999, "session_version": 0})()
+    cookie = make_session_cookie(fake_user)  # type: ignore[arg-type]
+
+    client = TestClient(app, follow_redirects=False)
+    client.cookies.set("session", cookie)
+
+    with caplog.at_level(logging.INFO, logger="whisper_ui.web.auth"):
+        client.get("/")
+
+    assert any("no longer exists" in r.getMessage() for r in caplog.records)
+
+
+def test_bootstrap_latch_flip_emits_info_log_once(app, db, test_admin, caplog):
+    app.state.bootstrap_done = False
+    client = TestClient(app, follow_redirects=False)
+
+    with caplog.at_level(logging.INFO, logger="whisper_ui.web.auth"):
+        client.get("/")
+        client.get("/")  # latch already flipped; should not log again
+
+    flips = [r for r in caplog.records if "Bootstrap latch flipped" in r.getMessage()]
+    assert len(flips) == 1
+
+
+def test_anonymous_redirect_emits_debug_log(app, caplog):
+    client = TestClient(app, follow_redirects=False)
+
+    with caplog.at_level(logging.DEBUG, logger="whisper_ui.web.auth"):
+        client.get("/")
+
+    assert any("Redirecting unauthenticated request" in r.getMessage() for r in caplog.records)
+
+
+def test_require_admin_rejection_emits_warning_log(app, test_user, caplog):
+    """A non-admin hitting an admin-only route must produce a security log line."""
+    client = authed_test_client(app, test_user)
+
+    with caplog.at_level(logging.WARNING, logger="whisper_ui.web.auth"):
+        resp = client.get("/admin/users")
+
+    assert resp.status_code == 403
+    rejections = [r for r in caplog.records if "require_admin rejected" in r.getMessage()]
+    assert len(rejections) == 1
+    assert test_user.username in rejections[0].getMessage()
+
+
+def test_authed_request_sets_user_id_contextvar_during_handler(app, test_user):
+    """When the middleware resolves a user the contextvar is exposed to
+    downstream code; after the response the var resets to '-'.
+    """
+    from whisper_ui.core.logging_setup import current_user_id
+
+    captured: dict = {}
+
+    @app.get("/test-current-user")
+    def _read_ctx():
+        captured["during"] = current_user_id()
+        return {"ok": True}
+
+    client = authed_test_client(app, test_user)
+    client.get("/test-current-user")
+
+    assert captured["during"] == test_user.username
+    assert current_user_id() == "-"  # reset after request

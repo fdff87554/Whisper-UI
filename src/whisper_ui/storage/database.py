@@ -15,6 +15,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Cap on how many recovered job ids the stale-recovery WARNING line
+# embeds. Picked so an operator can scan the list without horizontal
+# scroll. The Python sample buffer in recover_stale_jobs is bounded
+# to this many ids regardless of backlog size; note that SQLite's
+# RETURNING clause itself still materialises every recovered row in
+# temporary storage server-side before streaming them to the cursor
+# (https://sqlite.org/lang_returning.html), so the practical upper
+# bound on stale recovery's transient memory is set by N * sizeof(id)
+# at the engine layer — fine for the UUID-only id column we request
+# (~1MB at N=10K worst case), but worth knowing if the SELECT list
+# ever grows beyond a single column.
+_STALE_RECOVERY_LOG_SAMPLE = 20
+
 _JOB_COLUMNS = [
     "id",
     "filename",
@@ -179,8 +192,27 @@ class JobDatabase:
         See ``test_recover_stale_jobs_concurrent_workers_dont_double_recover``.
         """
         threshold = (datetime.now(UTC) - timedelta(seconds=timeout_seconds)).isoformat()
+        # SQLite's RETURNING clause (3.35+) gives the recovered ids back
+        # atomically with the UPDATE, so the audit log cannot drift from
+        # the actual rowcount even when multiple frontends run the stale
+        # checker concurrently. The startup version guard in
+        # migrations._ensure_sqlite_version ensures this is always
+        # available; a too-old deploy raises before init_db returns.
+        #
+        # The RETURNING cursor is iterated row-by-row (instead of
+        # ``fetchall()``) so the Python-side sample buffer stays bounded
+        # by ``_STALE_RECOVERY_LOG_SAMPLE``. SQLite still buffers every
+        # recovered row server-side before any value is sent to the
+        # cursor (see https://sqlite.org/lang_returning.html), so a
+        # post-outage worst case where N runs into the thousands does
+        # consume proportional temporary memory inside the engine —
+        # but each row carries only the UUID id column we request, so
+        # the practical upper bound stays well under any sane SQLite
+        # cache limit. Tighter bounding would require batching the
+        # UPDATE (e.g. SELECT id LIMIT N then UPDATE WHERE id IN ...)
+        # and is not justified at current row sizes.
         cursor = self._conn.execute(
-            "UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE status = ? AND updated_at < ?",
+            "UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE status = ? AND updated_at < ? RETURNING id",
             (
                 JobStatus.FAILED.value,
                 error_message,
@@ -189,8 +221,23 @@ class JobDatabase:
                 threshold,
             ),
         )
+        recovered = 0
+        shown: list[str] = []
+        for row in cursor:
+            recovered += 1
+            if len(shown) < _STALE_RECOVERY_LOG_SAMPLE:
+                shown.append(row[0])
         self._conn.commit()
-        return cursor.rowcount
+        if recovered > 0:
+            tail = f" (+{recovered - len(shown)} more)" if recovered > len(shown) else ""
+            logger.warning(
+                "stale recovery marked %d job(s) FAILED after %ds timeout: ids=%s%s",
+                recovered,
+                timeout_seconds,
+                shown,
+                tail,
+            )
+        return recovered
 
     def update_job(self, job: Job) -> None:
         job.touch()
