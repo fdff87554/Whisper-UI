@@ -2,7 +2,29 @@
 {% from "_icons.html" import icon_layers, icon_clock, icon_check, icon_plus, icon_eye %}
 
 {% block content %}
-<h1 class="text-2xl font-medium mb-6">{{ labels.DASHBOARD_HEADER }}</h1>
+{# Time-aware greeting — hour is read on the client so the user's local
+   timezone is respected without a server-side TZ assumption. #}
+<div x-data="{
+       greetingHour: new Date().getHours(),
+       morningLabel: '{{ labels.DASHBOARD_GREETING_MORNING }}',
+       afternoonLabel: '{{ labels.DASHBOARD_GREETING_AFTERNOON }}',
+       eveningLabel: '{{ labels.DASHBOARD_GREETING_EVENING }}',
+       get greeting() {
+         if (this.greetingHour < 12) return this.morningLabel;
+         if (this.greetingHour < 18) return this.afternoonLabel;
+         return this.eveningLabel;
+       },
+       get heading() {
+         const name = {{ (request.state.user.username if request.state and request.state.user else '')|tojson }};
+         const template = name
+           ? '{{ labels.DASHBOARD_GREETING_WITH_NAME }}'
+           : '{{ labels.DASHBOARD_GREETING_GUEST }}';
+         return template.replace('{greeting}', this.greeting).replace('{name}', name);
+       }
+     }"
+     class="mb-6">
+  <h1 class="text-2xl font-medium" x-text="heading">{{ labels.DASHBOARD_HEADER }}</h1>
+</div>
 
 {# Quick Stats #}
 <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">

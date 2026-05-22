@@ -11,16 +11,53 @@
    slower cadence while idle, so we don't burn Redis/SQLite reads for a
    dashboard with nothing to show — but idle->active is still picked up
    within one tick of the slow cadence, not stuck at that interval forever. #}
+{%- set _stage_keys = ['download', 'prepare', 'transcribe', 'diarize', 'correct', 'export'] -%}
+{%- set _stage_labels = {
+  'download': labels.DASHBOARD_STAGE_DOWNLOAD,
+  'prepare': labels.DASHBOARD_STAGE_PREPARE,
+  'transcribe': labels.DASHBOARD_STAGE_TRANSCRIBE,
+  'diarize': labels.DASHBOARD_STAGE_DIARIZE,
+  'correct': labels.DASHBOARD_STAGE_CORRECT,
+  'export': labels.DASHBOARD_STAGE_EXPORT,
+} -%}
 <div id="dashboard-active"
      hx-get="/dashboard/active"
      hx-trigger="every {% if active_jobs %}5s{% else %}30s{% endif %}"
      hx-swap="morph:outerHTML">
   {% if active_jobs %}
   <section class="mb-8">
-    <h2 class="text-lg font-medium mb-3">{{ labels.DASHBOARD_ACTIVE_SECTION }}</h2>
+    <h2 class="text-lg font-medium mb-3">{{ labels.DASHBOARD_HERO_IN_FLIGHT }}</h2>
     {% for job in active_jobs %}
+    {%- set pd = progress_data.get(job.id, {}) -%}
+    {%- set progress_val = pd.get('progress', '0')|float -%}
+    {%- set progress_pct = (progress_val * 100)|int -%}
+    {%- set progress_msg = pd.get('message', labels.JOBS_WAITING) -%}
+    {%- if '下載' in progress_msg %}{% set _stage = 'download' %}
+    {%- elif '預處理' in progress_msg or '轉換' in progress_msg %}{% set _stage = 'prepare' %}
+    {%- elif '對齊' in progress_msg or '轉錄' in progress_msg %}{% set _stage = 'transcribe' %}
+    {%- elif '分離' in progress_msg or '分配' in progress_msg %}{% set _stage = 'diarize' %}
+    {%- elif '校驗' in progress_msg %}{% set _stage = 'correct' %}
+    {%- elif '後處理' in progress_msg %}{% set _stage = 'export' %}
+    {%- else %}{% set _stage = 'transcribe' %}{% endif -%}
+    {%- set _stage_idx = _stage_keys.index(_stage) -%}
     <div id="dashboard-active-{{ job.id }}"
-         class="card bg-base-200 border border-base-300 mb-2">
+         class="card bg-base-200 border border-base-300 mb-2"
+         x-data="{
+           createdAt: {{ (job.created_at or '')|tojson }},
+           progress: {{ progress_val }},
+           etaTemplate: '{{ labels.DASHBOARD_HERO_ETA }}',
+           etaUnknownLabel: '{{ labels.DASHBOARD_HERO_ETA_UNKNOWN }}',
+           get etaText() {
+             if (!this.createdAt || this.progress <= 0.01) return this.etaUnknownLabel;
+             const startMs = Date.parse(this.createdAt);
+             if (Number.isNaN(startMs)) return this.etaUnknownLabel;
+             const elapsedMs = Date.now() - startMs;
+             if (elapsedMs <= 0) return this.etaUnknownLabel;
+             const remainingMs = elapsedMs * (1 - this.progress) / this.progress;
+             const minutes = Math.max(1, Math.round(remainingMs / 60000));
+             return this.etaTemplate.replace('{minutes}', minutes);
+           }
+         }">
       <div class="card-body p-4">
         <div class="flex items-center justify-between gap-4 mb-2">
           <span class="font-medium truncate flex-1 min-w-0">{{ job.filename }}</span>
@@ -29,13 +66,30 @@
             {{ labels.STATUS_LABELS[job.status.value] }}
           </span>
         </div>
-        {% set pd = progress_data.get(job.id, {}) %}
-        {% set progress_val = pd.get('progress', '0')|float %}
-        {% set progress_msg = pd.get('message', labels.JOBS_WAITING) %}
-        <progress class="progress progress-primary w-full" value="{{ (progress_val * 100)|int }}" max="100"></progress>
+
+        {# Stage pill row — derived from progress message; non-color cue
+           for users who don't read 中文 fluently and want a quick overview. #}
+        <div class="flex flex-wrap items-center gap-1 mb-2 text-xs">
+          {% for key in _stage_keys %}
+          {%- set is_current = (loop.index0 == _stage_idx) -%}
+          {%- set is_done = (loop.index0 < _stage_idx) -%}
+          <span class="px-2 py-0.5 rounded-full
+            {% if is_current %}bg-primary text-primary-content
+            {% elif is_done %}bg-base-300 opacity-70
+            {% else %}border border-base-300 opacity-50{% endif %}">
+            {{ _stage_labels[key] }}
+          </span>
+          {% if not loop.last %}<span class="opacity-30">›</span>{% endif %}
+          {% endfor %}
+        </div>
+
+        <progress class="progress progress-primary w-full" value="{{ progress_pct }}" max="100"></progress>
         <div class="flex justify-between text-sm opacity-60 mt-1">
           <span>{{ progress_msg }}</span>
-          <span>{{ (progress_val * 100)|int }}%</span>
+          <span class="flex items-center gap-3">
+            <span x-text="etaText"></span>
+            <span>{{ progress_pct }}%</span>
+          </span>
         </div>
       </div>
     </div>
