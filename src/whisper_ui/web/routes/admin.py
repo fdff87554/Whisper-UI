@@ -80,6 +80,8 @@ def _admin_error_message(error: str) -> str | None:
         return ui_labels.AUTH_USERNAME_INVALID
     if error == "password_short":
         return ui_labels.AUTH_PASSWORD_TOO_SHORT
+    if error == "user_not_found":
+        return ui_labels.ADMIN_USER_NOT_FOUND_ERROR
     return None
 
 
@@ -147,7 +149,7 @@ async def admin_toggle_admin(user_id: int, db: DbDep, admin: AdminUserDep):
         return _admin_redirect(error="self_action")
     target = users_repo.get_user_by_id(db.conn, user_id)
     if target is None:
-        return _admin_redirect()
+        return _admin_redirect(error="user_not_found")
     try:
         users_repo.set_admin(db.conn, user_id, admin=not target.is_admin)
     except LastAdminError:
@@ -176,7 +178,7 @@ async def admin_reset_password(
         return _admin_redirect(error="password_short")
     target = users_repo.get_user_by_id(db.conn, user_id)
     if target is None:
-        return _admin_redirect()
+        return _admin_redirect(error="user_not_found")
     users_repo.set_password(db.conn, user_id, new_password)
     if user_id == admin.id:
         logger.warning(

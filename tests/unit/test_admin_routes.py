@@ -323,7 +323,7 @@ def test_admin_self_reset_emits_warning_log(app, db, test_admin, caplog):
     assert matches[0].levelno == logging.WARNING
 
 
-def test_admin_reset_password_for_missing_user_is_noop(app, db, test_admin):
+def test_admin_reset_password_for_missing_user_reports_not_found(app, db, test_admin):
     client = authed_test_client(app, test_admin)
 
     resp = client.post(
@@ -332,4 +332,17 @@ def test_admin_reset_password_for_missing_user_is_noop(app, db, test_admin):
         follow_redirects=False,
     )
 
-    assert resp.status_code == 303  # silent no-op
+    assert resp.status_code == 303
+    assert resp.headers["location"].endswith("error=user_not_found")
+
+
+def test_admin_toggle_admin_for_missing_user_reports_not_found(app, db, test_admin):
+    client = authed_test_client(app, test_admin)
+
+    resp = client.post(
+        "/admin/users/9999/toggle-admin",
+        follow_redirects=False,
+    )
+
+    assert resp.status_code == 303
+    assert resp.headers["location"].endswith("error=user_not_found")
