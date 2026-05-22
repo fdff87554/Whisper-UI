@@ -165,6 +165,27 @@ def test_run_diarize_only_persists_declared_output_keys(monkeypatch):
     assert stored["audio_path"] == "/tmp/16k.wav"
 
 
+def test_run_preprocess_logs_stage_start_and_finish(monkeypatch, caplog):
+    import logging as _logging
+
+    fake_redis = fakeredis.FakeRedis()
+    job = Job(id="job-log", status=JobStatus.PROCESSING, filepath="/tmp/audio.mp3")
+    _install_fake_runtime(monkeypatch, fake_redis, job)
+
+    fake_stage = _RecordingStage({"audio_path": "/tmp/16k.wav", "duration": 1.0})
+    with (
+        patch("whisper_ui.worker.stage_tasks.PreprocessStage", return_value=fake_stage),
+        caplog.at_level(_logging.INFO, logger="whisper_ui.worker.stage_tasks"),
+    ):
+        run_preprocess("job-log")
+
+    start = next(r.getMessage() for r in caplog.records if "Stage preprocess starting" in r.getMessage())
+    assert "job-log" in start
+    finish = next(r.getMessage() for r in caplog.records if "Stage preprocess finished" in r.getMessage())
+    assert "elapsed_ms=" in finish
+    assert "job-log" in finish
+
+
 def test_run_postprocess_persists_transcript_result(monkeypatch):
     fake_redis = fakeredis.FakeRedis()
     job = Job(id="job-p", status=JobStatus.PROCESSING, convert_to_traditional=False)

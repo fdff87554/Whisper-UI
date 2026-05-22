@@ -246,6 +246,39 @@ def test_enqueue_pipeline_seeds_initial_context(tmp_path):
     assert "source_url" not in ctx
 
 
+def test_enqueue_pipeline_logs_dag_summary_with_stage_metadata(tmp_path, caplog):
+    """Operators must be able to read one line and know which stages were
+    enqueued, the model + language settings, and the configured timeout —
+    the prior 'with N sub-jobs' summary forced them to cross-reference
+    the Job row separately.
+    """
+    import logging as _logging
+
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(
+        id="job-enq-log",
+        filename="m.mp3",
+        filepath=str(tmp_path / "m.mp3"),
+        status=JobStatus.QUEUED,
+        language="zh",
+        model_name="large-v3",
+        enable_diarization=True,
+        duration=600.0,
+    )
+
+    with caplog.at_level(_logging.INFO, logger="whisper_ui.worker.pipeline_dispatcher"):
+        enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+
+    summary = next(r.getMessage() for r in caplog.records if "Enqueued pipeline DAG" in r.getMessage())
+    assert "model=large-v3" in summary
+    assert "language=zh" in summary
+    assert "diarize=True" in summary
+    assert "stages=[" in summary
+    assert "timeout=" in summary
+
+
 def test_subjobs_are_routed_to_resource_specific_queues(tmp_path):
     """Each stage must land on the queue matching the resource it consumes.
 
@@ -418,6 +451,52 @@ def test_finalize_failure_marks_job_failed_and_cancels_siblings(monkeypatch, tmp
         assert refreshed.is_canceled, f"sub-job {_stage_func(other)} should be cancelled"
     # context store should be wiped
     assert PipelineContextStore(redis, job.id).load() == {}
+
+
+def test_finalize_failure_logs_exception_class_separately_from_user_label(monkeypatch, tmp_path, caplog):
+    """The user-facing error message is localised; the logged exception
+    class is not. Operators counting timeouts vs preprocess errors vs
+    OOMs need the raw class name in the log without having to parse the
+    Chinese label.
+    """
+    import logging as _logging
+
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(
+        id="job-fail-log",
+        filename="m.mp3",
+        filepath=str(tmp_path / "m.mp3"),
+        status=JobStatus.PROCESSING,
+    )
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    failing = next(s for s in _load_subjobs(redis, job.id) if _stage_func(s) == "run_preprocess")
+
+    runtime = MagicMock()
+    runtime.redis = redis
+    runtime.db.get_job.return_value = job
+    runtime.settings.redis_processing_expiry = 7200
+
+    from contextlib import contextmanager
+
+    from whisper_ui.worker.progress import RedisProgressReporter
+
+    @contextmanager
+    def _fake_builder(job_id, *, generation=None):
+        runtime.reporter = RedisProgressReporter(redis, job_id, processing_ttl=7200, generation=generation)
+        yield runtime
+
+    monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
+
+    with caplog.at_level(_logging.ERROR, logger="whisper_ui.worker.pipeline_dispatcher"):
+        pd.finalize_failure(failing, redis, ValueError, ValueError("bad input"), None)
+
+    failure = next(r.getMessage() for r in caplog.records if "Pipeline failure for job" in r.getMessage())
+    assert "exception=ValueError" in failure
+    assert job.id in failure
 
 
 def test_finalize_failure_uses_chinese_timeout_label_for_rq_timeout(monkeypatch, tmp_path):

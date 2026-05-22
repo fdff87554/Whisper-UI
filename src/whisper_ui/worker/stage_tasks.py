@@ -16,6 +16,7 @@ GPU worker when multiple cards are available.
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from rq.timeouts import BaseTimeoutException
@@ -155,6 +156,25 @@ def _current_generation() -> int | None:
         return None
 
 
+def _current_job_timeout() -> int | None:
+    """Return the RQ ``job_timeout`` configured at enqueue time, or None.
+
+    Returns None outside an RQ worker context (unit tests that invoke
+    stage tasks directly) and on any unexpected error so the log line
+    just renders '-' rather than crashing the stage.
+    """
+    try:
+        from rq import get_current_job
+
+        current = get_current_job()
+        if current is None or not current.timeout:
+            return None
+        return int(current.timeout)
+    except Exception:
+        logger.debug("rq.get_current_job() unavailable while reading timeout", exc_info=True)
+        return None
+
+
 def _persist_outputs(
     ctx_store: PipelineContextStore,
     updated: dict[str, Any],
@@ -223,10 +243,31 @@ def _run_single_stage(
         band = weights.get(stage_name, (0.0, 1.0))
         on_progress = _banded_progress(throttled, band)
 
-        updated = _execute_stage(stage, context.copy(), on_progress, stage_name=stage_name)
-        _persist_outputs(ctx_store, updated, output_keys, stage_name=stage_name)
-
-        logger.info("Stage %s finished for job %s", stage_name, parent_job_id)
+        # The dispatcher sizes every sub-job with the parent's audio-duration-
+        # based timeout (or the default fallback); surface it in the stage
+        # log so an operator can tell from a single line whether a stage
+        # ran out of its budgeted slot vs hit a hard failure.
+        timeout_seconds = _current_job_timeout()
+        generation = _current_generation()
+        logger.info(
+            "Stage %s starting for job %s (generation=%s timeout=%ss)",
+            stage_name,
+            parent_job_id,
+            generation if generation is not None else "-",
+            timeout_seconds if timeout_seconds is not None else "-",
+        )
+        start_ns = time.perf_counter_ns()
+        try:
+            updated = _execute_stage(stage, context.copy(), on_progress, stage_name=stage_name)
+            _persist_outputs(ctx_store, updated, output_keys, stage_name=stage_name)
+        finally:
+            elapsed_ms = (time.perf_counter_ns() - start_ns) // 1_000_000
+            logger.info(
+                "Stage %s finished for job %s (elapsed_ms=%d)",
+                stage_name,
+                parent_job_id,
+                elapsed_ms,
+            )
         return f"{stage_name}:{parent_job_id}"
 
 
