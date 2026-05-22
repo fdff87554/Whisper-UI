@@ -101,8 +101,10 @@ class Settings(BaseSettings):
     # Extra buffer added on top of job_timeout_max when reclaiming stale jobs
     # whose worker died without updating the DB.
     stale_job_buffer: int = 1800  # 30min
-    # Redis TTL for progress keys of running jobs. Should exceed the longest
-    # possible job timeout so the UI does not lose progress state mid-run.
+    # Redis TTL for the per-job progress HSET while a job is running. Must
+    # exceed the longest possible job timeout so the UI does not lose
+    # progress state mid-run. See core/constants.py for the relationship
+    # to PIPELINE_STATE_TTL_SECONDS and worker/progress._DEFAULT_PROCESSING_TTL.
     redis_processing_expiry: int = 30600  # job_timeout_max + stale_job_buffer
     # How often DiarizeStage's background heartbeat refreshes progress so
     # stale-job-recovery and the UI can see the task is still alive.

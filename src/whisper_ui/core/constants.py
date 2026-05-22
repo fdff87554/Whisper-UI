@@ -50,12 +50,20 @@ YT_DLP_SOCKET_TIMEOUT = 30
 REDIS_COMPLETED_EXPIRY = 86400  # 24 hours
 REDIS_FAILED_EXPIRY = 86400  # 24 hours
 
-# Safety-net TTL for per-pipeline state in Redis (context HSET, generation
-# counter, sub-job sets). A successful or failed pipeline always deletes
-# these keys explicitly; this TTL only matters when a worker is killed
-# between bumping the generation counter and writing the finalizer. It
-# must outlive the longest plausible stage so a late writer can still
-# observe the bumped generation and drop its stale write.
+# Pipeline TTLs at a glance (three layers, longest to shortest):
+#   PIPELINE_STATE_TTL_SECONDS (here, 24h)
+#       Safety net for per-pipeline state (context HSET, generation
+#       counter, sub-job sets). Only matters when a worker is killed
+#       between bumping the generation counter and writing the
+#       finalizer; a successful/failed pipeline always deletes these
+#       keys explicitly. Must outlive the longest plausible stage so
+#       late writers still observe the bumped generation and self-drop.
+#   Settings.redis_processing_expiry (core/config.py, default ~8.5h)
+#       TTL on the per-job progress HSET emitted by RedisProgressReporter
+#       during a running job, sized to outlive job_timeout_max.
+#   progress._DEFAULT_PROCESSING_TTL (worker/progress.py, 2h)
+#       Fallback when callers construct a reporter without going through
+#       Settings (unit tests, ad-hoc scripts).
 PIPELINE_STATE_TTL_SECONDS = 86_400  # 24 hours
 
 # Worker queues. Stages are partitioned across these queues by the resource

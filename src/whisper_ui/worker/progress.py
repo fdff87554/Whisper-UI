@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 # Fallback TTL used when callers do not pass a processing expiry. Long enough
 # to survive the default job timeout but short enough that crashed workers do
 # not leave orphaned progress keys around for the whole completed-job window.
+# Production callers always route through Settings.redis_processing_expiry;
+# this constant only matters for ad-hoc usages (unit tests, scripts) that
+# instantiate a reporter directly. See core/constants.py for the three-layer
+# TTL map.
 _DEFAULT_PROCESSING_TTL = 7200
 
 # Sentinel meaning "no generation check" in the Lua scripts. Callers that
