@@ -166,6 +166,7 @@ async def retry_job(
         # 404 (not 403) so cross-user access does not leak job existence.
         return Response(status_code=404)
 
+    previous_error = job.error
     try:
         retry_duration = _probe_retry_duration(job)
         job.status = JobStatus.QUEUED
@@ -178,6 +179,13 @@ async def retry_job(
         redis.delete(f"job:{job.id}")
 
         enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+        logger.info(
+            "job retried: job_id=%s user_id=%s filename=%r previous_error=%r",
+            job.id,
+            user.id,
+            job.filename,
+            previous_error or "(none)",
+        )
     except Exception:
         logger.exception("Failed to enqueue retry for job %s", job.id)
         job.status = JobStatus.FAILED
@@ -199,6 +207,13 @@ async def delete_job(job_id: str, db: DbDep, filestore: FileStoreDep, redis: Red
     filestore.delete_job_files(job.id)
     db.delete_job(job.id)
     redis.delete(f"job:{job.id}")
+    logger.info(
+        "job deleted: job_id=%s user_id=%s filename=%r status_at_delete=%s",
+        job.id,
+        user.id,
+        job.filename,
+        job.status,
+    )
     return Response(status_code=204, headers={"HX-Trigger": "refreshJobList"})
 
 
@@ -216,6 +231,7 @@ async def retry_batch(
     if not all_jobs:
         return Response(status_code=404)
 
+    retried = 0
     for job in all_jobs:
         if job.status != JobStatus.FAILED:
             continue
@@ -230,12 +246,20 @@ async def retry_batch(
             db.update_job(job)
             redis.delete(f"job:{job.id}")
             enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+            retried += 1
         except Exception:
             logger.exception("Failed to retry job %s", job.id)
             job.status = JobStatus.FAILED
             job.error = "Failed to enqueue retry"
             db.update_job(job)
 
+    logger.info(
+        "batch retry finished: batch_id=%s user_id=%s retried=%d total=%d",
+        batch_id,
+        user.id,
+        retried,
+        len(all_jobs),
+    )
     return Response(status_code=204, headers={"HX-Trigger": "refreshJobList"})
 
 
@@ -246,13 +270,22 @@ async def delete_batch(batch_id: str, db: DbDep, filestore: FileStoreDep, redis:
     if not all_jobs:
         return Response(status_code=404)
 
+    deleted = 0
     for job in all_jobs:
         if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
             continue
         filestore.delete_job_files(job.id)
         db.delete_job(job.id)
         redis.delete(f"job:{job.id}")
+        deleted += 1
 
+    logger.info(
+        "batch deleted: batch_id=%s user_id=%s deleted=%d total=%d",
+        batch_id,
+        user.id,
+        deleted,
+        len(all_jobs),
+    )
     return Response(status_code=204, headers={"HX-Trigger": "refreshJobList"})
 
 

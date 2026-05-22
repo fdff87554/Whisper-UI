@@ -295,6 +295,33 @@ class TestJobsRoutes:
         assert "Redis internal" not in (refreshed.error or "")
         assert "secret" not in (refreshed.error or "")
 
+    def test_delete_job_emits_audit_log(self, client, db, filestore, caplog):
+        import logging as _logging
+
+        job = _create_completed_job(db, filestore)
+        with caplog.at_level(_logging.INFO, logger="whisper_ui.web.routes.jobs"):
+            client.delete(f"/jobs/{job.id}")
+
+        msg = next(r.getMessage() for r in caplog.records if "job deleted" in r.getMessage())
+        assert job.id in msg
+        assert "status_at_delete=completed" in msg
+
+    def test_retry_job_emits_audit_log_with_previous_error(self, client, db, caplog):
+        import logging as _logging
+
+        job = _create_failed_job(db)
+        # _create_failed_job sets error="Test failure" — verify it round-trips into the log.
+        with (
+            patch("whisper_ui.web.routes.jobs.enqueue_pipeline"),
+            patch("whisper_ui.web.routes.jobs.get_audio_duration_seconds", return_value=60.0),
+            caplog.at_level(_logging.INFO, logger="whisper_ui.web.routes.jobs"),
+        ):
+            client.post(f"/jobs/{job.id}/retry")
+
+        msg = next(r.getMessage() for r in caplog.records if "job retried" in r.getMessage())
+        assert job.id in msg
+        assert "previous_error=" in msg
+
 
 class TestViewerRoutes:
     def test_viewer_redirects_to_jobs(self, client):
@@ -769,6 +796,37 @@ class TestBatchRoutes:
         assert resp.status_code == 204
         for job in jobs:
             assert db.get_job(job.id) is None
+
+    def test_retry_batch_emits_summary_log(self, client, db, caplog):
+        import logging as _logging
+
+        batch_id = "e" * 32
+        for i in range(3):
+            db.insert_job(
+                Job(filename=f"f{i}.mp3", status=JobStatus.FAILED, error="err", batch_id=batch_id),
+            )
+        with (
+            patch("whisper_ui.web.routes.jobs.enqueue_pipeline"),
+            patch("whisper_ui.web.routes.jobs.get_audio_duration_seconds", return_value=60.0),
+            caplog.at_level(_logging.INFO, logger="whisper_ui.web.routes.jobs"),
+        ):
+            client.post(f"/jobs/batch/{batch_id}/retry")
+
+        summary = next(r.getMessage() for r in caplog.records if "batch retry finished" in r.getMessage())
+        assert "retried=3" in summary
+        assert "total=3" in summary
+
+    def test_delete_batch_emits_summary_log(self, client, db, filestore, caplog):
+        import logging as _logging
+
+        batch_id = "f" * 32
+        self._create_batch(db, filestore, batch_id=batch_id)
+        with caplog.at_level(_logging.INFO, logger="whisper_ui.web.routes.jobs"):
+            client.delete(f"/jobs/batch/{batch_id}")
+
+        summary = next(r.getMessage() for r in caplog.records if "batch deleted" in r.getMessage())
+        assert "deleted=" in summary
+        assert batch_id in summary
 
 
 class TestRetentionSweep:
