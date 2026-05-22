@@ -123,6 +123,12 @@ async def admin_deactivate_user(user_id: int, db: DbDep, admin: AdminUserDep):
         users_repo.set_active(db.conn, user_id, active=False)
     except LastAdminError:
         return _admin_redirect(error="last_admin")
+    except ValueError:
+        # users_repo.set_active raises ValueError when the user row is
+        # missing (deleted by another admin / hand-edited DB / stale
+        # form). Surface the same message the sibling endpoints use
+        # instead of leaking a 500.
+        return _admin_redirect(error="user_not_found")
     logger.info("admin %r deactivated uid=%s", admin.username, user_id)
     return _admin_redirect()
 
@@ -132,7 +138,10 @@ async def admin_activate_user(user_id: int, db: DbDep, admin: AdminUserDep):
     # No self-action guard: to reach this handler the admin must already
     # be active (the auth middleware would have cleared a deactivated
     # session). Activating self is a harmless no-op.
-    users_repo.set_active(db.conn, user_id, active=True)
+    try:
+        users_repo.set_active(db.conn, user_id, active=True)
+    except ValueError:
+        return _admin_redirect(error="user_not_found")
     logger.info("admin %r activated uid=%s", admin.username, user_id)
     return _admin_redirect()
 
@@ -154,6 +163,11 @@ async def admin_toggle_admin(user_id: int, db: DbDep, admin: AdminUserDep):
         users_repo.set_admin(db.conn, user_id, admin=not target.is_admin)
     except LastAdminError:
         return _admin_redirect(error="last_admin")
+    except ValueError:
+        # The user row could have been deleted between the get_user_by_id
+        # check above and set_admin here (TOCTOU). Surface the same
+        # message the sibling endpoints use rather than leaking a 500.
+        return _admin_redirect(error="user_not_found")
     logger.info("admin %r set is_admin=%s on uid=%s", admin.username, not target.is_admin, user_id)
     return _admin_redirect()
 

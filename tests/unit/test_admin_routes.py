@@ -346,3 +346,50 @@ def test_admin_toggle_admin_for_missing_user_reports_not_found(app, db, test_adm
 
     assert resp.status_code == 303
     assert resp.headers["location"].endswith("error=user_not_found")
+
+
+def test_admin_activate_for_missing_user_reports_not_found(app, db, test_admin):
+    client = authed_test_client(app, test_admin)
+
+    resp = client.post(
+        "/admin/users/9999/activate",
+        follow_redirects=False,
+    )
+
+    assert resp.status_code == 303
+    assert resp.headers["location"].endswith("error=user_not_found")
+
+
+def test_admin_deactivate_for_missing_user_reports_not_found(app, db, test_admin):
+    client = authed_test_client(app, test_admin)
+
+    resp = client.post(
+        "/admin/users/9999/deactivate",
+        follow_redirects=False,
+    )
+
+    assert resp.status_code == 303
+    assert resp.headers["location"].endswith("error=user_not_found")
+
+
+def test_admin_toggle_admin_catches_value_error_from_set_admin(app, db, test_admin, bob, monkeypatch):
+    """Defensive catch for the TOCTOU window between get_user_by_id and
+    set_admin: simulate the row being deleted in between by forcing
+    set_admin to raise ValueError. This is regression coverage for the
+    defensive ``except ValueError``; it does not (and cannot) exercise
+    the actual race deterministically.
+    """
+
+    def _raise_value_error(*_args, **_kwargs):
+        raise ValueError(f"User {bob.id} not found")
+
+    monkeypatch.setattr(users_repo, "set_admin", _raise_value_error)
+    client = authed_test_client(app, test_admin)
+
+    resp = client.post(
+        f"/admin/users/{bob.id}/toggle-admin",
+        follow_redirects=False,
+    )
+
+    assert resp.status_code == 303
+    assert resp.headers["location"].endswith("error=user_not_found")
