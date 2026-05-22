@@ -7,6 +7,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-05-22
+
 ### Added
 
 - Centralised stdlib `logging` setup in `whisper_ui.core.logging_setup`.
@@ -59,6 +61,46 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `max-size: 20m` and `max-file: 5` (100 MB per container) so the
   log volume from the new structured access log cannot fill
   `/var/lib/docker` on long-running deployments.
+
+### Fixed
+
+- Admin endpoints `activate`, `deactivate`, and `toggle-admin` now
+  surface a `user_not_found` error for missing user IDs instead of
+  returning 500. Previously only `toggle-admin` / `reset-password`
+  (via a pre-check) showed the friendly message; the sibling endpoints
+  leaked the underlying `ValueError` from `users_repo.set_active` /
+  `set_admin`. The `toggle-admin` path also defensively catches the
+  TOCTOU race between the pre-check and the actual update.
+- Batch ZIP entries for URL-source jobs no longer carry the YouTube
+  URL as the filename (which produced entries like `watch?v=abc.srt`
+  that some Windows extractors reject). URL jobs now use the job id
+  as the entry name; uploaded media keeps its original basename.
+
+### Documentation
+
+- `SECURITY.md` rewritten to match v2.1.0: documents the session-cookie
+  authentication, CSRF (Origin-vs-Host), per-user + per-IP rate limit,
+  owner isolation, session-version revocation, defense-in-depth
+  headers, upload hardening, and YouTube URL whitelist that are all
+  shipped. Replaces the previous text which claimed these controls were
+  intentionally omitted. Deployment best practices section updated
+  with `SESSION_SECRET`, `SESSION_HTTPS_ONLY`, `TRUST_PROXY_HEADERS`,
+  and `REDIS_PASSWORD` guidance.
+- `CONTRIBUTING.md` migrated from `pip install -e ".[dev]"` to
+  `uv sync --extra dev`; duplicated architecture tree replaced with a
+  pointer to README's `## Project Structure` (which now also carries
+  the layer dependency direction block).
+- README config table drops the misleading `LOG_JSON` row (env var
+  was never wired up).
+- Internal docstrings added to `JobDatabase` (thread-safety contract),
+  `PostprocessStage._converter` (per-instance lifecycle), the three
+  pipeline TTL constants (`PIPELINE_STATE_TTL_SECONDS`,
+  `Settings.redis_processing_expiry`, `_DEFAULT_PROCESSING_TTL`), and
+  the three generation-gating enforcement sites
+  (`pipeline_callbacks.is_stale_callback`,
+  `progress._LUA_TERMINAL_GENERATION_GATE`,
+  `context_store._GENERATION_GATED_HSET_LUA`) so the shared-state
+  contracts are discoverable from the code.
 
 ## [2.1.0] - 2026-05-21
 
