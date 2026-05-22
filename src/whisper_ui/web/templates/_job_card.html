@@ -11,12 +11,15 @@
   </label>
   {% endif %}
   <strong class="truncate flex-1 min-w-0 text-sm">{{ job.filename }}</strong>
-  <span class="badge badge-sm
+  <span class="badge badge-sm gap-1
     {% if job.status.value == 'queued' %}badge-info
     {% elif job.status.value == 'processing' %}badge-warning
     {% elif job.status.value == 'completed' %}badge-success
     {% elif job.status.value == 'failed' %}badge-error
     {% else %}badge-ghost{% endif %}">
+    {% if job.status.value == 'processing' %}
+    <span class="status-pulse" aria-hidden="true"></span>
+    {% endif %}
     {{ labels.STATUS_LABELS[job.status.value] }}
   </span>
 </div>
