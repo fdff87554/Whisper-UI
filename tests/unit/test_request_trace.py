@@ -125,3 +125,87 @@ def test_access_log_duration_ms_is_non_negative_integer(caplog_with_context):
     duration_token = next(t for t in msg.split() if t.startswith("duration_ms="))
     value = int(duration_token.split("=", 1)[1])
     assert value >= 0
+
+
+def _make_user_aware_app(username: str = "alice") -> FastAPI:
+    """Build a minimal app whose handler simulates AuthMiddleware setting
+    ``request.state.user`` then resetting the user_id contextvar in its
+    own ``finally`` — the exact pattern that caused the PR #53 review
+    finding. Keeps the test independent of full create_app() machinery
+    (which would also overwrite caplog's handler via dictConfig).
+    """
+    from dataclasses import dataclass
+
+    from starlette.middleware.base import BaseHTTPMiddleware
+
+    from whisper_ui.core.logging_setup import reset_user_id
+    from whisper_ui.core.logging_setup import set_user_id as _set_user_id
+
+    @dataclass(frozen=True)
+    class _FakeUser:
+        username: str
+
+    class _FakeAuthMiddleware(BaseHTTPMiddleware):
+        """Mimic AuthMiddleware: stamp request.state.user + set the
+        user_id contextvar, then reset it in finally (which is what made
+        the access log render ``user=-`` before the F1 fix).
+        """
+
+        async def dispatch(self, request, call_next):
+            request.state.user = _FakeUser(username=username)
+            token = _set_user_id(username)
+            try:
+                return await call_next(request)
+            finally:
+                reset_user_id(token)
+
+    app = FastAPI()
+    # Order: RequestIdMiddleware OUTERMOST (added last), _FakeAuthMiddleware INNER.
+    app.add_middleware(_FakeAuthMiddleware)
+    app.add_middleware(RequestIdMiddleware)
+
+    @app.get("/ok")
+    def ok():
+        return {"ok": True}
+
+    return app
+
+
+def test_access_log_renders_authenticated_username(caplog_with_context):
+    """Regression for the PR #53 review finding: an authenticated request
+    must end up with ``user=<username>`` in the access log record, not
+    ``user=-``. AuthMiddleware (inner) sets the contextvar then resets
+    it in its own ``finally``; Starlette's BaseHTTPMiddleware may also
+    run the inner middleware in a sub-task whose contextvar changes do
+    not propagate back to the outer task. RequestIdMiddleware therefore
+    must read the resolved user from ``request.state`` and re-set the
+    var before writing the access log.
+    """
+    app = _make_user_aware_app(username="alice")
+    client = TestClient(app)
+
+    with caplog_with_context.at_level(logging.INFO):
+        resp = client.get("/ok")
+
+    assert resp.status_code == 200
+    access_records = [r for r in caplog_with_context.records if r.name == "whisper_ui.web.access"]
+    assert len(access_records) == 1
+    assert access_records[0].user_id == "alice", (
+        f"expected user_id='alice' on access record, got {access_records[0].user_id!r}"
+    )
+
+
+def test_access_log_renders_dash_for_anonymous_request(caplog_with_context):
+    """Symmetric to the authenticated case: anonymous requests (where
+    request.state.user is never set) must keep the ``-`` placeholder so
+    authenticated and anonymous lines stay easy to filter apart.
+    """
+    app = _make_app()  # bare app: no AuthMiddleware, no request.state.user
+    client = TestClient(app)
+
+    with caplog_with_context.at_level(logging.INFO):
+        client.get("/ok")
+
+    access_records = [r for r in caplog_with_context.records if r.name == "whisper_ui.web.access"]
+    assert len(access_records) == 1
+    assert access_records[0].user_id == "-"

@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from whisper_ui.core.logging_setup import reset_request_context, set_request_context
+from whisper_ui.core.logging_setup import reset_request_context, set_request_context, set_user_id
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -93,6 +93,20 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
             return response
         finally:
             duration_ms = (time.perf_counter_ns() - start_ns) // 1_000_000
+            # AuthMiddleware sits inside this middleware and runs its own
+            # finally before ours, resetting the user_id contextvar to '-'.
+            # Starlette's BaseHTTPMiddleware also runs the inner middleware
+            # in a sub-task whose contextvar mutations do not propagate back
+            # to this outer task. Re-read the resolved user from
+            # ``request.state`` (which Starlette shares across the middleware
+            # call chain via the Request object, not via contextvars) and
+            # re-set the var so the access log line's ``[user=...]`` tag
+            # matches the authenticated identity. The token is discarded —
+            # ``reset_request_context`` below restores both vars to their
+            # pre-set_request_context state regardless of intermediate sets.
+            user = getattr(request.state, "user", None)
+            if user is not None:
+                set_user_id(user.username)
             _access_logger.info(
                 "method=%s path=%s status=%s duration_ms=%s ip=%s",
                 request.method,
