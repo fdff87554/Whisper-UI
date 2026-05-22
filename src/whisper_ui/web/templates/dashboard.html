@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_icons.html" import icon_layers, icon_clock, icon_check, icon_plus, icon_eye %}
+{% from "_icons.html" import icon_layers, icon_clock, icon_check, icon_plus, icon_eye, icon_file_audio, icon_folder_open, icon_link %}
 
 {% block content %}
 {# Time-aware greeting — hour is read on the client so the user's local
@@ -26,41 +26,48 @@
   <h1 class="text-2xl font-medium" x-text="heading">{{ labels.DASHBOARD_HEADER }}</h1>
 </div>
 
-{# Quick Stats #}
+{# Quick-action grid — replaces the cold 3-stat tiles. Each card is a
+   full-card click target (Fitts) leading to the matching upload tab. #}
 <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-  <div class="card bg-base-200 border border-base-300">
+  <a href="/upload?mode=files"
+     class="card bg-base-200 border border-base-300 hover:border-primary/40 hover:bg-base-300 focus-visible:border-primary transition-colors"
+     hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true">
     <div class="card-body p-4">
       <div class="flex items-center gap-3">
-        {{ icon_layers("w-5 h-5 text-primary opacity-70") }}
-        <div>
-          <div class="text-2xl font-bold">{{ total_jobs }}</div>
-          <div class="text-sm opacity-60">{{ labels.DASHBOARD_TOTAL_JOBS }}</div>
+        {{ icon_file_audio("w-6 h-6 text-primary opacity-80") }}
+        <div class="flex-1 min-w-0">
+          <div class="font-medium">{{ labels.DASHBOARD_QUICK_ACTION_FILE }}</div>
+          <div class="text-xs opacity-60 truncate">{{ labels.DASHBOARD_QUICK_ACTION_FILE_DESC }}</div>
         </div>
       </div>
     </div>
-  </div>
-  <div class="card bg-base-200 border border-base-300">
+  </a>
+  <a href="/upload?mode=folder"
+     class="card bg-base-200 border border-base-300 hover:border-primary/40 hover:bg-base-300 focus-visible:border-primary transition-colors"
+     hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true">
     <div class="card-body p-4">
       <div class="flex items-center gap-3">
-        {{ icon_clock("w-5 h-5 text-warning opacity-70") }}
-        <div>
-          <div class="text-2xl font-bold">{{ active_count }}</div>
-          <div class="text-sm opacity-60">{{ labels.DASHBOARD_ACTIVE_JOBS }}</div>
+        {{ icon_folder_open("w-6 h-6 text-primary opacity-80") }}
+        <div class="flex-1 min-w-0">
+          <div class="font-medium">{{ labels.DASHBOARD_QUICK_ACTION_FOLDER }}</div>
+          <div class="text-xs opacity-60 truncate">{{ labels.DASHBOARD_QUICK_ACTION_FOLDER_DESC }}</div>
         </div>
       </div>
     </div>
-  </div>
-  <div class="card bg-base-200 border border-base-300">
+  </a>
+  <a href="/upload?mode=url"
+     class="card bg-base-200 border border-base-300 hover:border-primary/40 hover:bg-base-300 focus-visible:border-primary transition-colors"
+     hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true">
     <div class="card-body p-4">
       <div class="flex items-center gap-3">
-        {{ icon_check("w-5 h-5 text-success opacity-70") }}
-        <div>
-          <div class="text-2xl font-bold">{{ completed_today }}</div>
-          <div class="text-sm opacity-60">{{ labels.DASHBOARD_COMPLETED_TODAY }}</div>
+        {{ icon_link("w-6 h-6 text-primary opacity-80") }}
+        <div class="flex-1 min-w-0">
+          <div class="font-medium">{{ labels.DASHBOARD_QUICK_ACTION_URL }}</div>
+          <div class="text-xs opacity-60 truncate">{{ labels.DASHBOARD_QUICK_ACTION_URL_DESC }}</div>
         </div>
       </div>
     </div>
-  </div>
+  </a>
 </div>
 
 {# Active Jobs polling area. The fragment owns its own wrapper and hx-trigger
@@ -95,23 +102,26 @@
 </section>
 {% endif %}
 
-{# Empty state #}
+{# Onboarding — first-run guidance replaces the lonely empty-state glyph. #}
 {% if total_jobs == 0 %}
-<div class="text-center py-16 opacity-60">
-  <svg class="w-16 h-16 mx-auto mb-4 opacity-30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
-    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-    <line x1="12" x2="12" y1="19" y2="22"/>
-  </svg>
-  <p class="mb-4">{{ labels.DASHBOARD_EMPTY }}</p>
-</div>
+<section class="card bg-base-200 border border-base-300 mb-8">
+  <div class="card-body p-6">
+    <h2 class="text-lg font-medium mb-4">{{ labels.DASHBOARD_ONBOARDING_TITLE }}</h2>
+    <ol class="space-y-3">
+      <li class="flex gap-3">
+        <span class="flex-shrink-0 w-7 h-7 rounded-full bg-primary text-primary-content text-sm font-medium flex items-center justify-center">1</span>
+        <span class="pt-0.5">{{ labels.DASHBOARD_ONBOARDING_STEP1 }}</span>
+      </li>
+      <li class="flex gap-3">
+        <span class="flex-shrink-0 w-7 h-7 rounded-full bg-base-300 text-sm font-medium flex items-center justify-center opacity-80">2</span>
+        <span class="pt-0.5 opacity-80">{{ labels.DASHBOARD_ONBOARDING_STEP2 }}</span>
+      </li>
+      <li class="flex gap-3">
+        <span class="flex-shrink-0 w-7 h-7 rounded-full bg-base-300 text-sm font-medium flex items-center justify-center opacity-80">3</span>
+        <span class="pt-0.5 opacity-80">{{ labels.DASHBOARD_ONBOARDING_STEP3 }}</span>
+      </li>
+    </ol>
+  </div>
+</section>
 {% endif %}
-
-{# CTA #}
-<div class="flex justify-center">
-  <a href="/upload" class="btn btn-primary gap-2">
-    {{ icon_plus("w-5 h-5") }}
-    {{ labels.DASHBOARD_NEW_TRANSCRIPTION }}
-  </a>
-</div>
 {% endblock %}
