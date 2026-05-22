@@ -380,6 +380,7 @@ def test_fallback_when_segments_key_missing():
         '{"segments": [{"idx": "0", "text": "x"}]}',  # idx not int
         '{"segments": [{"idx": 0}]}',  # missing text
         '{"segments": [[0, "x"]]}',  # not dict entries
+        '{"segments": "not-a-list"}',  # segments wrong outer type
     ],
 )
 def test_fallback_on_shape_errors(bad_payload: str):

@@ -86,6 +86,21 @@ def _row_to_job(row: sqlite3.Row) -> Job:
 
 
 class JobDatabase:
+    """SQLite-backed job repository.
+
+    Thread-safety contract: ``check_same_thread=False`` lets sibling
+    repositories on the same event-loop thread share one connection
+    (see :attr:`conn`). WAL + ``busy_timeout`` keep concurrent readers
+    from blocking each other, but Python's ``sqlite3`` binding does
+    **not** serialise concurrent writers on a single connection.
+
+    The web tier owns ``app.state.db`` and uses it from the event-loop
+    thread only. Any code that runs in another thread (the upload
+    retention sweep is the canonical example, see
+    ``web/app.py:_run_retention_sweep``) must open its own
+    short-lived ``JobDatabase`` instead of borrowing the shared one.
+    """
+
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
         db_path.parent.mkdir(parents=True, exist_ok=True)

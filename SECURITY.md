@@ -17,23 +17,65 @@ This policy covers the Whisper-UI application code and its Docker deployment con
 ## Intended Deployment Model
 
 Whisper-UI is designed for **internal-network deployment** (e.g. an
-office LAN, a VPN, or a Tailscale tailnet). It deliberately does
-**not** ship the controls a public-internet service would require:
+office LAN, a VPN, or a Tailscale tailnet). It is not hardened for
+direct exposure on the public internet, but it does ship a baseline of
+application-level controls so multiple users can safely share one
+deployment:
 
-- No user authentication or session management
-- No CSRF protection on state-changing routes
-- No request rate limiting
-- No per-user authorization on uploads, retries, or deletes
+- **Authentication**: session-cookie login with argon2id password hashing
+  (`web/auth.py`, `storage/users_repo.py`). The first visitor on a fresh
+  database is forced through a one-shot bootstrap registration that creates
+  the initial admin (`web/app.py`, `web/auth.py`).
+- **CSRF protection**: state-changing requests are rejected unless `Origin`
+  (or `Referer` as fallback) matches the request `Host` (`web/auth.py`).
+- **Rate limiting**: per-username and per-IP login throttling backed by
+  Redis (`web/rate_limit.py`, `web/routes/auth_routes.py`).
+- **Per-user authorization**: jobs are scoped to their `owner_id`; non-admin
+  users only see their own transcripts, downloads, and delete actions
+  (`web/routes/jobs.py`, `web/routes/viewer.py`).
+- **Session revocation**: each user row carries a `session_version` that is
+  bumped on password reset or account deactivation, invalidating any
+  outstanding session cookie.
+- **Defense-in-depth headers**: `X-Content-Type-Options`, `X-Frame-Options`,
+  `Referrer-Policy` set on every response (`web/app.py`
+  `SecurityHeadersMiddleware`). CSP / HSTS are intentionally not set; CSP
+  is left to deployment-time configuration because templates load
+  htmx / Alpine.js from jsDelivr, and HSTS is owned by the upstream TLS
+  proxy.
+- **Upload hardening**: filenames stripped to basename, sizes capped via
+  streamed reads, allowed extensions enumerated, output paths derived from
+  job IDs (`web/routes/upload.py`, `storage/filestore.py`).
+- **URL ingest whitelist**: only YouTube URLs from a fixed host set are
+  accepted; the URL is rebuilt from the extracted video ID before being
+  passed to yt-dlp (`web/url_validation.py`).
+- **Template autoescape**: enabled (FastAPI / Jinja2 default).
+- **Error surface**: unhandled exceptions return a generic 500; tracebacks
+  go to the operator log only (`web/app.py`).
 
-Anyone who can reach the application port can submit jobs, view
-transcripts, and delete records. Do not expose Whisper-UI directly to
-the public internet. If you need remote access, place it behind a
-reverse proxy that adds authentication (mTLS, OIDC, basic auth, etc.)
-and that itself is hardened for the public network.
+Even with the above, the application is **not** designed to face the
+open internet directly. Place it behind a reverse proxy that terminates
+TLS, rewrites `Host`, and either provides additional access control or
+restricts the network the application is reachable from.
 
 ## Best Practices for Deployment
 
-- Never commit `.env` files or HuggingFace tokens to version control
-- Run Docker containers with minimal privileges
-- Keep dependencies updated to patch known vulnerabilities
-- Restrict network access to the application port (8000) in production
+- Set a stable `SESSION_SECRET` (`openssl rand -hex 32`). An empty value
+  generates an ephemeral random secret per process and logs a warning;
+  every restart will invalidate all sessions.
+- Set `SESSION_HTTPS_ONLY=true` when running behind TLS so the session
+  cookie is marked `Secure`.
+- If you set `TRUST_PROXY_HEADERS=true`, the reverse proxy **must**
+  overwrite client-supplied `X-Forwarded-For` and `X-Forwarded-Host`
+  (e.g. nginx `proxy_set_header X-Forwarded-For $remote_addr;`).
+  Otherwise a hostile client can spoof its IP and host to defeat
+  rate-limit and CSRF checks. See the README "Multi-user authentication"
+  section for full operator guidance.
+- Set `REDIS_PASSWORD` before exposing the bundled Redis beyond the local
+  Docker network (the compose snippet only enables `--requirepass` when
+  the variable is non-empty).
+- Never commit `.env` files or HuggingFace tokens to version control.
+- Run Docker containers with minimal privileges.
+- Keep dependencies updated; the project ships a GitHub Dependabot
+  config (`.github/dependabot.yml`) and CI runs dependency checks.
+- Restrict network access to the application port (8000) so reach is
+  limited to the intended audience.

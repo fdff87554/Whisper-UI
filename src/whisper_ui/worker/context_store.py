@@ -89,6 +89,11 @@ if TYPE_CHECKING:
 # success, 0 if the write was rejected because the caller's generation was
 # stale (the parent job has been retried under a new generation).
 #
+# Generation gating lives in three places that must agree on the
+# "writer is stale if its generation < central" rule. See
+# worker/pipeline_callbacks.py ``is_stale_callback`` and
+# worker/progress.py ``_LUA_TERMINAL_GENERATION_GATE``.
+#
 # KEYS[1] = context hash key (whisper:ctx:<parent>)
 # KEYS[2] = generation counter key (whisper:pipeline:<parent>:generation)
 # ARGV[1] = expected generation (int as string)

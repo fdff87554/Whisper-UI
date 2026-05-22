@@ -80,6 +80,8 @@ def _admin_error_message(error: str) -> str | None:
         return ui_labels.AUTH_USERNAME_INVALID
     if error == "password_short":
         return ui_labels.AUTH_PASSWORD_TOO_SHORT
+    if error == "user_not_found":
+        return ui_labels.ADMIN_USER_NOT_FOUND_ERROR
     return None
 
 
@@ -121,6 +123,12 @@ async def admin_deactivate_user(user_id: int, db: DbDep, admin: AdminUserDep):
         users_repo.set_active(db.conn, user_id, active=False)
     except LastAdminError:
         return _admin_redirect(error="last_admin")
+    except ValueError:
+        # users_repo.set_active raises ValueError when the user row is
+        # missing (deleted by another admin / hand-edited DB / stale
+        # form). Surface the same message the sibling endpoints use
+        # instead of leaking a 500.
+        return _admin_redirect(error="user_not_found")
     logger.info("admin %r deactivated uid=%s", admin.username, user_id)
     return _admin_redirect()
 
@@ -130,7 +138,10 @@ async def admin_activate_user(user_id: int, db: DbDep, admin: AdminUserDep):
     # No self-action guard: to reach this handler the admin must already
     # be active (the auth middleware would have cleared a deactivated
     # session). Activating self is a harmless no-op.
-    users_repo.set_active(db.conn, user_id, active=True)
+    try:
+        users_repo.set_active(db.conn, user_id, active=True)
+    except ValueError:
+        return _admin_redirect(error="user_not_found")
     logger.info("admin %r activated uid=%s", admin.username, user_id)
     return _admin_redirect()
 
@@ -147,11 +158,16 @@ async def admin_toggle_admin(user_id: int, db: DbDep, admin: AdminUserDep):
         return _admin_redirect(error="self_action")
     target = users_repo.get_user_by_id(db.conn, user_id)
     if target is None:
-        return _admin_redirect()
+        return _admin_redirect(error="user_not_found")
     try:
         users_repo.set_admin(db.conn, user_id, admin=not target.is_admin)
     except LastAdminError:
         return _admin_redirect(error="last_admin")
+    except ValueError:
+        # The user row could have been deleted between the get_user_by_id
+        # check above and set_admin here (TOCTOU). Surface the same
+        # message the sibling endpoints use rather than leaking a 500.
+        return _admin_redirect(error="user_not_found")
     logger.info("admin %r set is_admin=%s on uid=%s", admin.username, not target.is_admin, user_id)
     return _admin_redirect()
 
@@ -176,7 +192,7 @@ async def admin_reset_password(
         return _admin_redirect(error="password_short")
     target = users_repo.get_user_by_id(db.conn, user_id)
     if target is None:
-        return _admin_redirect()
+        return _admin_redirect(error="user_not_found")
     users_repo.set_password(db.conn, user_id, new_password)
     if user_id == admin.id:
         logger.warning(
