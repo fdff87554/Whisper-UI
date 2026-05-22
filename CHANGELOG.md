@@ -5,6 +5,61 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Centralised stdlib `logging` setup in `whisper_ui.core.logging_setup`.
+  Reads `LOG_LEVEL` (DEBUG / INFO / WARNING / ERROR / CRITICAL; default
+  INFO) and applies one dictConfig across the frontend and worker.
+  Pins `rq` / `rq.worker` / `rq.scheduler` / `uvicorn.access` to
+  WARNING so the every-13-minute RQ heartbeat and the soon-to-be-
+  replaced uvicorn access log do not crowd out signal.
+- `RequestIdMiddleware` (registered as the outermost middleware on the
+  frontend) reads `X-Request-ID` from the inbound request (8-64 hex
+  chars; otherwise generates a fresh 8-char id), publishes it via
+  contextvars, and echoes it back on the response. Every log line
+  during the request renders `[req=<id> user=<name>]` so an operator
+  can grep one id and read the whole request trace; `AuthMiddleware`
+  overlays the resolved username into the `user=` tag.
+- Structured access log on the `whisper_ui.web.access` logger
+  carrying method, path, status, duration_ms, and ip on every
+  request (including exceptions, which render `status=500` sentinel).
+  Replaces uvicorn's stock access log via `--no-access-log` on the
+  container CMD.
+- Audit logging across the previously silent paths: rate-limit
+  decisions (debug per check, warning on threshold), session lifecycle
+  events in AuthMiddleware (session_version mismatch / deactivated user /
+  unknown uid), upload pipeline events (per-file insert + batch
+  summary), job delete / retry success paths, stage transitions
+  (start / finish with elapsed_ms / timeout), pipeline failures
+  (exception class alongside the localised user-facing message),
+  filestore deletes (info on success, warning on OSError) and
+  schema migrations (info per applied ALTER, debug for already-applied
+  skips).
+- `recover_stale_jobs` now logs a WARNING containing the recovered job
+  ids (capped at 20 + count overflow) so an operator can correlate the
+  recovery event with the affected DB rows from a single line.
+
+### Changed
+
+- Worker container now starts via `python -m whisper_ui.worker` (a
+  thin wrapper that calls `setup_logging()` then delegates to
+  `rq.cli.main`) instead of `python -m rq.cli`. This applies the
+  project-wide dictConfig inside the RQ worker process rather than
+  losing it across the shell `exec`.
+- `pipeline.audio_probe.get_audio_duration_seconds` gains a `job_id`
+  kwarg used purely for log correlation. The absolute path is no
+  longer logged because user-supplied filenames can themselves be PII
+  and the upload layout reveals internal storage paths. Three failure
+  modes that previously shared one generic message are now distinct:
+  `subprocess.TimeoutExpired`, `FileNotFoundError` (binary missing),
+  and other `OSError` (logs the exception class).
+- All `compose.yml` services pin `logging.driver=json-file` with
+  `max-size: 20m` and `max-file: 5` (100 MB per container) so the
+  log volume from the new structured access log cannot fill
+  `/var/lib/docker` on long-running deployments.
+
 ## [2.1.0] - 2026-05-21
 
 ### Added
