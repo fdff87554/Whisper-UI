@@ -15,6 +15,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Cap on how many recovered job ids the stale-recovery WARNING line
+# embeds. Picked so an operator can scan the list without horizontal
+# scroll and so memory stays bounded regardless of backlog size — the
+# RETURNING cursor is iterated row-by-row instead of materialised
+# entirely in memory, and the rest is reported as "(+N more)".
+_STALE_RECOVERY_LOG_SAMPLE = 20
+
 _JOB_COLUMNS = [
     "id",
     "filename",
@@ -185,6 +192,13 @@ class JobDatabase:
         # checker concurrently. The startup version guard in
         # migrations._ensure_sqlite_version ensures this is always
         # available; a too-old deploy raises before init_db returns.
+        #
+        # The RETURNING cursor is iterated row-by-row (instead of
+        # ``fetchall()``) so log memory stays bounded by
+        # ``_STALE_RECOVERY_LOG_SAMPLE`` regardless of backlog size. A
+        # post-outage worst case where N runs into the thousands would
+        # otherwise materialise every UUID into a list just to drop all
+        # but the first 20.
         cursor = self._conn.execute(
             "UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE status = ? AND updated_at < ? RETURNING id",
             (
@@ -195,14 +209,15 @@ class JobDatabase:
                 threshold,
             ),
         )
-        recovered_ids = [row[0] for row in cursor.fetchall()]
+        recovered = 0
+        shown: list[str] = []
+        for row in cursor:
+            recovered += 1
+            if len(shown) < _STALE_RECOVERY_LOG_SAMPLE:
+                shown.append(row[0])
         self._conn.commit()
-        recovered = len(recovered_ids)
         if recovered > 0:
-            # Cap the id list in the log so an apocalyptic backlog doesn't
-            # produce a multi-megabyte line; the count is always accurate.
-            shown = recovered_ids[:20]
-            tail = f" (+{len(recovered_ids) - 20} more)" if len(recovered_ids) > 20 else ""
+            tail = f" (+{recovered - len(shown)} more)" if recovered > len(shown) else ""
             logger.warning(
                 "stale recovery marked %d job(s) FAILED after %ds timeout: ids=%s%s",
                 recovered,

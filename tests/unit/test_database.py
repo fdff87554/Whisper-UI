@@ -209,6 +209,44 @@ def test_recover_stale_jobs_silent_when_no_candidates(db: JobDatabase, caplog):
     assert not any("stale recovery" in r.getMessage() for r in caplog.records)
 
 
+def test_recover_stale_jobs_log_caps_id_list_at_sample_size(db: JobDatabase, caplog):
+    """PR #53 Round 2 G2: a large backlog must produce a bounded log line
+    (20 ids embedded + '(+N-20 more)' tail) so an apocalyptic recovery
+    sweep does not balloon the WARNING into a multi-megabyte string.
+    The accurate total still goes into the message prefix.
+    """
+    import logging as _logging
+
+    from whisper_ui.storage.database import _STALE_RECOVERY_LOG_SAMPLE
+
+    backlog = _STALE_RECOVERY_LOG_SAMPLE + 5
+    stale_ids: list[str] = []
+    for i in range(backlog):
+        job = Job(filename=f"stale-{i}.mp3", filepath=f"/tmp/{i}.mp3")
+        job.status = JobStatus.PROCESSING
+        db.insert_job(job)
+        stale_ids.append(job.id)
+    db._conn.execute(
+        "UPDATE jobs SET updated_at = '2000-01-01T00:00:00+00:00' WHERE status = ?",
+        (JobStatus.PROCESSING.value,),
+    )
+    db._conn.commit()
+
+    with caplog.at_level(_logging.WARNING, logger="whisper_ui.storage.database"):
+        recovered = db.recover_stale_jobs(timeout_seconds=60, error_message="timeout")
+
+    assert recovered == backlog
+    msg = next(r.getMessage() for r in caplog.records if "stale recovery marked" in r.getMessage())
+    assert f"{backlog} job(s)" in msg
+    overflow = backlog - _STALE_RECOVERY_LOG_SAMPLE
+    assert f"(+{overflow} more)" in msg
+    # The ids embedded in the message are a subset of the original stale
+    # set (SQLite ordering is implementation-defined for an UPDATE without
+    # ORDER BY, so we only assert membership + count, not order).
+    embedded = [sid for sid in stale_ids if sid in msg]
+    assert len(embedded) == _STALE_RECOVERY_LOG_SAMPLE
+
+
 def test_init_db_raises_when_sqlite_version_lacks_returning(monkeypatch, tmp_path):
     """PR #53 review F5: recover_stale_jobs relies on UPDATE ... RETURNING
     for race-free id capture, so a too-old libsqlite must fail at init_db
