@@ -527,6 +527,36 @@ class TestDiarizeStage:
             )
         assert not any("已執行" in m for _, m in progress_calls)
 
+    def test_heartbeat_thread_cleaned_up_when_pipeline_raises(self):
+        """The heartbeat is wrapped in a contextmanager whose finally
+        block sets stop_event and joins the daemon. If the pipeline
+        raises mid-execution the thread must still be reaped, otherwise
+        future jobs would accumulate idle daemons. This pins the
+        contract by ensuring no ``diarize-heartbeat`` thread survives
+        the failed call.
+        """
+        import threading as threading_mod
+
+        stage = DiarizeStage(hf_token="t", device="cpu", heartbeat_interval=1)
+        mock_pipeline_cls = MagicMock()
+        mock_pipeline_cls.return_value = MagicMock(side_effect=RuntimeError("kaboom"))
+        mock_diarize_module = MagicMock()
+        mock_diarize_module.DiarizationPipeline = mock_pipeline_cls
+
+        names_before = {t.name for t in threading_mod.enumerate()}
+
+        with (
+            patch.dict("sys.modules", {"whisperx.diarize": mock_diarize_module, "whisperx": MagicMock()}),
+            pytest.raises(DiarizationError, match="kaboom"),
+        ):
+            stage.execute(
+                {"audio_path": "/tmp/test.wav"},
+                on_progress=lambda p, m: None,
+            )
+
+        new_threads = {t.name for t in threading_mod.enumerate()} - names_before
+        assert "diarize-heartbeat" not in new_threads
+
 
 class TestAssignSpeakersStage:
     def test_no_diarize_skips(self):
