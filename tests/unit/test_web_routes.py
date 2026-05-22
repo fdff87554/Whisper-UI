@@ -389,6 +389,51 @@ class TestJobsRoutes:
         refreshed = db.get_job(their_job.id)
         assert refreshed.status == JobStatus.FAILED
 
+    def test_jobs_page_renders_per_status_chip_counts(self, client, db, filestore):
+        """v2 sticky filter shows each status's count, not just total."""
+        _create_completed_job(db, filestore)
+        _create_failed_job(db)
+
+        resp = client.get("/jobs")
+
+        assert resp.status_code == 200
+        assert "已完成" in resp.text
+        assert "失敗" in resp.text
+        assert "JOBS_SEARCH_PLACEHOLDER" not in resp.text  # label is rendered, not the constant name
+
+    def test_jobs_list_fragment_includes_data_job_search_with_url(self, client, db):
+        """URL jobs must be findable via the search box — the new
+        data-job-search attribute combines filename + source URL."""
+        url = "https://www.youtube.com/watch?v=abc123"
+        failed = _create_failed_job(db, source_url=url)
+
+        resp = client.get("/jobs/list")
+
+        assert resp.status_code == 200
+        assert f'data-job-search="{failed.filename} {url}"' in resp.text
+
+    def test_jobs_card_renders_bulk_select_checkbox_for_completed_jobs(self, client, db, filestore):
+        """Bulk-eligible rows (completed / failed) carry the selection
+        checkbox bound to $store.jobSelection."""
+        completed = _create_completed_job(db, filestore)
+
+        resp = client.get("/jobs/list")
+
+        assert resp.status_code == 200
+        assert f"$store.jobSelection.has('{completed.id}')" in resp.text
+        assert "checkbox checkbox-sm" in resp.text
+
+    def test_jobs_card_omits_bulk_checkbox_for_active_jobs(self, client, db):
+        """Active jobs (queued / processing) cannot be retried or deleted
+        in bulk, so they must NOT render a selection checkbox."""
+        active = Job(filename="busy.mp3", status=JobStatus.PROCESSING)
+        db.insert_job(active)
+
+        resp = client.get("/jobs/list")
+
+        assert resp.status_code == 200
+        assert f"$store.jobSelection.has('{active.id}')" not in resp.text
+
     def test_delete_job_returns_500_and_preserves_db_row_when_filestore_fails(self, client, db, filestore, caplog):
         """PR #53 review F2: a filesystem failure must NOT lead to a
         DB-deleted-but-files-still-on-disk inconsistency. The route must
