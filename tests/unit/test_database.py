@@ -500,6 +500,37 @@ def test_get_status_counts_with_owner_only_counts_user_jobs(db: JobDatabase):
     assert db.get_status_counts()[JobStatus.COMPLETED.value] == 2
 
 
+def test_count_completed_by_day_returns_fixed_width_bucket_list(db: JobDatabase):
+    """7-day sparkline contract: result length equals days, oldest first."""
+    long_ago = "2000-01-01T00:00:00+00:00"
+    completed = Job(filename="old.mp3", filepath="/tmp/old.mp3")
+    completed.status = JobStatus.COMPLETED
+    completed.updated_at = long_ago
+    db.insert_job(completed)
+
+    buckets = db.count_completed_by_day(days=7)
+
+    assert len(buckets) == 7
+    assert all(isinstance(value, int) for value in buckets)
+    assert sum(buckets) == 0  # `long_ago` falls outside the 7-day window
+
+
+def test_count_completed_by_day_groups_today_under_owner(db: JobDatabase):
+    """Bucket counts respect the owner_id filter and roll up by UTC day."""
+    mine = Job(filename="m.mp3", filepath="/tmp/m.mp3", owner_id=1)
+    mine.status = JobStatus.COMPLETED
+    db.insert_job(mine)
+    theirs = Job(filename="t.mp3", filepath="/tmp/t.mp3", owner_id=2)
+    theirs.status = JobStatus.COMPLETED
+    db.insert_job(theirs)
+
+    mine_buckets = db.count_completed_by_day(days=7, owner_id=1)
+    everyone_buckets = db.count_completed_by_day(days=7)
+
+    assert mine_buckets[-1] == 1
+    assert everyone_buckets[-1] == 2
+
+
 def test_count_completed_since_with_owner(db: JobDatabase):
     mine = Job(filename="a.mp3", filepath="/tmp/a.mp3", owner_id=1)
     mine.status = JobStatus.COMPLETED

@@ -74,6 +74,40 @@
    so the poll interval is recomputed after every swap (see _dashboard_active.html). #}
 {% include "_dashboard_active.html" %}
 
+{# 7-day completed sparkline — quick "is anything getting done?" signal. #}
+{% if completed_by_day and completed_by_day|sum > 0 %}
+{%- set _max = completed_by_day|max -%}
+{%- set _width = 140 -%}
+{%- set _height = 36 -%}
+{%- set _step = (_width // (completed_by_day|length - 1)) if completed_by_day|length > 1 else 0 -%}
+<section class="mb-8">
+  <div class="flex items-center justify-between mb-2">
+    <h2 class="text-lg font-medium">{{ labels.DASHBOARD_SPARKLINE_TITLE }}</h2>
+    <span class="text-sm opacity-60">{{ completed_by_day|sum }}</span>
+  </div>
+  <svg viewBox="0 0 {{ _width }} {{ _height }}" width="{{ _width }}" height="{{ _height }}"
+       preserveAspectRatio="none" aria-hidden="true"
+       class="text-primary">
+    <polyline fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"
+              points="
+              {%- for value in completed_by_day -%}
+              {{ loop.index0 * _step }},{{ _height - ((value / _max) * (_height - 4) if _max > 0 else 0) - 2 }}
+              {%- if not loop.last %} {% endif -%}
+              {%- endfor -%}" />
+    {% for value in completed_by_day %}
+    <circle cx="{{ loop.index0 * _step }}"
+            cy="{{ _height - ((value / _max) * (_height - 4) if _max > 0 else 0) - 2 }}"
+            r="1.5" fill="currentColor" />
+    {% endfor %}
+  </svg>
+  <ul class="sr-only">
+    {% for value in completed_by_day %}
+    <li>{{ value }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
 {# Recent Completed #}
 {% if recent_completed %}
 <section class="mb-8">
