@@ -322,6 +322,29 @@ class TestJobsRoutes:
         assert job.id in msg
         assert "previous_error=" in msg
 
+    def test_delete_job_returns_500_and_preserves_db_row_when_filestore_fails(self, client, db, filestore, caplog):
+        """PR #53 review F2: a filesystem failure must NOT lead to a
+        DB-deleted-but-files-still-on-disk inconsistency. The route must
+        return 5xx, leave the row in place, and not emit the success
+        audit log.
+        """
+        import logging as _logging
+
+        job = _create_completed_job(db, filestore)
+
+        with (
+            patch.object(filestore, "delete_job_files", side_effect=PermissionError("denied")),
+            caplog.at_level(_logging.ERROR, logger="whisper_ui.web.routes.jobs"),
+        ):
+            resp = client.delete(f"/jobs/{job.id}")
+
+        assert resp.status_code == 500
+        # DB row preserved so the user can retry.
+        assert db.get_job(job.id) is not None
+        # Audit log records the abort, not a misleading "job deleted".
+        assert any("job delete aborted" in r.getMessage() for r in caplog.records)
+        assert not any("job deleted:" in r.getMessage() for r in caplog.records)
+
 
 class TestViewerRoutes:
     def test_viewer_redirects_to_jobs(self, client):
@@ -827,6 +850,48 @@ class TestBatchRoutes:
         summary = next(r.getMessage() for r in caplog.records if "batch deleted" in r.getMessage())
         assert "deleted=" in summary
         assert batch_id in summary
+
+    def test_delete_batch_keeps_db_rows_for_jobs_whose_filestore_delete_fails(self, client, db, filestore, caplog):
+        """PR #53 review F2: per-job atomicity in batch delete. If one
+        job's filesystem reclaim fails, that job's DB row must stay; the
+        rest of the batch still gets cleaned and the summary log reports
+        deleted + failed counts honestly.
+        """
+        import logging as _logging
+
+        from whisper_ui.core.models import Job, JobStatus
+
+        batch_id = "1" * 32
+        jobs = [Job(filename=f"f{i}.mp3", status=JobStatus.COMPLETED, batch_id=batch_id) for i in range(3)]
+        for j in jobs:
+            db.insert_job(j)
+
+        original_delete = filestore.delete_job_files
+        call_count = {"n": 0}
+
+        def _failing_delete(job_id):
+            call_count["n"] += 1
+            if call_count["n"] == 2:
+                raise PermissionError("denied for middle job")
+            return original_delete(job_id)
+
+        with (
+            patch.object(filestore, "delete_job_files", side_effect=_failing_delete),
+            caplog.at_level(_logging.INFO, logger="whisper_ui.web.routes.jobs"),
+        ):
+            resp = client.delete(f"/jobs/batch/{batch_id}")
+
+        assert resp.status_code == 204
+        # First and third jobs succeeded; the middle one stayed.
+        assert db.get_job(jobs[0].id) is None
+        assert db.get_job(jobs[1].id) is not None
+        assert db.get_job(jobs[2].id) is None
+
+        summary = next(r.getMessage() for r in caplog.records if "batch deleted" in r.getMessage())
+        assert "deleted=2" in summary
+        assert "failed=1" in summary
+        assert "total=3" in summary
+        assert any("batch delete skipped one job" in r.getMessage() for r in caplog.records)
 
 
 class TestRetentionSweep:

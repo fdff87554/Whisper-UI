@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
+
 from whisper_ui.core.models import Segment, TranscriptResult
 
 if TYPE_CHECKING:
@@ -111,3 +113,22 @@ def test_delete_upload_files_logs_debug_on_success(filestore: FileStore, caplog)
         filestore.delete_upload_files("job-dbg")
 
     assert any("reclaimed upload dir" in r.getMessage() and "job-dbg" in r.getMessage() for r in caplog.records)
+
+
+def test_delete_job_files_raises_on_filesystem_failure(filestore: FileStore, monkeypatch):
+    """Manual delete routes rely on this raising — if shutil.rmtree fails,
+    the route must see the OSError and keep the DB row, not silently
+    proceed to db.delete_job (which would leave files on disk while UI /
+    audit log claim the job was deleted).
+    """
+    import shutil
+
+    filestore.save_upload("job-fail", "input.mp3", b"data")
+
+    def _boom(*_args, **_kwargs):
+        raise PermissionError("read-only filesystem")
+
+    monkeypatch.setattr(shutil, "rmtree", _boom)
+
+    with pytest.raises(PermissionError):
+        filestore.delete_job_files("job-fail")

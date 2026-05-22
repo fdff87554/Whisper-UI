@@ -204,7 +204,19 @@ async def delete_job(job_id: str, db: DbDep, filestore: FileStoreDep, redis: Red
     if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
         return Response(status_code=409)
 
-    filestore.delete_job_files(job.id)
+    try:
+        filestore.delete_job_files(job.id)
+    except OSError as exc:
+        # Keep the DB row + Redis state + audit log silent so retrying the
+        # delete is a no-op-then-real-delete instead of "DB row gone but
+        # files still on disk". See PR #53 review F2.
+        logger.error(
+            "job delete aborted: filestore reclaim failed for job_id=%s user_id=%s: %s",
+            job.id,
+            user.id,
+            exc.__class__.__name__,
+        )
+        return Response(status_code=500)
     db.delete_job(job.id)
     redis.delete(f"job:{job.id}")
     logger.info(
@@ -271,19 +283,35 @@ async def delete_batch(batch_id: str, db: DbDep, filestore: FileStoreDep, redis:
         return Response(status_code=404)
 
     deleted = 0
+    failed = 0
     for job in all_jobs:
         if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
             continue
-        filestore.delete_job_files(job.id)
+        try:
+            filestore.delete_job_files(job.id)
+        except OSError as exc:
+            # Per-job atomicity: keep the failing job's DB row + Redis
+            # state so the user can retry just that one. Other jobs in
+            # the batch still get cleaned. See PR #53 review F2.
+            logger.error(
+                "batch delete skipped one job: job_id=%s batch_id=%s user_id=%s: %s",
+                job.id,
+                batch_id,
+                user.id,
+                exc.__class__.__name__,
+            )
+            failed += 1
+            continue
         db.delete_job(job.id)
         redis.delete(f"job:{job.id}")
         deleted += 1
 
     logger.info(
-        "batch deleted: batch_id=%s user_id=%s deleted=%d total=%d",
+        "batch deleted: batch_id=%s user_id=%s deleted=%d failed=%d total=%d",
         batch_id,
         user.id,
         deleted,
+        failed,
         len(all_jobs),
     )
     return Response(status_code=204, headers={"HX-Trigger": "refreshJobList"})
