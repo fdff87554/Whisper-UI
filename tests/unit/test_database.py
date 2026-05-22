@@ -4,6 +4,8 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
+import pytest
+
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.storage.database import JobDatabase
 
@@ -205,6 +207,45 @@ def test_recover_stale_jobs_silent_when_no_candidates(db: JobDatabase, caplog):
 
     assert recovered == 0
     assert not any("stale recovery" in r.getMessage() for r in caplog.records)
+
+
+def test_init_db_raises_when_sqlite_version_lacks_returning(monkeypatch, tmp_path):
+    """PR #53 review F5: recover_stale_jobs relies on UPDATE ... RETURNING
+    for race-free id capture, so a too-old libsqlite must fail at init_db
+    time instead of producing an OperationalError 60 seconds later when
+    the first stale recovery fires.
+    """
+    import sqlite3 as _sqlite3
+
+    from whisper_ui.storage import migrations
+
+    monkeypatch.setattr(migrations.sqlite3, "sqlite_version", "3.34.0")
+    monkeypatch.setattr(migrations.sqlite3, "sqlite_version_info", (3, 34, 0))
+
+    conn = _sqlite3.connect(tmp_path / "wont-init.db")
+    try:
+        with pytest.raises(RuntimeError, match=r"requires SQLite >= 3\.35\.0"):
+            migrations.init_db(conn)
+    finally:
+        conn.close()
+
+
+def test_init_db_accepts_sqlite_3_35(monkeypatch, tmp_path):
+    """Boundary: exactly 3.35.0 is acceptable (RETURNING introduced)."""
+    import sqlite3 as _sqlite3
+
+    from whisper_ui.storage import migrations
+
+    monkeypatch.setattr(migrations.sqlite3, "sqlite_version", "3.35.0")
+    monkeypatch.setattr(migrations.sqlite3, "sqlite_version_info", (3, 35, 0))
+
+    conn = _sqlite3.connect(tmp_path / "ok.db")
+    try:
+        # Should not raise; the underlying real sqlite is much newer so
+        # the schema execution itself still works fine.
+        migrations.init_db(conn)
+    finally:
+        conn.close()
 
 
 def test_has_active_jobs_empty(db: JobDatabase):
