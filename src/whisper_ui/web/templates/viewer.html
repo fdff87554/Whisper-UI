@@ -48,14 +48,50 @@
 {% endif %}
 
 {% if result.segments %}
+{% set _speaker_glyphs = ['●', '▲', '■', '◆', '★', '✦', '◉', '♦'] %}
 <div x-data="{
   search: '',
+  activeIndex: 0,
+  shortcutsOpen: false,
   get matchCount() {
     if (!this.search) return {{ result.segments|length }};
     const q = this.search.toLowerCase();
     return Array.from(document.querySelectorAll('.segment[data-text]')).filter(el => el.dataset.text.includes(q)).length;
-  }
-}">
+  },
+  _visibleSegments() {
+    return Array.from(document.querySelectorAll('.segment')).filter(el => el.offsetParent !== null);
+  },
+  focusSearch() {
+    const el = document.querySelector('input[type=search]');
+    if (el) { el.focus(); el.select(); }
+  },
+  navigateSegments(delta) {
+    const visible = this._visibleSegments();
+    if (!visible.length) return;
+    this.activeIndex = Math.max(0, Math.min(visible.length - 1, this.activeIndex + delta));
+    const target = visible[this.activeIndex];
+    if (target) target.scrollIntoView({block: 'center', behavior: 'smooth'});
+  },
+  copyActive() {
+    const visible = this._visibleSegments();
+    const target = visible[this.activeIndex];
+    const text = target?.querySelector('button[data-copy-text]')?.dataset?.copyText;
+    if (text) {
+      navigator.clipboard.writeText(text)
+        .then(() => $store.toasts.add({ message: '{{ labels.VIEWER_SEGMENT_COPIED }}', type: 'success' }));
+    }
+  },
+  clearSearch() { this.search = ''; }
+}"
+@keydown.window="
+  const tag = document.activeElement.tagName;
+  const inField = tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement.isContentEditable;
+  if ($event.key === '/' && !inField) { $event.preventDefault(); focusSearch(); }
+  else if ($event.key === 'Escape' && document.activeElement.matches('input[type=search]')) { clearSearch(); document.activeElement.blur(); }
+  else if (!inField && $event.key === 'ArrowDown') { $event.preventDefault(); navigateSegments(1); }
+  else if (!inField && $event.key === 'ArrowUp') { $event.preventDefault(); navigateSegments(-1); }
+  else if (!inField && ($event.key === 'c' || $event.key === 'C')) { copyActive(); }
+">
   {# Sticky toolbar #}
   <div class="sticky top-0 z-10 bg-base-100 border-b border-base-300 pb-3 mb-4 pt-2">
     {# Export buttons #}
@@ -96,21 +132,38 @@
       {{ labels.VIEWER_SEARCH_DISABLED.format(count=result.segments|length) }}
     </div>
     {% else %}
-    {# Search #}
-    <div class="relative max-w-sm">
-      <span class="absolute left-3 top-1/2 -translate-y-1/2 opacity-40">{{ icon_search("w-4 h-4") }}</span>
-      <input type="search" class="input input-sm w-full pl-9 pr-20" x-model="search"
-             placeholder="{{ labels.VIEWER_SEARCH_PLACEHOLDER }}">
-      <span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs opacity-40"
-            x-show="search"
-            x-text="matchCount + ' / {{ result.segments|length }}'"></span>
+    {# Search + keyboard shortcut hint #}
+    <div class="flex flex-wrap items-center gap-2">
+      <div class="relative max-w-sm flex-1 min-w-[180px]">
+        <span class="absolute left-3 top-1/2 -translate-y-1/2 opacity-40">{{ icon_search("w-4 h-4") }}</span>
+        <input type="search" class="input input-sm w-full pl-9 pr-20" x-model="search"
+               placeholder="{{ labels.VIEWER_SEARCH_PLACEHOLDER }}">
+        <span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs opacity-40"
+              x-show="search"
+              x-text="matchCount + ' / {{ result.segments|length }}'"></span>
+      </div>
+      <button type="button" class="btn btn-ghost btn-xs gap-1"
+              :aria-expanded="shortcutsOpen.toString()"
+              @click="shortcutsOpen = !shortcutsOpen">
+        <kbd class="kbd kbd-xs">?</kbd>
+        <span class="hidden sm:inline">{{ labels.VIEWER_SHORTCUTS_TITLE }}</span>
+      </button>
     </div>
+    <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-xs mt-2 opacity-70"
+        x-show="shortcutsOpen" x-transition.opacity x-cloak>
+      <div class="flex items-center gap-2"><kbd class="kbd kbd-xs">/</kbd><span>{{ labels.VIEWER_SHORTCUTS_FOCUS_SEARCH }}</span></div>
+      <div class="flex items-center gap-2"><kbd class="kbd kbd-xs">↑</kbd><kbd class="kbd kbd-xs">↓</kbd><span>{{ labels.VIEWER_SHORTCUTS_NAV }}</span></div>
+      <div class="flex items-center gap-2"><kbd class="kbd kbd-xs">C</kbd><span>{{ labels.VIEWER_SHORTCUTS_COPY }}</span></div>
+      <div class="flex items-center gap-2"><kbd class="kbd kbd-xs">Esc</kbd><span>{{ labels.VIEWER_SHORTCUTS_CLEAR }}</span></div>
+    </dl>
     {% endif %}
   </div>
 
   {# Segments #}
   <div class="transcript-container">
     {% for seg in result.segments %}
+    {%- set _color_class = speaker_colors.get(seg.speaker, '') if seg.speaker else '' -%}
+    {%- set _glyph_idx_raw = _color_class.rsplit('-', 1)[-1] if _color_class else '' -%}
     <div class="segment group flex gap-3 py-2 px-3 rounded-box hover:bg-base-200 transition-colors"
          {% if not search_disabled %}data-text="{{ seg.text|lower|e }}"
          x-show="!search || $el.dataset.text.includes(search.toLowerCase())"
@@ -118,9 +171,14 @@
       <code class="text-xs font-mono opacity-40 whitespace-nowrap pt-0.5">{{ seg.start|format_time }}</code>
       <div class="flex-1 min-w-0">
         {% if seg.speaker %}
-        <strong class="text-xs font-medium {{ speaker_colors.get(seg.speaker, '') }}">[{{ seg.speaker }}]</strong>
+        <strong class="text-xs font-medium {{ _color_class }}">
+          {% if _glyph_idx_raw in ('1','2','3','4','5','6','7','8') %}
+          <span class="font-mono mr-0.5" aria-hidden="true">{{ _speaker_glyphs[_glyph_idx_raw|int - 1] }}</span>
+          {% endif %}
+          [{{ seg.speaker }}]
+        </strong>
         {% endif %}
-        <span>{{ seg.text }}</span>
+        <span x-html="window.whisperHighlight({{ seg.text|tojson }}, search)"></span>
       </div>
       <button class="btn btn-ghost btn-xs opacity-60 hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 transition-opacity flex-shrink-0"
               type="button"
@@ -164,4 +222,28 @@
 {% endif %}
 
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  // Escape HTML so user-supplied transcript text can never inject markup,
+  // then wrap matches of `query` in <mark> for visible highlighting.
+  const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[c]);
+  const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  window.whisperHighlight = function(text, query) {
+    const escaped = escapeHtml(text);
+    if (!query) return escaped;
+    const q = String(query).trim();
+    if (!q) return escaped;
+    try {
+      return escaped.replace(new RegExp(escapeRegex(q), 'gi'), (m) => '<mark>' + m + '</mark>');
+    } catch (_) {
+      return escaped;
+    }
+  };
+})();
+</script>
 {% endblock %}
