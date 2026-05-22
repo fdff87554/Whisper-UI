@@ -177,6 +177,36 @@ def test_recover_stale_jobs(db: JobDatabase):
     assert fresh_fetched.status == JobStatus.PROCESSING
 
 
+def test_recover_stale_jobs_logs_warning_with_ids(db: JobDatabase, caplog):
+    import logging as _logging
+
+    stale = Job(filename="stale.mp3", filepath="/tmp/stale.mp3")
+    stale.status = JobStatus.PROCESSING
+    db.insert_job(stale)
+    db._conn.execute(
+        "UPDATE jobs SET updated_at = '2000-01-01T00:00:00+00:00' WHERE id = ?",
+        (stale.id,),
+    )
+    db._conn.commit()
+
+    with caplog.at_level(_logging.WARNING, logger="whisper_ui.storage.database"):
+        db.recover_stale_jobs(timeout_seconds=60, error_message="timeout")
+
+    msg = next(r.getMessage() for r in caplog.records if "stale recovery marked" in r.getMessage())
+    assert stale.id in msg
+    assert "1 job(s)" in msg
+
+
+def test_recover_stale_jobs_silent_when_no_candidates(db: JobDatabase, caplog):
+    import logging as _logging
+
+    with caplog.at_level(_logging.WARNING, logger="whisper_ui.storage.database"):
+        recovered = db.recover_stale_jobs(timeout_seconds=60, error_message="timeout")
+
+    assert recovered == 0
+    assert not any("stale recovery" in r.getMessage() for r in caplog.records)
+
+
 def test_has_active_jobs_empty(db: JobDatabase):
     assert db.has_active_jobs() is False
 

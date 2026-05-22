@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from pathlib import Path
 
 from whisper_ui.core.models import TranscriptResult
+
+logger = logging.getLogger(__name__)
 
 
 class FileStore:
@@ -59,10 +62,28 @@ class FileStore:
         return None
 
     def delete_job_files(self, job_id: str) -> None:
-        for base in (self._upload_dir, self._output_dir):
+        removed: list[str] = []
+        for base, label in ((self._upload_dir, "upload"), (self._output_dir, "output")):
             job_dir = base / job_id
-            if job_dir.exists():
+            if not job_dir.exists():
+                continue
+            try:
                 shutil.rmtree(job_dir)
+            except OSError as exc:
+                logger.warning(
+                    "filestore %s dir delete failed for job_id=%s: %s",
+                    label,
+                    job_id,
+                    exc.__class__.__name__,
+                )
+                continue
+            removed.append(label)
+        if removed:
+            logger.info(
+                "filestore deleted job dirs for job_id=%s (%s)",
+                job_id,
+                "+".join(removed),
+            )
 
     def delete_upload_files(self, job_id: str) -> bool:
         """Remove only the upload directory for ``job_id``; keep results.
@@ -75,5 +96,14 @@ class FileStore:
         job_dir = self._upload_dir / job_id
         if not job_dir.exists():
             return False
-        shutil.rmtree(job_dir)
+        try:
+            shutil.rmtree(job_dir)
+        except OSError as exc:
+            logger.warning(
+                "filestore upload-dir reclaim failed for job_id=%s: %s",
+                job_id,
+                exc.__class__.__name__,
+            )
+            return False
+        logger.debug("filestore reclaimed upload dir for job_id=%s", job_id)
         return True

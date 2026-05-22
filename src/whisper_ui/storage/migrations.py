@@ -70,7 +70,9 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         try:
             conn.execute(sql)
             conn.commit()
+            logger.info("schema migration applied: %s", sql)
         except sqlite3.OperationalError as e:
             if "duplicate column" in str(e).lower():
+                logger.debug("schema migration already applied (skipped): %s", sql)
                 continue
             raise

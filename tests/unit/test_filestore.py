@@ -85,3 +85,29 @@ def test_delete_upload_files_removes_uploads_but_keeps_result(filestore: FileSto
 
 def test_delete_upload_files_returns_false_when_nothing_to_remove(filestore: FileStore):
     assert filestore.delete_upload_files("job-does-not-exist") is False
+
+
+def test_delete_job_files_logs_info_with_directory_summary(filestore: FileStore, caplog):
+    import logging as _logging
+
+    filestore.save_upload("job-log", "input.mp3", b"data")
+    result = TranscriptResult(segments=[], language="zh", duration=0.0)
+    filestore.save_result("job-log", result)
+
+    with caplog.at_level(_logging.INFO, logger="whisper_ui.storage.filestore"):
+        filestore.delete_job_files("job-log")
+
+    info = next(r.getMessage() for r in caplog.records if "deleted job dirs" in r.getMessage())
+    assert "job-log" in info
+    assert "upload" in info
+    assert "output" in info
+
+
+def test_delete_upload_files_logs_debug_on_success(filestore: FileStore, caplog):
+    import logging as _logging
+
+    filestore.save_upload("job-dbg", "input.mp3", b"data")
+    with caplog.at_level(_logging.DEBUG, logger="whisper_ui.storage.filestore"):
+        filestore.delete_upload_files("job-dbg")
+
+    assert any("reclaimed upload dir" in r.getMessage() and "job-dbg" in r.getMessage() for r in caplog.records)

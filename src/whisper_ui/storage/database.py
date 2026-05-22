@@ -179,6 +179,17 @@ class JobDatabase:
         See ``test_recover_stale_jobs_concurrent_workers_dont_double_recover``.
         """
         threshold = (datetime.now(UTC) - timedelta(seconds=timeout_seconds)).isoformat()
+        # Snapshot the candidate ids before the UPDATE so the log line can
+        # name the affected jobs. The SELECT is read-only and racy with a
+        # concurrent writer (it may include rows that another worker is
+        # about to recover); the authoritative rowcount comes from the
+        # UPDATE itself. The log is best-effort context, not a contract.
+        candidate_rows = self._conn.execute(
+            "SELECT id FROM jobs WHERE status = ? AND updated_at < ?",
+            (JobStatus.PROCESSING.value, threshold),
+        ).fetchall()
+        candidate_ids = [row[0] for row in candidate_rows]
+
         cursor = self._conn.execute(
             "UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE status = ? AND updated_at < ?",
             (
@@ -190,7 +201,20 @@ class JobDatabase:
             ),
         )
         self._conn.commit()
-        return cursor.rowcount
+        recovered = cursor.rowcount
+        if recovered > 0:
+            # Cap the id list in the log so an apocalyptic backlog doesn't
+            # produce a multi-megabyte line; the count is always accurate.
+            shown = candidate_ids[:20]
+            tail = f" (+{len(candidate_ids) - 20} more)" if len(candidate_ids) > 20 else ""
+            logger.warning(
+                "stale recovery marked %d job(s) FAILED after %ds timeout: ids=%s%s",
+                recovered,
+                timeout_seconds,
+                shown,
+                tail,
+            )
+        return recovered
 
     def update_job(self, job: Job) -> None:
         job.touch()
