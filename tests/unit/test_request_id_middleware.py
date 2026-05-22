@@ -131,3 +131,83 @@ def test_normalise_request_id_helpers():
     assert _normalise_request_id("DEADBEEF") == "deadbeef"
     assert _normalise_request_id(None) != ""
     assert len(_normalise_request_id("bad!")) == 8
+
+
+def _make_app_with_settings(*, trust_proxy_headers: bool):
+    """Build a minimal app whose settings carries the trust_proxy_headers
+    flag the way create_app() would expose it (via app.state.settings).
+    """
+    from types import SimpleNamespace
+
+    app = FastAPI()
+    app.state.settings = SimpleNamespace(trust_proxy_headers=trust_proxy_headers)
+    app.add_middleware(RequestIdMiddleware)
+
+    @app.get("/ok")
+    def ok():
+        return {"ok": True}
+
+    return app
+
+
+def test_client_ip_uses_request_client_when_proxy_headers_not_trusted(caplog):
+    """Default deployment: XFF must be ignored even if a hostile client
+    sends it. The access log keeps request.client.host so spoofing the
+    forensic IP requires bypassing the connection layer.
+    """
+    import logging
+
+    from whisper_ui.core.logging_setup import RequestContextFilter
+
+    app = _make_app_with_settings(trust_proxy_headers=False)
+    client = TestClient(app)
+    caplog.handler.addFilter(RequestContextFilter())
+    try:
+        with caplog.at_level(logging.INFO):
+            client.get("/ok", headers={"X-Forwarded-For": "9.9.9.9, 10.0.0.1"})
+        access = next(r for r in caplog.records if r.name == "whisper_ui.web.access")
+        assert "ip=testclient" in access.getMessage()
+        assert "9.9.9.9" not in access.getMessage()
+    finally:
+        caplog.handler.removeFilter(caplog.handler.filters[-1])
+
+
+def test_client_ip_uses_leftmost_xff_when_proxy_headers_trusted(caplog):
+    """Reverse-proxy deployment opted in: XFF left-most wins so the log
+    records the original client, not the proxy's inner-network IP.
+    """
+    import logging
+
+    from whisper_ui.core.logging_setup import RequestContextFilter
+
+    app = _make_app_with_settings(trust_proxy_headers=True)
+    client = TestClient(app)
+    caplog.handler.addFilter(RequestContextFilter())
+    try:
+        with caplog.at_level(logging.INFO):
+            client.get("/ok", headers={"X-Forwarded-For": "9.9.9.9, 10.0.0.1"})
+        access = next(r for r in caplog.records if r.name == "whisper_ui.web.access")
+        assert "ip=9.9.9.9" in access.getMessage()
+    finally:
+        caplog.handler.removeFilter(caplog.handler.filters[-1])
+
+
+def test_client_ip_falls_back_to_request_client_when_xff_absent(caplog):
+    """trust_proxy_headers=True but the proxy didn't add the header
+    (e.g. internal monitoring probe): fall back to request.client.host
+    rather than emitting a misleading '-' default.
+    """
+    import logging
+
+    from whisper_ui.core.logging_setup import RequestContextFilter
+
+    app = _make_app_with_settings(trust_proxy_headers=True)
+    client = TestClient(app)
+    caplog.handler.addFilter(RequestContextFilter())
+    try:
+        with caplog.at_level(logging.INFO):
+            client.get("/ok")
+        access = next(r for r in caplog.records if r.name == "whisper_ui.web.access")
+        assert "ip=testclient" in access.getMessage()
+    finally:
+        caplog.handler.removeFilter(caplog.handler.filters[-1])

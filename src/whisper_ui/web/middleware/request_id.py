@@ -71,6 +71,31 @@ def _normalise_request_id(raw: str | None) -> str:
 
 
 def _client_ip(request: Request) -> str:
+    """Best-effort client IP for the access log.
+
+    Mirrors :func:`whisper_ui.web.routes.auth_routes._client_ip` —
+    when ``settings.trust_proxy_headers`` is True (operator opt-in),
+    the **left-most** ``X-Forwarded-For`` entry wins, which is the
+    convention for "original client IP" when a chain of proxies adds
+    itself to the right. Otherwise fall back to ``request.client.host``.
+
+    Returns ``'-'`` (not ``'unknown'`` like the auth_routes mirror) so
+    the access log line stays formatted consistently with the
+    contextvar default placeholder.
+
+    Kept inline rather than extracted into a shared module: only two
+    callers, with different fallback strings (this one's ``'-'`` versus
+    auth_routes' ``'unknown'`` which suits rate-limit bucketing). The
+    duplication is acknowledged here and there; if a third caller
+    appears, extract then.
+    """
+    settings = getattr(request.app.state, "settings", None)
+    if settings is not None and getattr(settings, "trust_proxy_headers", False):
+        xff = request.headers.get("x-forwarded-for", "")
+        if xff:
+            first = xff.split(",")[0].strip()
+            if first:
+                return first
     client = request.client
     return client.host if client is not None else "-"
 
