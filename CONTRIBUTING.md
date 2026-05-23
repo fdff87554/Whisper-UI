@@ -64,6 +64,33 @@ storage / export / ui flow upward into web).
 - Update documentation if the change affects user-facing behavior
 - Do not commit `.env`, credentials, or other sensitive files
 
+## Local non-Docker development
+
+Most contributors run the app via `docker compose`, where CSS is
+rebuilt automatically (production: `Dockerfile.frontend` Stage 1;
+development: the `css-watcher` sidecar in `compose.dev.yml`). Skip
+this section unless you need to run the app directly under `uvicorn`.
+
+If you do run bare-metal, the compiled Tailwind output
+(`src/whisper_ui/web/static/style.css`) is gitignored and Docker is
+not involved, so the file must be produced locally before pages
+render with the correct styles:
+
+```bash
+# One-off production-style build
+mise run css
+
+# Or rebuild on every change while developing
+mise run css:watch
+
+# Then start the app
+uv run uvicorn whisper_ui.web.app:app --reload
+```
+
+Skipping the CSS build does not crash the server — FastAPI just
+serves `/static/style.css` as 404 and the page renders without
+styles, which is the easiest way to recognise the missing step.
+
 ## Running with Docker
 
 ```bash
