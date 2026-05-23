@@ -55,10 +55,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Deploy notes
 
-- Run `mise run css` after pulling this change so
-  `src/whisper_ui/web/static/style.css` includes the new
-  `.status-pulse` keyframe and v2 utility classes referenced by
-  the templates. The artifact is gitignored.
+- **Docker deployments do not require any extra step.** The CSS
+  rebuild is handled by `docker/Dockerfile.frontend` Stage 1
+  (`node:24-alpine` runs `npx @tailwindcss/cli --minify` and the
+  output is copied into the Python runtime image); the
+  development compose file ships a `css-watcher` sidecar that
+  rebuilds on file change. Both paths pick up the new
+  `.status-pulse` keyframe and v2 utility classes automatically.
+- **Bare-metal deployments** (running `uvicorn whisper_ui.web.app`
+  without Docker) need to run `mise run css` once after pulling
+  to refresh `src/whisper_ui/web/static/style.css`. The artifact
+  is gitignored; `mise run css:watch` keeps it live during local
+  development. See CONTRIBUTING.md for the full local non-Docker
+  workflow.
 - No backend contract changes: form field names, status enum
   values, URL paths, htmx polling structure, and theme strings
   are all preserved. See evaluation report §6 for the full
