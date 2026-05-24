@@ -56,6 +56,11 @@ class DownloadStage:
             "outtmpl": str(download_dir / "video.%(ext)s"),
             "merge_output_format": "mp4",
             "noplaylist": True,
+            # Defense in depth: the URL is already whitelisted and canonicalised
+            # to a youtube.com/watch URL by validate_youtube_url, but pinning the
+            # extractor stops yt-dlp from ever falling back to the generic
+            # extractor and fetching an arbitrary (e.g. internal) host.
+            "allowed_extractors": ["youtube"],
             "socket_timeout": YT_DLP_SOCKET_TIMEOUT,
             "progress_hooks": [progress_hook],
             "quiet": True,
