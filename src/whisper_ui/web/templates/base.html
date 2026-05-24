@@ -215,6 +215,19 @@
         Alpine.store('toasts').add({ message: '{{ labels.TOAST_NETWORK_ERROR }}', type: 'error' });
       }
     });
+
+    // htmx 4xx/5xx handling — without this, htmx.ajax callers (e.g. the
+    // single-row retry/delete confirm dialog) fail silently because only
+    // htmx:sendError (network layer) was handled. A 401 is left alone so
+    // the server's HX-Redirect to /login takes effect.
+    document.body.addEventListener('htmx:responseError', function(evt) {
+      if (evt.detail && evt.detail.xhr && evt.detail.xhr.status === 401) {
+        return;
+      }
+      if (Alpine.store('toasts')) {
+        Alpine.store('toasts').add({ message: '{{ labels.TOAST_ACTION_FAILED }}', type: 'error' });
+      }
+    });
   })();
   </script>
 

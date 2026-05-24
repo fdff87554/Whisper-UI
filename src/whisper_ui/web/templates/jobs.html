@@ -149,6 +149,17 @@ document.addEventListener('alpine:init', () => {
       }
       fetch(`/jobs/bulk/${action}`, { method: 'POST', body: formData, credentials: 'same-origin' })
         .then(resp => {
+          // This fetch carries no HX-Request header, so an expired session
+          // is answered with a 302 to /login that fetch transparently
+          // follows — resp.ok would be true for the login page. Detect the
+          // redirect explicitly and send the user to log in again.
+          if (resp.redirected) {
+            window.location.href = resp.url;
+            return;
+          }
+          if (!resp.ok) {
+            throw new Error(`bulk ${action} failed with ${resp.status}`);
+          }
           this.clear();
           // Server emits HX-Trigger: refreshJobList, which htmx listens for —
           // dispatch it manually since this fetch bypasses htmx.
@@ -173,8 +184,10 @@ document.addEventListener('alpine:init', () => {
           }
         })
         .catch(() => {
+          // Covers both network failures and the explicit throw on a 4xx/5xx
+          // status above. Keep the selection intact so the user can retry.
           if (Alpine.store('toasts')) {
-            Alpine.store('toasts').add({ message: '{{ labels.TOAST_NETWORK_ERROR }}', type: 'error' });
+            Alpine.store('toasts').add({ message: '{{ labels.TOAST_ACTION_FAILED }}', type: 'error' });
           }
         });
     }
