@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from whisper_ui.export.utils import format_timestamp
+from whisper_ui.export.utils import collapse_newlines, format_timestamp
 
 if TYPE_CHECKING:
     from whisper_ui.core.models import Segment, TranscriptResult
@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 def _format_text(segment: Segment) -> str:
     prefix = f"<v {segment.speaker}>" if segment.speaker else ""
-    return f"{prefix}{segment.text}"
+    return collapse_newlines(f"{prefix}{segment.text}")
 
 
 class VttExporter:
