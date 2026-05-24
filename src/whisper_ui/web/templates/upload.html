@@ -228,35 +228,25 @@
   {# Advanced settings — collapsed by default. The "已啟用 N 項" pill is a
      summary so users never have to expand the panel just to see whether
      diarization / 繁體 / LLM are on. #}
-  <section class="mt-6 pt-6 border-t border-base-300"
-           x-data="{
-             open: false,
-             get enabledCount() {
-               const form = this.$root;
-               return ['enable_diarization', 'convert_to_traditional', 'llm_correction_enabled']
-                 .map(name => form.querySelector(`[name=&quot;${name}&quot;]`))
-                 .filter(field => field && !field.disabled && field.checked).length;
-             }
-           }">
+  <section class="mt-6 pt-6 border-t border-base-300">
     <button type="button"
             class="w-full flex items-center justify-between gap-3 text-left focus-visible:outline-none"
-            :aria-expanded="open.toString()"
-            :aria-label="open ? '{{ labels.UPLOAD_ADVANCED_TOGGLE_COLLAPSE }}' : '{{ labels.UPLOAD_ADVANCED_TOGGLE_EXPAND }}'"
-            @click="open = !open">
+            :aria-expanded="advancedOpen.toString()"
+            :aria-label="advancedOpen ? '{{ labels.UPLOAD_ADVANCED_TOGGLE_COLLAPSE }}' : '{{ labels.UPLOAD_ADVANCED_TOGGLE_EXPAND }}'"
+            @click="advancedOpen = !advancedOpen">
       <h2 class="text-sm font-medium opacity-80">{{ labels.UPLOAD_SECTION_ADVANCED }}</h2>
       <span class="flex items-center gap-2 text-xs">
         <span class="badge badge-ghost badge-sm" x-text="`{{ labels.UPLOAD_ADVANCED_ENABLED_COUNT }}`.replace('{count}', enabledCount)"></span>
-        <span class="opacity-50" x-text="open ? '−' : '+'"></span>
+        <span class="opacity-50" x-text="advancedOpen ? '−' : '+'"></span>
       </span>
     </button>
 
-    <div x-show="open" x-transition class="space-y-3 mt-4" x-cloak>
-      <div class="fieldset"
-           x-data="{ diarEnabled: {{ 'true' if settings.hf_token else 'false' }} }">
+    <div x-show="advancedOpen" x-transition class="space-y-3 mt-4" x-cloak>
+      <div class="fieldset">
         <label class="fieldset-label gap-3">
           <input type="checkbox" name="enable_diarization" value="true"
                  class="toggle toggle-primary toggle-sm"
-                 x-model="diarEnabled"
+                 x-model="diarization"
                  {% if not settings.hf_token %}disabled{% endif %}>
           <div class="flex-1">
             <span class="inline-flex items-center gap-1">
@@ -269,7 +259,7 @@
             </span>
           </div>
         </label>
-        <div x-show="diarEnabled" x-transition class="ml-12 mt-2">
+        <div x-show="diarization" x-transition class="ml-12 mt-2">
           <fieldset class="fieldset w-full max-w-xs">
             <legend class="fieldset-legend text-sm">{{ labels.UPLOAD_NUM_SPEAKERS }}</legend>
             <input type="number" name="num_speakers" value="0" min="0" max="20"
@@ -281,7 +271,7 @@
       <div class="fieldset">
         <label class="fieldset-label gap-3">
           <input type="checkbox" name="convert_to_traditional" value="true"
-                 class="toggle toggle-primary toggle-sm" checked>
+                 class="toggle toggle-primary toggle-sm" x-model="convertTraditional">
           <div class="flex-1">
             <span class="inline-flex items-center gap-1">
               {{ labels.UPLOAD_CONVERT_TRADITIONAL }}
@@ -297,6 +287,7 @@
         <label class="fieldset-label gap-3">
           <input type="checkbox" name="llm_correction_enabled" value="true"
                  class="toggle toggle-primary toggle-sm"
+                 x-model="llmCorrection"
                  {% if not settings.ollama_base_url %}disabled{% endif %}>
           <div class="flex-1">
             <span class="inline-flex items-center gap-1">
@@ -343,9 +334,20 @@ function uploadForm() {
     progress: 0,
     selectedFiles: [],
     urlText: '',
+    advancedOpen: false,
+    diarization: {{ 'true' if settings.hf_token else 'false' }},
+    convertTraditional: true,
+    llmCorrection: false,
     activePreset: null,
     presetsTouched: false,
     _applyingPreset: false,
+    get enabledCount() {
+      // Reactive: reads the three toggle booleans, so the badge updates
+      // whenever any of them changes. Disabled toggles start false and
+      // applyPreset skips disabled fields, so filtering on truthiness is
+      // equivalent to the old "!disabled && checked" DOM check.
+      return [this.diarization, this.convertTraditional, this.llmCorrection].filter(Boolean).length;
+    },
     get statusLine() {
       if (this.tab === 'url') {
         const lines = this.urlText.split('\n').map(s => s.trim()).filter(Boolean);
