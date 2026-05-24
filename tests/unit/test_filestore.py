@@ -115,6 +115,43 @@ def test_delete_upload_files_logs_debug_on_success(filestore: FileStore, caplog)
     assert any("reclaimed upload dir" in r.getMessage() and "job-dbg" in r.getMessage() for r in caplog.records)
 
 
+def test_copy_source_for_new_job_copies_audio_to_new_dir(filestore: FileStore):
+    data = b"original audio bytes"
+    filestore.save_upload("root", "meeting.mp3", data)
+
+    dest = filestore.copy_source_for_new_job("root", "meeting.mp3", "version1")
+
+    assert dest.parent.name == "version1"
+    assert dest.name == "meeting.mp3"
+    assert dest.read_bytes() == data
+
+
+def test_copy_source_for_new_job_leaves_original_intact(filestore: FileStore):
+    data = b"original audio bytes"
+    src = filestore.save_upload("root", "meeting.mp3", data)
+
+    filestore.copy_source_for_new_job("root", "meeting.mp3", "version1")
+
+    # The new version is an independent copy; the source job is untouched.
+    assert src.exists()
+    assert src.read_bytes() == data
+
+
+def test_copy_source_for_new_job_independent_of_source_deletion(filestore: FileStore):
+    filestore.save_upload("root", "meeting.mp3", b"data")
+    filestore.copy_source_for_new_job("root", "meeting.mp3", "version1")
+
+    filestore.delete_job_files("root")
+
+    # Deleting the source job does not affect the copied version.
+    assert filestore.get_upload_path("version1", "meeting.mp3").exists()
+
+
+def test_copy_source_for_new_job_raises_when_source_missing(filestore: FileStore):
+    with pytest.raises(FileNotFoundError):
+        filestore.copy_source_for_new_job("gone", "meeting.mp3", "version1")
+
+
 def test_delete_job_files_raises_on_filesystem_failure(filestore: FileStore, monkeypatch):
     """Manual delete routes rely on this raising — if shutil.rmtree fails,
     the route must see the OSError and keep the DB row, not silently
