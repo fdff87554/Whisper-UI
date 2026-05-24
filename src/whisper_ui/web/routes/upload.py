@@ -179,7 +179,7 @@ async def upload_submit(
             )
 
         job.filepath = str(dest)
-        job.duration = get_audio_duration_seconds(dest, job_id=job.id)
+        job.duration = await asyncio.to_thread(get_audio_duration_seconds, dest, job_id=job.id)
         job.status = JobStatus.QUEUED
         db.insert_job(job)
         logger.info(

@@ -223,7 +223,7 @@ async def bulk_job_action(
         if not jobs:
             raise HTTPException(status_code=404, detail="No matching jobs")
         try:
-            zip_data = create_batch_zip(jobs, filestore, format_name)
+            zip_data = await asyncio.to_thread(create_batch_zip, jobs, filestore, format_name)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from None
         if zip_data is None:
@@ -247,7 +247,7 @@ async def bulk_job_action(
                 failed += 1
                 continue
             try:
-                retry_duration = _probe_retry_duration(job)
+                retry_duration = await asyncio.to_thread(_probe_retry_duration, job)
                 job.status = JobStatus.QUEUED
                 job.error = None
                 job.progress = 0.0
@@ -269,7 +269,7 @@ async def bulk_job_action(
                 failed += 1
                 continue
             try:
-                filestore.delete_job_files(job.id)
+                await asyncio.to_thread(filestore.delete_job_files, job.id)
             except OSError:
                 logger.exception("bulk delete: filestore reclaim failed for job %s", job.id)
                 failed += 1
@@ -311,7 +311,7 @@ async def retry_job(
 
     previous_error = job.error
     try:
-        retry_duration = _probe_retry_duration(job)
+        retry_duration = await asyncio.to_thread(_probe_retry_duration, job)
         job.status = JobStatus.QUEUED
         job.error = None
         job.progress = 0.0
@@ -410,7 +410,7 @@ async def re_transcribe_job(
             )
             return HTMLResponse(ui_labels.JOBS_RE_TRANSCRIBE_SOURCE_GONE, status_code=409)
         new_job.filepath = str(dest)
-        new_job.duration = get_audio_duration_seconds(dest, job_id=new_job.id)
+        new_job.duration = await asyncio.to_thread(get_audio_duration_seconds, dest, job_id=new_job.id)
 
     db.insert_job(new_job)
     try:
@@ -442,7 +442,7 @@ async def delete_job(job_id: str, db: DbDep, filestore: FileStoreDep, redis: Red
         return Response(status_code=409)
 
     try:
-        filestore.delete_job_files(job.id)
+        await asyncio.to_thread(filestore.delete_job_files, job.id)
     except OSError as exc:
         # Keep the DB row + Redis state + audit log silent so retrying the
         # delete is a no-op-then-real-delete instead of "DB row gone but
@@ -485,7 +485,7 @@ async def retry_batch(
         if job.status != JobStatus.FAILED:
             continue
         try:
-            retry_duration = _probe_retry_duration(job)
+            retry_duration = await asyncio.to_thread(_probe_retry_duration, job)
             job.status = JobStatus.QUEUED
             job.error = None
             job.progress = 0.0
@@ -525,7 +525,7 @@ async def delete_batch(batch_id: str, db: DbDep, filestore: FileStoreDep, redis:
         if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
             continue
         try:
-            filestore.delete_job_files(job.id)
+            await asyncio.to_thread(filestore.delete_job_files, job.id)
         except OSError as exc:
             # Per-job atomicity: keep the failing job's DB row + Redis
             # state so the user can retry just that one. Other jobs in
@@ -568,7 +568,7 @@ async def batch_download(
         raise HTTPException(status_code=404, detail="Batch not found")
 
     try:
-        zip_data = create_batch_zip(all_jobs, filestore, format_name)
+        zip_data = await asyncio.to_thread(create_batch_zip, all_jobs, filestore, format_name)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
     if zip_data is None:

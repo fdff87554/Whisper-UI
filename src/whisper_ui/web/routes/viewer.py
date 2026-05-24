@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -67,7 +68,7 @@ async def viewer_page(request: Request, db: DbDep, filestore: FileStoreDep, user
     elif job.status != JobStatus.COMPLETED:
         error = "not_completed"
     else:
-        result = filestore.load_result(job_id)
+        result = await asyncio.to_thread(filestore.load_result, job_id)
         if result is None:
             error = "no_result"
         else:
@@ -105,7 +106,7 @@ async def export_download(job_id: str, format_name: str, db: DbDep, filestore: F
     if job is None or job.status != JobStatus.COMPLETED:
         raise HTTPException(status_code=404)
 
-    result = filestore.load_result(job_id)
+    result = await asyncio.to_thread(filestore.load_result, job_id)
     if result is None:
         raise HTTPException(status_code=404)
 
