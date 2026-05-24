@@ -158,7 +158,7 @@
              accept="{{ supported_extensions|join(',') }}"
              :disabled="tab !== 'files'"
              x-ref="fileInput"
-             @change="updateFileList()"
+             @change="updateFileList($event)"
              class="hidden">
     </div>
     {# File preview list #}
@@ -183,6 +183,8 @@
     <label for="upload-folder" class="btn btn-outline btn-sm">{{ labels.UPLOAD_CHOOSE_FOLDER }}</label>
     <input type="file" id="upload-folder" name="files" webkitdirectory
            :disabled="tab !== 'folder'"
+           x-ref="folderInput"
+           @change="updateFileList($event)"
            class="hidden">
   </div>
 
@@ -356,16 +358,29 @@ function uploadForm() {
     activePreset: null,
     presetsTouched: false,
     _applyingPreset: false,
+    init() {
+      // Switching source tab clears any pending selection so the sticky
+      // footer count and the disabled-but-still-populated input can't go
+      // stale between tabs.
+      this.$watch('tab', () => this.resetSelection());
+    },
     onProgress(event) {
       if (event.detail && event.detail.loaded !== undefined && event.detail.total) {
         this.progress = (event.detail.loaded / event.detail.total) * 100;
       }
     },
-    updateFileList() {
-      const input = this.$refs.fileInput;
+    updateFileList(event) {
+      // Works for the files input, the folder input, and the drag-drop
+      // handler (which calls without an event after writing $refs.fileInput).
+      const input = (event && event.target) ? event.target : this.$refs.fileInput;
       if (input && input.files) {
         this.selectedFiles = Array.from(input.files);
       }
+    },
+    resetSelection() {
+      this.selectedFiles = [];
+      if (this.$refs.fileInput) this.$refs.fileInput.value = '';
+      if (this.$refs.folderInput) this.$refs.folderInput.value = '';
     },
     removeFile(idx) {
       this.selectedFiles.splice(idx, 1);
