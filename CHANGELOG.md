@@ -7,6 +7,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-05-24
+
 ### Added
 
 - v2 UI redesign across Login, Dashboard, Upload, Jobs, and Viewer
@@ -52,6 +54,26 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   written by `RedisProgressReporter` is unchanged.
 - `JOBS_SEARCH_PLACEHOLDER` updated to mention 網址 since the
   search now matches source URLs.
+- Dependencies bumped: transformers 4.57.6 → 5.9.0 (major; the
+  whisperx 3.8 Wav2Vec2 align path was runtime-validated against
+  transformers 5.9.0 — import surface plus model load / forward /
+  CTC decode), argon2-cffi 23.1.0 → 25.1.0 (PasswordHasher defaults
+  unchanged: time_cost=3, memory_cost=65536, parallelism=4),
+  fastapi[standard] → 0.136.3, numpy → 2.4.6, fakeredis[lua] →
+  2.35.1.
+
+### Fixed
+
+- SRT / VTT export now collapses embedded newlines in cue text, so a
+  line break inside a segment (which the optional LLM correction
+  stage can emit) can no longer split or truncate a subtitle cue.
+- YouTube download stage pins `allowed_extractors=["youtube"]` as
+  defense in depth on top of the existing URL whitelist, so yt-dlp
+  can never fall back to the generic extractor.
+
+### Security
+
+- `starlette` bumped to 1.1.0 to remediate PYSEC-2026-161.
 
 ### Deploy notes
 
@@ -72,6 +94,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   values, URL paths, htmx polling structure, and theme strings
   are all preserved. See evaluation report §6 for the full
   "do-not-touch" list.
+- **Worker images now build on transformers 5.9.0.** Rebuild the
+  worker image (`docker compose --profile gpu|cpu build`) when
+  upgrading. The transformers 5 align path was validated at the API
+  level, not via a full GPU end-to-end run, so a one-off
+  Chinese-audio align smoke test after deploy is recommended.
 
 ## [2.2.0] - 2026-05-22
 
