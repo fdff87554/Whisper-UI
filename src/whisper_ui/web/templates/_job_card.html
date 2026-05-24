@@ -6,7 +6,7 @@
          :aria-label="$store.jobSelection.has('{{ job.id }}') ? '{{ labels.JOBS_BULK_CLEAR_SELECTION }}' : '{{ labels.JOBS_SELECT_ROW }}'">
     <input type="checkbox" class="checkbox checkbox-sm" data-morph-skip-checked
            :checked="$store.jobSelection.has('{{ job.id }}')"
-           @change="$store.jobSelection.toggle('{{ job.id }}')">
+           @change="$store.jobSelection.toggle('{{ job.id }}', '{{ job.status.value }}')">
     <span class="sr-only">{{ labels.JOBS_SELECT_ROW }}</span>
   </label>
   {% endif %}

@@ -466,6 +466,18 @@ class TestJobsRoutes:
         assert resp.status_code == 200
         assert f"$store.jobSelection.has('{active.id}')" not in resp.text
 
+    def test_jobs_card_checkbox_carries_status_for_bulk_gating(self, client, db, filestore):
+        """The selection toggle must pass the job status so the bulk bar can
+        gate export (needs completed) / retry (needs failed). Finding F3."""
+        completed = _create_completed_job(db, filestore)
+        failed = _create_failed_job(db)
+
+        resp = client.get("/jobs/list")
+
+        assert resp.status_code == 200
+        assert f"toggle('{completed.id}', 'completed')" in resp.text
+        assert f"toggle('{failed.id}', 'failed')" in resp.text
+
     def test_delete_job_returns_500_and_preserves_db_row_when_filestore_fails(self, client, db, filestore, caplog):
         """PR #53 review F2: a filesystem failure must NOT lead to a
         DB-deleted-but-files-still-on-disk inconsistency. The route must

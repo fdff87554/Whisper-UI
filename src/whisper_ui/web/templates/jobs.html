@@ -47,10 +47,14 @@
       <span class="text-sm font-medium" x-text="`{{ labels.JOBS_BULK_SELECTED }}`.replace('{count}', $store.jobSelection.size)"></span>
       <div class="flex flex-wrap gap-2 ml-auto">
         <button class="btn btn-sm btn-ghost"
+                :disabled="!$store.jobSelection.hasFailed"
+                :title="$store.jobSelection.hasFailed ? '' : '{{ labels.JOBS_BULK_RETRY_HINT }}'"
                 @click="$store.jobSelection.bulkAction('retry', '{{ labels.JOBS_BULK_CONFIRM_RETRY }}')">
           {{ labels.JOBS_BULK_RETRY }}
         </button>
         <button class="btn btn-sm btn-ghost"
+                :disabled="!$store.jobSelection.hasCompleted"
+                :title="$store.jobSelection.hasCompleted ? '' : '{{ labels.JOBS_BULK_EXPORT_HINT }}'"
                 @click="$store.jobSelection.bulkAction('export')">
           {{ labels.JOBS_BULK_EXPORT }}
         </button>
@@ -113,16 +117,70 @@
 <script>
 document.addEventListener('alpine:init', () => {
   Alpine.store('jobSelection', {
-    ids: new Set(),
-    get size() { return this.ids.size; },
-    has(id) { return this.ids.has(id); },
-    toggle(id) {
-      if (this.ids.has(id)) this.ids.delete(id);
-      else this.ids.add(id);
+    // id -> status, so the bar can gate actions on the selected jobs'
+    // states (export needs a completed job, retry needs a failed one).
+    items: new Map(),
+    get size() { return this.items.size; },
+    get hasCompleted() {
+      for (const status of this.items.values()) if (status === 'completed') return true;
+      return false;
     },
-    clear() { this.ids = new Set(); },
+    get hasFailed() {
+      for (const status of this.items.values()) if (status === 'failed') return true;
+      return false;
+    },
+    has(id) { return this.items.has(id); },
+    toggle(id, status) {
+      if (this.items.has(id)) this.items.delete(id);
+      else this.items.set(id, status);
+    },
+    clear() { this.items = new Map(); },
+    _toast(message, type) {
+      if (Alpine.store('toasts')) Alpine.store('toasts').add({ message, type });
+    },
+    _handleAuthRedirect(resp) {
+      // These fetches carry no HX-Request header, so an expired session is
+      // answered with a 302 to /login that fetch transparently follows —
+      // resp.ok would be true for the login page. Detect it and send the
+      // user to log in again.
+      if (resp.redirected) {
+        window.location.href = resp.url;
+        return true;
+      }
+      return false;
+    },
+    bulkExport() {
+      const ids = Array.from(this.items.keys());
+      if (!ids.length) return;
+      const formData = new FormData();
+      formData.set('job_ids', ids.join(','));
+      let filename = 'selection.zip';
+      fetch('/jobs/bulk/export', { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(resp => {
+          if (this._handleAuthRedirect(resp)) return null;
+          if (!resp.ok) throw new Error(`bulk export failed with ${resp.status}`);
+          const disposition = resp.headers.get('Content-Disposition') || '';
+          const match = disposition.match(/filename="?([^"]+)"?/);
+          if (match) filename = match[1];
+          return resp.blob();
+        })
+        .then(blob => {
+          if (!blob) return;
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+          this.clear();
+        })
+        .catch(() => this._toast('{{ labels.TOAST_ACTION_FAILED }}', 'error'));
+    },
     bulkAction(action, confirmTpl) {
-      const ids = Array.from(this.ids);
+      if (action === 'export') { this.bulkExport(); return; }
+      const ids = Array.from(this.items.keys());
       if (!ids.length) return;
       if (confirmTpl) {
         const msg = confirmTpl.replace('{count}', ids.length);
@@ -130,35 +188,9 @@ document.addEventListener('alpine:init', () => {
       }
       const formData = new FormData();
       formData.set('job_ids', ids.join(','));
-      if (action === 'export') {
-        // POST with FormData triggers a download via a hidden form.
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = '/jobs/bulk/export';
-        form.target = '_self';
-        for (const [k, v] of formData.entries()) {
-          const input = document.createElement('input');
-          input.type = 'hidden';
-          input.name = k;
-          input.value = v;
-          form.appendChild(input);
-        }
-        document.body.appendChild(form);
-        form.submit();
-        form.remove();
-        this.clear();
-        return;
-      }
       fetch(`/jobs/bulk/${action}`, { method: 'POST', body: formData, credentials: 'same-origin' })
         .then(resp => {
-          // This fetch carries no HX-Request header, so an expired session
-          // is answered with a 302 to /login that fetch transparently
-          // follows — resp.ok would be true for the login page. Detect the
-          // redirect explicitly and send the user to log in again.
-          if (resp.redirected) {
-            window.location.href = resp.url;
-            return;
-          }
+          if (this._handleAuthRedirect(resp)) return;
           if (!resp.ok) {
             throw new Error(`bulk ${action} failed with ${resp.status}`);
           }
@@ -167,20 +199,14 @@ document.addEventListener('alpine:init', () => {
           // dispatch it manually since this fetch bypasses htmx.
           document.body.dispatchEvent(new CustomEvent('refreshJobList'));
           const settle = resp.headers.get('HX-Trigger-After-Settle');
-          if (settle && Alpine.store('toasts')) {
+          if (settle) {
             try {
               const events = JSON.parse(settle);
               if (events.bulkPartial) {
                 const { ok, failed } = events.bulkPartial;
-                Alpine.store('toasts').add({
-                  message: '{{ labels.JOBS_BULK_PARTIAL }}'.replace('{ok}', ok).replace('{failed}', failed),
-                  type: 'warning'
-                });
+                this._toast('{{ labels.JOBS_BULK_PARTIAL }}'.replace('{ok}', ok).replace('{failed}', failed), 'warning');
               } else if (events.bulkComplete) {
-                Alpine.store('toasts').add({
-                  message: '{{ labels.JOBS_BULK_SUCCESS }}'.replace('{count}', events.bulkComplete.ok),
-                  type: 'success'
-                });
+                this._toast('{{ labels.JOBS_BULK_SUCCESS }}'.replace('{count}', events.bulkComplete.ok), 'success');
               }
             } catch (_) { /* ignore malformed trigger payload */ }
           }
@@ -188,9 +214,7 @@ document.addEventListener('alpine:init', () => {
         .catch(() => {
           // Covers both network failures and the explicit throw on a 4xx/5xx
           // status above. Keep the selection intact so the user can retry.
-          if (Alpine.store('toasts')) {
-            Alpine.store('toasts').add({ message: '{{ labels.TOAST_ACTION_FAILED }}', type: 'error' });
-          }
+          this._toast('{{ labels.TOAST_ACTION_FAILED }}', 'error');
         });
     }
   });
