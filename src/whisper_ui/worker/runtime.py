@@ -118,7 +118,7 @@ def is_llm_active(job: Job, settings: Settings) -> bool:
     pick the matching progress weight table) consult this so the two
     decisions never drift.
     """
-    return bool(job.llm_correction_enabled) and bool(settings.ollama_base_url)
+    return bool(job.llm_correction_enabled) and settings.llm_correction_available
 
 
 def make_throttled_progress_reporter(

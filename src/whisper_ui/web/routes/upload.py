@@ -153,9 +153,11 @@ async def upload_submit(
             language=language,
             model_name=model_name,
             num_speakers=num_speakers if num_speakers > 0 else None,
-            enable_diarization=enable_diarization,
+            # Clamp opt-in flags to what this deployment can actually run so the
+            # persisted flag is honest and no no-op stage is enqueued.
+            enable_diarization=enable_diarization and settings.diarization_available,
             convert_to_traditional=convert_to_traditional,
-            llm_correction_enabled=llm_correction_enabled,
+            llm_correction_enabled=llm_correction_enabled and settings.llm_correction_available,
             batch_id=batch_id,
             owner_id=user.id,
         )
@@ -179,7 +181,7 @@ async def upload_submit(
             )
 
         job.filepath = str(dest)
-        job.duration = get_audio_duration_seconds(dest, job_id=job.id)
+        job.duration = await asyncio.to_thread(get_audio_duration_seconds, dest, job_id=job.id)
         job.status = JobStatus.QUEUED
         db.insert_job(job)
         logger.info(
@@ -189,8 +191,8 @@ async def upload_submit(
             display_name,
             f"{job.duration:.1f}" if job.duration else "unknown",
             model_name,
-            enable_diarization,
-            llm_correction_enabled,
+            job.enable_diarization,
+            job.llm_correction_enabled,
         )
 
         try:
@@ -301,9 +303,10 @@ async def upload_url_submit(
             language=language,
             model_name=model_name,
             num_speakers=num_speakers if num_speakers > 0 else None,
-            enable_diarization=enable_diarization,
+            # Clamp opt-in flags to deployment availability (see file-upload branch).
+            enable_diarization=enable_diarization and settings.diarization_available,
             convert_to_traditional=convert_to_traditional,
-            llm_correction_enabled=llm_correction_enabled,
+            llm_correction_enabled=llm_correction_enabled and settings.llm_correction_available,
             batch_id=batch_id,
             owner_id=user.id,
         )
@@ -317,8 +320,8 @@ async def upload_url_submit(
             job.id,
             user.id,
             model_name,
-            enable_diarization,
-            llm_correction_enabled,
+            job.enable_diarization,
+            job.llm_correction_enabled,
         )
 
         try:

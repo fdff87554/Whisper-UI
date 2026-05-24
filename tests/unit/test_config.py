@@ -238,3 +238,13 @@ def test_ollama_base_url_accepts_valid_values(tmp_path, good_url):
     s = _make_settings(tmp_path, ollama_base_url=good_url)
     # normalization may strip trailing slashes / /api, but the value parses.
     assert s.ollama_base_url == good_url
+
+
+def test_diarization_available_reflects_hf_token(tmp_path):
+    assert _make_settings(tmp_path, hf_token="").diarization_available is False
+    assert _make_settings(tmp_path, hf_token="hf-test-not-real").diarization_available is True
+
+
+def test_llm_correction_available_reflects_ollama_base_url(tmp_path):
+    assert _make_settings(tmp_path, ollama_base_url="").llm_correction_available is False
+    assert _make_settings(tmp_path, ollama_base_url="http://ollama:11434").llm_correction_available is True

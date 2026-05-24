@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     duration REAL,
     batch_id TEXT,
     source_url TEXT,
-    owner_id INTEGER
+    owner_id INTEGER,
+    source_job_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS users (
@@ -64,6 +65,12 @@ _MIGRATIONS: list[str] = [
     # never matches NULL).
     "ALTER TABLE jobs ADD COLUMN owner_id INTEGER",
     "CREATE INDEX IF NOT EXISTS idx_jobs_owner_id ON jobs(owner_id)",
+    # source_job_id links re-transcribe versions back to their root job so the
+    # UI can group transcript versions of the same audio. Indexed because the
+    # version-grouping lookup runs whenever the viewer renders a version's
+    # sibling list.
+    "ALTER TABLE jobs ADD COLUMN source_job_id TEXT",
+    "CREATE INDEX IF NOT EXISTS idx_jobs_source_job_id ON jobs(source_job_id)",
 ]
 
 

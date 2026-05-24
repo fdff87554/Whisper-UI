@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import math
 from collections import OrderedDict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 
 from whisper_ui.core.constants import DEFAULT_JOBS_PER_PAGE
+from whisper_ui.core.languages import SUPPORTED_LANGUAGES, WHISPER_MODELS
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.pipeline.audio_probe import get_audio_duration_seconds
 from whisper_ui.ui import labels as ui_labels
@@ -102,6 +104,7 @@ async def jobs_page(
     db: DbDep,
     redis: RedisDep,
     filestore: FileStoreDep,
+    settings: SettingsDep,
     user: CurrentUserDep,
     submitted: int | None = None,
     status: str = "",
@@ -114,6 +117,11 @@ async def jobs_page(
     ctx["active_page"] = "jobs"
     ctx["submitted"] = submitted
     ctx["status_counts"] = db.get_status_counts(owner_id=owner_id)
+    # The re-transcribe modal (full page only, not the /jobs/list fragment)
+    # reuses the upload form's option choices.
+    ctx["supported_languages"] = SUPPORTED_LANGUAGES
+    ctx["whisper_models"] = WHISPER_MODELS
+    ctx["settings"] = settings
     return templates.TemplateResponse(request=request, name="jobs.html", context=ctx)
 
 
@@ -215,7 +223,7 @@ async def bulk_job_action(
         if not jobs:
             raise HTTPException(status_code=404, detail="No matching jobs")
         try:
-            zip_data = create_batch_zip(jobs, filestore, format_name)
+            zip_data = await asyncio.to_thread(create_batch_zip, jobs, filestore, format_name)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from None
         if zip_data is None:
@@ -239,7 +247,7 @@ async def bulk_job_action(
                 failed += 1
                 continue
             try:
-                retry_duration = _probe_retry_duration(job)
+                retry_duration = await asyncio.to_thread(_probe_retry_duration, job)
                 job.status = JobStatus.QUEUED
                 job.error = None
                 job.progress = 0.0
@@ -261,7 +269,7 @@ async def bulk_job_action(
                 failed += 1
                 continue
             try:
-                filestore.delete_job_files(job.id)
+                await asyncio.to_thread(filestore.delete_job_files, job.id)
             except OSError:
                 logger.exception("bulk delete: filestore reclaim failed for job %s", job.id)
                 failed += 1
@@ -303,7 +311,7 @@ async def retry_job(
 
     previous_error = job.error
     try:
-        retry_duration = _probe_retry_duration(job)
+        retry_duration = await asyncio.to_thread(_probe_retry_duration, job)
         job.status = JobStatus.QUEUED
         job.error = None
         job.progress = 0.0
@@ -330,6 +338,103 @@ async def retry_job(
     return Response(status_code=204, headers={"HX-Trigger": "refreshJobList"})
 
 
+@router.post("/jobs/{job_id}/re-transcribe")
+async def re_transcribe_job(
+    job_id: str,
+    db: DbDep,
+    redis: RedisDep,
+    settings: SettingsDep,
+    filestore: FileStoreDep,
+    user: CurrentUserDep,
+    language: Annotated[str, Form()] = "zh",
+    model_name: Annotated[str, Form()] = "large-v3",
+    num_speakers: Annotated[int, Form()] = 0,
+    enable_diarization: Annotated[bool, Form()] = False,
+    convert_to_traditional: Annotated[bool, Form()] = False,
+    llm_correction_enabled: Annotated[bool, Form()] = False,
+):
+    """Re-run transcription on a completed job's audio with new parameters.
+
+    Creates a *new* job (a new version) that reuses the source audio without
+    re-uploading, leaving the original transcript untouched so the user can
+    compare versions. ``source_job_id`` links the new job back to the version
+    chain's root for UI grouping.
+    """
+    validate_hex_id(job_id, "job_id")
+    src = db.get_job(job_id, owner_id=owner_filter(user))
+    # 404 (not 403/409) for missing/cross-user so existence does not leak;
+    # only a COMPLETED job has a transcript worth preserving as a prior version.
+    if src is None or src.status != JobStatus.COMPLETED:
+        return Response(status_code=404)
+
+    if language not in SUPPORTED_LANGUAGES:
+        return HTMLResponse(ui_labels.UPLOAD_INVALID_LANGUAGE.format(value=language), status_code=400)
+    if model_name not in WHISPER_MODELS:
+        return HTMLResponse(ui_labels.UPLOAD_INVALID_MODEL.format(value=model_name), status_code=400)
+
+    # Flat chain: every version points at the original root so grouping is a
+    # single lookup. Re-transcribing a version re-roots to the same source.
+    root_id = src.source_job_id or src.id
+    new_job = Job(
+        filename=src.filename,
+        language=language,
+        model_name=model_name,
+        num_speakers=num_speakers if num_speakers > 0 else None,
+        # Clamp opt-in flags to deployment availability so the new version's
+        # persisted flags are honest even if the source job (or a tampered
+        # request) carries flags this deployment cannot run.
+        enable_diarization=enable_diarization and settings.diarization_available,
+        convert_to_traditional=convert_to_traditional,
+        llm_correction_enabled=llm_correction_enabled and settings.llm_correction_available,
+        source_url=src.source_url,
+        owner_id=user.id,
+        source_job_id=root_id,
+        status=JobStatus.QUEUED,
+    )
+
+    if src.source_url:
+        # URL jobs always re-download: enqueue_pipeline prepends a download
+        # stage whenever source_url is set, so there is no local media to
+        # copy. Point filepath at the new job's own dir, like upload_url_submit.
+        new_job.filepath = str(filestore.prepare_upload_path(new_job.id, "_").parent)
+    else:
+        # Copy from the source job's OWN upload dir (each version owns an
+        # independent copy), not the root — so deleting any version never
+        # strands another. ``to_thread`` keeps a large copy off the event loop.
+        try:
+            dest = await asyncio.to_thread(filestore.copy_source_for_new_job, src.id, src.filename, new_job.id)
+        except FileNotFoundError:
+            # The retention sweep already reclaimed the source audio; there is
+            # nothing to re-transcribe from, so do not insert a doomed job.
+            logger.info(
+                "re-transcribe rejected: source audio gone for job_id=%s user_id=%s",
+                src.id,
+                user.id,
+            )
+            return HTMLResponse(ui_labels.JOBS_RE_TRANSCRIBE_SOURCE_GONE, status_code=409)
+        new_job.filepath = str(dest)
+        new_job.duration = await asyncio.to_thread(get_audio_duration_seconds, dest, job_id=new_job.id)
+
+    db.insert_job(new_job)
+    try:
+        enqueue_pipeline(new_job, redis=redis, settings=settings, filestore=filestore)
+        logger.info(
+            "job re-transcribe queued: new_job_id=%s source_job_id=%s user_id=%s model=%s lang=%s",
+            new_job.id,
+            root_id,
+            user.id,
+            model_name,
+            language,
+        )
+    except Exception:
+        logger.exception("Failed to enqueue re-transcribe job %s", new_job.id)
+        new_job.status = JobStatus.FAILED
+        new_job.error = ui_labels.UPLOAD_ENQUEUE_FAILED
+        db.update_job(new_job)
+
+    return Response(status_code=204, headers={"HX-Trigger": "refreshJobList"})
+
+
 @router.delete("/jobs/{job_id}")
 async def delete_job(job_id: str, db: DbDep, filestore: FileStoreDep, redis: RedisDep, user: CurrentUserDep):
     validate_hex_id(job_id, "job_id")
@@ -340,7 +445,7 @@ async def delete_job(job_id: str, db: DbDep, filestore: FileStoreDep, redis: Red
         return Response(status_code=409)
 
     try:
-        filestore.delete_job_files(job.id)
+        await asyncio.to_thread(filestore.delete_job_files, job.id)
     except OSError as exc:
         # Keep the DB row + Redis state + audit log silent so retrying the
         # delete is a no-op-then-real-delete instead of "DB row gone but
@@ -383,7 +488,7 @@ async def retry_batch(
         if job.status != JobStatus.FAILED:
             continue
         try:
-            retry_duration = _probe_retry_duration(job)
+            retry_duration = await asyncio.to_thread(_probe_retry_duration, job)
             job.status = JobStatus.QUEUED
             job.error = None
             job.progress = 0.0
@@ -423,7 +528,7 @@ async def delete_batch(batch_id: str, db: DbDep, filestore: FileStoreDep, redis:
         if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
             continue
         try:
-            filestore.delete_job_files(job.id)
+            await asyncio.to_thread(filestore.delete_job_files, job.id)
         except OSError as exc:
             # Per-job atomicity: keep the failing job's DB row + Redis
             # state so the user can retry just that one. Other jobs in
@@ -466,7 +571,7 @@ async def batch_download(
         raise HTTPException(status_code=404, detail="Batch not found")
 
     try:
-        zip_data = create_batch_zip(all_jobs, filestore, format_name)
+        zip_data = await asyncio.to_thread(create_batch_zip, all_jobs, filestore, format_name)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
     if zip_data is None:

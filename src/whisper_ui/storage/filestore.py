@@ -28,6 +28,26 @@ class FileStore:
         dest.write_bytes(data)
         return dest
 
+    def copy_source_for_new_job(self, src_job_id: str, src_filename: str, new_job_id: str) -> Path:
+        """Copy ``src_job_id``'s uploaded audio into ``new_job_id``'s upload dir.
+
+        Returns the destination path so the caller can set the new job's
+        ``filepath`` without re-deriving it. Copies (rather than references)
+        the file so each transcript version owns an independent upload dir;
+        the strict all-or-nothing :meth:`delete_job_files` contract and the
+        retention sweep then need no reference-counting.
+
+        Raises ``FileNotFoundError`` when the source file is absent — e.g. the
+        retention sweep already reclaimed it — so the caller can surface a
+        clear "please re-upload" error instead of enqueuing a doomed job.
+        """
+        src_path = self.get_upload_path(src_job_id, src_filename)
+        if not src_path.exists():
+            raise FileNotFoundError(f"source audio for job {src_job_id} not found at {src_path}")
+        dest = self.prepare_upload_path(new_job_id, src_path.name)
+        shutil.copy2(src_path, dest)
+        return dest
+
     def save_result(self, job_id: str, result: TranscriptResult) -> Path:
         job_dir = self._output_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)

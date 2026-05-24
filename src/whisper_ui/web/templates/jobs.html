@@ -111,6 +111,78 @@
     <form method="dialog" class="modal-backdrop"><button>close</button></form>
   </dialog>
 </div>
+
+{# Re-transcribe dialog — re-run a completed job's audio with new parameters,
+   creating a new version while preserving the original transcript. The fields
+   mirror the upload form's options but pre-fill from the source job. #}
+<div x-data="retranscribeDialog()" @open-retranscribe.window="show($event.detail)">
+  <dialog x-ref="rtDialog" class="modal">
+    <div class="modal-box">
+      <h3 class="text-lg font-bold">{{ labels.JOBS_RE_TRANSCRIBE_TITLE }}</h3>
+      <p class="text-sm opacity-60 py-2">{{ labels.JOBS_RE_TRANSCRIBE_DESC }}</p>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
+        <fieldset class="fieldset w-full">
+          <legend class="fieldset-legend text-sm">{{ labels.UPLOAD_LANGUAGE }}</legend>
+          <select x-model="language" class="select w-full">
+            {% for code in supported_languages %}
+            <option value="{{ code }}">{{ LANGUAGE_LABELS.get(code, code) }}</option>
+            {% endfor %}
+          </select>
+        </fieldset>
+        <fieldset class="fieldset w-full">
+          <legend class="fieldset-legend text-sm">{{ labels.UPLOAD_MODEL }}</legend>
+          <select x-model="modelName" class="select w-full">
+            {% for model in whisper_models %}
+            <option value="{{ model }}">{{ model }}</option>
+            {% endfor %}
+          </select>
+        </fieldset>
+      </div>
+
+      <div class="space-y-3 mt-4">
+        <div class="fieldset">
+          <label class="fieldset-label gap-3">
+            <input type="checkbox" class="toggle toggle-primary toggle-sm"
+                   x-model="diarization" {% if not settings.hf_token %}disabled{% endif %}>
+            <span>{{ labels.UPLOAD_ENABLE_DIARIZATION }}
+              {% if not settings.hf_token %}<span class="text-xs opacity-60">（{{ labels.UPLOAD_DIARIZATION_UNAVAILABLE }}）</span>{% endif %}
+            </span>
+          </label>
+          <div x-show="diarization" x-transition class="ml-12 mt-2">
+            <fieldset class="fieldset w-full max-w-xs">
+              <legend class="fieldset-legend text-sm">{{ labels.UPLOAD_NUM_SPEAKERS }}</legend>
+              <input type="number" x-model.number="numSpeakers" min="0" max="20" class="input input-sm w-full max-w-xs">
+            </fieldset>
+          </div>
+        </div>
+
+        <div class="fieldset">
+          <label class="fieldset-label gap-3">
+            <input type="checkbox" class="toggle toggle-primary toggle-sm" x-model="traditional">
+            <span>{{ labels.UPLOAD_CONVERT_TRADITIONAL }}</span>
+          </label>
+        </div>
+
+        <div class="fieldset">
+          <label class="fieldset-label gap-3">
+            <input type="checkbox" class="toggle toggle-primary toggle-sm"
+                   x-model="llm" {% if not settings.ollama_base_url %}disabled{% endif %}>
+            <span>{{ labels.UPLOAD_ENABLE_LLM_CORRECTION }}
+              {% if not settings.ollama_base_url %}<span class="text-xs opacity-60">（{{ labels.UPLOAD_LLM_CORRECTION_UNAVAILABLE }}）</span>{% endif %}
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <div class="modal-action">
+        <button class="btn btn-ghost" @click="cancel()">{{ labels.DIALOG_CANCEL }}</button>
+        <button class="btn btn-primary" @click="submit()" :disabled="submitting" x-text="submitting ? '...' : '{{ labels.JOBS_RE_TRANSCRIBE_SUBMIT }}'"></button>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -256,6 +328,76 @@ function batchDownloadDialog() {
     },
     cancel() {
       this.$refs.dlDialog.close();
+    }
+  }
+}
+
+// Deployment availability mirrors the disabled state on the modal toggles,
+// so the pre-filled state never enables a feature this deployment cannot run
+// (the backend clamps too; this keeps the UI honest).
+const RT_HF_AVAILABLE = {{ 'true' if settings.hf_token else 'false' }};
+const RT_OLLAMA_AVAILABLE = {{ 'true' if settings.ollama_base_url else 'false' }};
+
+function retranscribeDialog() {
+  return {
+    jobId: '',
+    language: 'zh',
+    modelName: 'large-v3',
+    numSpeakers: 0,
+    diarization: false,
+    traditional: false,
+    llm: false,
+    submitting: false,
+    show(detail) {
+      this.jobId = detail.jobId;
+      this.language = detail.language;
+      this.modelName = detail.model;
+      this.numSpeakers = detail.numSpeakers || 0;
+      this.diarization = !!detail.diarization && RT_HF_AVAILABLE;
+      this.traditional = !!detail.traditional;
+      this.llm = !!detail.llm && RT_OLLAMA_AVAILABLE;
+      this.submitting = false;
+      this.$refs.rtDialog.showModal();
+    },
+    cancel() {
+      this.$refs.rtDialog.close();
+    },
+    _toast(message, type) {
+      if (Alpine.store('toasts')) Alpine.store('toasts').add({ message, type });
+    },
+    submit() {
+      if (this.submitting) return;
+      this.submitting = true;
+      const fd = new FormData();
+      fd.set('language', this.language);
+      fd.set('model_name', this.modelName);
+      fd.set('num_speakers', this.numSpeakers);
+      // Only send checkboxes that are on, matching HTML form semantics; the
+      // route's Form(bool) defaults to False when the field is absent.
+      if (this.diarization) fd.set('enable_diarization', 'true');
+      if (this.traditional) fd.set('convert_to_traditional', 'true');
+      if (this.llm) fd.set('llm_correction_enabled', 'true');
+      fetch(`/jobs/${this.jobId}/re-transcribe`, { method: 'POST', body: fd, credentials: 'same-origin' })
+        .then(async resp => {
+          this.submitting = false;
+          // A bare fetch follows the 302-to-/login a stale session triggers,
+          // so resp.ok would be the login page — detect and redirect instead.
+          if (resp.redirected) { window.location.href = resp.url; return; }
+          if (resp.ok) {
+            this.$refs.rtDialog.close();
+            // The fetch bypasses htmx, so dispatch the refresh event manually.
+            document.body.dispatchEvent(new CustomEvent('refreshJobList'));
+            this._toast('{{ labels.JOBS_RE_TRANSCRIBE_SUCCESS }}', 'success');
+            return;
+          }
+          // 409 (source audio reclaimed) and 400 (bad params) carry a message.
+          const text = await resp.text();
+          this._toast(text || '{{ labels.JOBS_RE_TRANSCRIBE_FAILED }}', 'error');
+        })
+        .catch(() => {
+          this.submitting = false;
+          this._toast('{{ labels.JOBS_RE_TRANSCRIBE_FAILED }}', 'error');
+        });
     }
   }
 }

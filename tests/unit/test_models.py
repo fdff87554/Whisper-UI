@@ -104,3 +104,9 @@ def test_job_status_values():
     assert JobStatus.PENDING == "pending"
     assert JobStatus.COMPLETED == "completed"
     assert JobStatus.FAILED == "failed"
+
+
+def test_job_source_job_id_defaults_to_none():
+    """A directly-uploaded job has no source job; only re-transcribe versions set it."""
+    assert Job().source_job_id is None
+    assert Job(source_job_id="root123").source_job_id == "root123"

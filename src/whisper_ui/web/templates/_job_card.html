@@ -33,7 +33,10 @@
 {% endif %}
 
 <div class="flex items-center justify-between gap-2 mt-1">
-  <span class="text-xs opacity-50">{{ job.language }} | {{ job.model_name }} | {{ job.created_at|relative_time }}</span>
+  <span class="text-xs opacity-50">
+    {{ job.language }} | {{ job.model_name }} | {{ job.created_at|relative_time }}
+    {% if job.source_job_id %}<span class="badge badge-ghost badge-xs ml-1">{{ labels.JOBS_VERSION_BADGE }}</span>{% endif %}
+  </span>
   <div class="flex gap-1 flex-shrink-0">
     {% if job.status.value == 'completed' %}
     <a href="/viewer/{{ job.id }}" class="btn btn-primary btn-xs">{{ labels.JOBS_VIEW }}</a>
@@ -49,6 +52,16 @@
         {% endif %}
       </ul>
     </div>
+    <button class="btn btn-ghost btn-xs"
+            @click="$dispatch('open-retranscribe', {
+              jobId: '{{ job.id }}',
+              language: '{{ job.language }}',
+              model: '{{ job.model_name }}',
+              numSpeakers: {{ job.num_speakers or 0 }},
+              diarization: {{ job.enable_diarization|tojson }},
+              traditional: {{ job.convert_to_traditional|tojson }},
+              llm: {{ job.llm_correction_enabled|tojson }}
+            })">{{ labels.JOBS_RE_TRANSCRIBE }}</button>
     {% endif %}
 
     {% if job.status.value == 'failed' %}
