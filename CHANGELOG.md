@@ -7,6 +7,37 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-05-24
+
+### Added
+
+- Re-transcribe a completed job's audio with different parameters
+  (model, language, speaker diarization, traditional-Chinese conversion,
+  LLM correction) **without re-uploading**. Each run creates a new
+  transcript version and preserves the original so versions can be
+  compared. The job card gains a "重新轉換" modal pre-filled from the
+  source job, and re-transcribe versions are tagged with a "重新轉換版本"
+  badge; a `source_job_id` column links a version chain back to its root
+  job. The source audio is copied into the new job's own directory, so
+  each version is independent for viewing, export, and deletion.
+
+### Changed
+
+- The diarization and LLM-correction opt-in flags are now clamped to what
+  the deployment can actually run (`HF_TOKEN` for diarization,
+  `OLLAMA_BASE_URL` for LLM correction) when a job is created from upload,
+  URL, or re-transcribe. This keeps the persisted flag honest and avoids
+  enqueueing a diarize sub-job that the stage would only skip. The upload
+  "job inserted" log now records the clamped flags rather than the raw
+  request flags.
+
+### Fixed
+
+- Async request handlers no longer block the event loop on slow filesystem
+  or subprocess work: the ffprobe duration probe, batch ZIP creation,
+  transcript result loading, and job-directory deletion are now offloaded
+  to worker threads.
+
 ## [2.3.1] - 2026-05-24
 
 ### Fixed
