@@ -104,6 +104,7 @@ async def jobs_page(
     db: DbDep,
     redis: RedisDep,
     filestore: FileStoreDep,
+    settings: SettingsDep,
     user: CurrentUserDep,
     submitted: int | None = None,
     status: str = "",
@@ -116,6 +117,11 @@ async def jobs_page(
     ctx["active_page"] = "jobs"
     ctx["submitted"] = submitted
     ctx["status_counts"] = db.get_status_counts(owner_id=owner_id)
+    # The re-transcribe modal (full page only, not the /jobs/list fragment)
+    # reuses the upload form's option choices.
+    ctx["supported_languages"] = SUPPORTED_LANGUAGES
+    ctx["whisper_models"] = WHISPER_MODELS
+    ctx["settings"] = settings
     return templates.TemplateResponse(request=request, name="jobs.html", context=ctx)
 
 

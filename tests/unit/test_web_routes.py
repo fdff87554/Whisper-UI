@@ -195,6 +195,30 @@ class TestJobsRoutes:
         assert resp.status_code == 200
         assert f'id="job-{job.id}"' in resp.text
 
+    def test_jobs_page_shows_re_transcribe_for_completed_job(self, client, db, filestore):
+        _create_completed_job(db, filestore)
+        resp = client.get("/jobs")
+        assert resp.status_code == 200
+        assert "open-retranscribe" in resp.text
+        assert "重新轉換" in resp.text
+
+    def test_jobs_page_shows_version_badge_for_re_transcribe_version(self, client, db, filestore):
+        root = _create_completed_job(db, filestore)
+        version = Job(
+            filename="meeting.mp3",
+            status=JobStatus.COMPLETED,
+            language="en",
+            source_job_id=root.id,
+        )
+        filestore.save_result(version.id, TranscriptResult(segments=[], language="en", duration=1.0))
+        version.result_path = str(filestore.get_output_dir(version.id) / "result.json")
+        db.insert_job(version)
+
+        resp = client.get("/jobs")
+
+        assert resp.status_code == 200
+        assert "重新轉換版本" in resp.text
+
     def test_jobs_list_hides_download_media_when_reclaimed(self, client, db, filestore):
         """The inline export dropdown in _job_card.html must also gate
         Download Media on media availability — same regression as the
