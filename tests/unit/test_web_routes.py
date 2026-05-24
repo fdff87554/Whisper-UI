@@ -1026,6 +1026,34 @@ class TestUploadPost:
         assert any("upload job inserted" in m and "filename='test.mp3'" in m for m in messages)
         assert any("upload batch finished" in m and "submitted=1" in m for m in messages)
 
+    def test_upload_log_reflects_clamped_flags_not_raw_request(self, client, app, caplog):
+        import logging as _logging
+
+        # Without hf_token / ollama_base_url the posted flags are clamped to
+        # False; the "job inserted" log must report the clamped job.* values,
+        # not the misleading raw request flags.
+        app.state.settings = app.state.settings.model_copy(update={"hf_token": "", "ollama_base_url": ""})
+        with (
+            patch("whisper_ui.web.routes.upload.enqueue_pipeline"),
+            caplog.at_level(_logging.INFO, logger="whisper_ui.web.routes.upload"),
+        ):
+            client.post(
+                "/upload",
+                data={
+                    "language": "zh",
+                    "model_name": "large-v3",
+                    "num_speakers": "0",
+                    "enable_diarization": "true",
+                    "llm_correction_enabled": "true",
+                },
+                files=[("files", ("test.mp3", b"fake audio data", "audio/mpeg"))],
+                follow_redirects=False,
+            )
+
+        inserted = next(r.getMessage() for r in caplog.records if "upload job inserted" in r.getMessage())
+        assert "diarize=False" in inserted
+        assert "llm=False" in inserted
+
     def test_upload_too_large_logs_rejection(self, client, app, caplog):
         import logging as _logging
 

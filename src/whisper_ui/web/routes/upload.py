@@ -191,8 +191,8 @@ async def upload_submit(
             display_name,
             f"{job.duration:.1f}" if job.duration else "unknown",
             model_name,
-            enable_diarization,
-            llm_correction_enabled,
+            job.enable_diarization,
+            job.llm_correction_enabled,
         )
 
         try:
@@ -320,8 +320,8 @@ async def upload_url_submit(
             job.id,
             user.id,
             model_name,
-            enable_diarization,
-            llm_correction_enabled,
+            job.enable_diarization,
+            job.llm_correction_enabled,
         )
 
         try:
