@@ -145,6 +145,15 @@ def test_alice_gets_404_on_bobs_retry(app, db, test_user, bob):
     assert resp.status_code == 404
 
 
+def test_alice_gets_404_on_bobs_re_transcribe(app, db, filestore, test_user, bob):
+    job = _save_completed_job(db, filestore, owner_id=bob.id)
+    client = authed_test_client(app, test_user)
+
+    resp = client.post(f"/jobs/{job.id}/re-transcribe", data={"language": "zh", "model_name": "large-v3"})
+
+    assert resp.status_code == 404
+
+
 def test_alice_gets_404_on_bobs_delete(app, db, filestore, test_user, bob):
     job = _save_completed_job(db, filestore, owner_id=bob.id)
     client = authed_test_client(app, test_user)

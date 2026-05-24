@@ -70,6 +70,17 @@ def _create_failed_job(db, *, source_url: str | None = None) -> Job:
     return job
 
 
+def _completed_upload_job_with_audio(db, filestore, *, filename: str = "meeting.mp3") -> Job:
+    """A COMPLETED upload job with both its source audio and result on disk."""
+    result = TranscriptResult(segments=[], language="zh", duration=60.0)
+    job = Job(filename=filename, status=JobStatus.COMPLETED, language="zh", model_name="large-v3")
+    filestore.save_upload(job.id, filename, b"original audio bytes")
+    job.filepath = str(filestore.get_upload_path(job.id, filename))
+    job.result_path = str(filestore.save_result(job.id, result))
+    db.insert_job(job)
+    return job
+
+
 class TestHealthEndpoint:
     def test_health_returns_ok(self, client):
         resp = client.get("/health")
@@ -353,6 +364,110 @@ class TestJobsRoutes:
         msg = next(r.getMessage() for r in caplog.records if "job retried" in r.getMessage())
         assert job.id in msg
         assert "previous_error=" in msg
+
+    def test_re_transcribe_creates_new_version_and_preserves_original(self, client, db, filestore):
+        src = _completed_upload_job_with_audio(db, filestore)
+        with (
+            patch("whisper_ui.web.routes.jobs.enqueue_pipeline") as mock_enqueue,
+            patch("whisper_ui.web.routes.jobs.get_audio_duration_seconds", return_value=42.0),
+        ):
+            resp = client.post(
+                f"/jobs/{src.id}/re-transcribe",
+                data={"language": "en", "model_name": "medium", "enable_diarization": "true"},
+            )
+
+        assert resp.status_code == 204
+        assert resp.headers.get("hx-trigger") == "refreshJobList"
+        new_job = mock_enqueue.call_args[0][0]
+        # A distinct job carrying the new parameters, linked to the source.
+        assert new_job.id != src.id
+        assert new_job.language == "en"
+        assert new_job.model_name == "medium"
+        assert new_job.enable_diarization is True
+        assert new_job.source_job_id == src.id
+        assert new_job.status == JobStatus.QUEUED
+        # The original transcript is untouched.
+        original = db.get_job(src.id)
+        assert original.status == JobStatus.COMPLETED
+        assert original.result_path == src.result_path
+
+    def test_re_transcribe_copies_audio_to_new_job_dir(self, client, db, filestore):
+        src = _completed_upload_job_with_audio(db, filestore, filename="meeting.mp3")
+        with (
+            patch("whisper_ui.web.routes.jobs.enqueue_pipeline") as mock_enqueue,
+            patch("whisper_ui.web.routes.jobs.get_audio_duration_seconds", return_value=42.0),
+        ):
+            client.post(f"/jobs/{src.id}/re-transcribe", data={"language": "zh", "model_name": "large-v3"})
+
+        new_job = mock_enqueue.call_args[0][0]
+        # New job has its own independent copy; the source copy survives.
+        assert filestore.get_upload_path(new_job.id, "meeting.mp3").exists()
+        assert filestore.get_upload_path(src.id, "meeting.mp3").exists()
+
+    def test_re_transcribe_source_audio_gone_returns_409_without_new_job(self, client, db, filestore):
+        # Completed job whose upload file was reclaimed by retention (never created here).
+        result = TranscriptResult(segments=[], language="zh", duration=60.0)
+        src = Job(filename="gone.mp3", status=JobStatus.COMPLETED, language="zh")
+        src.result_path = str(filestore.save_result(src.id, result))
+        db.insert_job(src)
+        before = db.count_jobs()
+
+        with patch("whisper_ui.web.routes.jobs.enqueue_pipeline") as mock_enqueue:
+            resp = client.post(f"/jobs/{src.id}/re-transcribe", data={"language": "zh", "model_name": "large-v3"})
+
+        assert resp.status_code == 409
+        mock_enqueue.assert_not_called()
+        assert db.count_jobs() == before
+
+    def test_re_transcribe_url_job_skips_copy_and_reenqueues(self, client, db, filestore):
+        result = TranscriptResult(segments=[], language="zh", duration=60.0)
+        src = Job(
+            filename="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            status=JobStatus.COMPLETED,
+            language="zh",
+            source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        )
+        src.result_path = str(filestore.save_result(src.id, result))
+        db.insert_job(src)
+
+        with patch("whisper_ui.web.routes.jobs.enqueue_pipeline") as mock_enqueue:
+            resp = client.post(f"/jobs/{src.id}/re-transcribe", data={"language": "en", "model_name": "medium"})
+
+        assert resp.status_code == 204
+        new_job = mock_enqueue.call_args[0][0]
+        # URL jobs re-download (no media to copy); source_url carries over.
+        assert new_job.source_url == src.source_url
+        assert new_job.source_job_id == src.id
+
+    def test_re_transcribe_rejects_non_completed_job(self, client, db, filestore):
+        src = _create_failed_job(db)
+        resp = client.post(f"/jobs/{src.id}/re-transcribe", data={"language": "zh", "model_name": "large-v3"})
+        assert resp.status_code == 404
+
+    def test_re_transcribe_invalid_model_returns_400(self, client, db, filestore):
+        src = _completed_upload_job_with_audio(db, filestore)
+        resp = client.post(f"/jobs/{src.id}/re-transcribe", data={"language": "zh", "model_name": "not-a-model"})
+        assert resp.status_code == 400
+
+    def test_re_transcribe_enqueue_failure_marks_new_job_failed(self, client, db, filestore):
+        src = _completed_upload_job_with_audio(db, filestore)
+        with (
+            patch(
+                "whisper_ui.web.routes.jobs.enqueue_pipeline",
+                side_effect=Exception("Redis internal: secret/key leak"),
+            ),
+            patch("whisper_ui.web.routes.jobs.get_audio_duration_seconds", return_value=42.0),
+        ):
+            resp = client.post(f"/jobs/{src.id}/re-transcribe", data={"language": "zh", "model_name": "large-v3"})
+
+        assert resp.status_code == 204
+        # The original is untouched; only the new version flips to FAILED with a
+        # generic, leak-free message.
+        assert db.get_job(src.id).status == JobStatus.COMPLETED
+        new_versions = db.list_jobs_by_source(src.id)
+        assert len(new_versions) == 1
+        assert new_versions[0].status == JobStatus.FAILED
+        assert "secret" not in (new_versions[0].error or "")
 
     def test_bulk_retry_requeues_failed_jobs_and_emits_trigger(self, client, db):
         """Two failed jobs → bulk retry → both transition to QUEUED and the
