@@ -25,6 +25,7 @@ import logging
 import re
 import sqlite3
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, Form, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -223,8 +224,6 @@ def _login_error_redirect(request: Request, next_url: str, error: str) -> Respon
     safe_next = _safe_next(next_url)
     target = f"/login?error={error}"
     if safe_next != "/":
-        from urllib.parse import quote
-
         target += f"&next={quote(safe_next)}"
     return _redirect_after_auth(request, target)
 
