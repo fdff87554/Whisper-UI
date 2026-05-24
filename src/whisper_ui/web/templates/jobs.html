@@ -10,7 +10,9 @@
    workflows where the filename is just the video id. #}
 <div class="sticky top-0 z-10 bg-base-100 pt-1 pb-3 mb-4 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 border-b border-base-300">
   <div class="flex flex-wrap gap-2 mb-3" x-data="{ activeFilter: {{ status|tojson }} }">
-    {% set _all_count = total_count %}
+    {# total_count is filtered by the active status, so it can't stand in for
+       the "全部" chip — sum the per-status counts for the true total. #}
+    {% set _all_count = status_counts.values()|sum %}
     {% for value, label in [('', labels.JOBS_FILTER_ALL)] + labels.STATUS_LABELS.items()|list %}
     {%- set _count = _all_count if value == '' else status_counts.get(value, 0) -%}
     <button class="btn btn-sm gap-1.5"

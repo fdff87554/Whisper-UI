@@ -161,6 +161,18 @@ class TestJobsRoutes:
         assert resp.status_code == 200
         assert "job-list-wrapper" in resp.text
 
+    def test_jobs_all_chip_shows_unfiltered_total_when_filtered(self, client, db, filestore):
+        """Finding F5: opening /jobs?status=failed must still show the true
+        total on the 全部 chip, not the failed-only count."""
+        _create_completed_job(db, filestore)
+        _create_failed_job(db)
+
+        resp = client.get("/jobs?status=failed")
+
+        assert resp.status_code == 200
+        # The 全部 chip badge must reflect both jobs, not just the 1 failed.
+        assert '<span class="badge badge-sm">2</span>' in resp.text
+
     def test_jobs_list_fragment_emits_stable_id_for_single_job(self, client, db, filestore):
         """Without a stable wrapper id Idiomorph falls back to positional
         matching, so a new job inserted at the top of the list can morph an
