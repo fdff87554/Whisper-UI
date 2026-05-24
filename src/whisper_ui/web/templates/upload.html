@@ -192,6 +192,7 @@
   <div x-show="tab === 'url'" x-transition.opacity>
     <p class="text-sm opacity-60 mb-3">{{ labels.UPLOAD_URL_DESCRIPTION }}</p>
     <textarea id="upload-url" name="url" rows="4"
+              x-model="urlText"
               placeholder="{{ labels.UPLOAD_URL_PLACEHOLDER }}"
               :disabled="tab !== 'url'"
               class="textarea w-full"></textarea>
@@ -314,21 +315,7 @@
   {# Sticky submit footer — keeps the primary action close to the user's
      cursor regardless of how far they've scrolled (Fitts's Law). The status
      line previews how many files / URLs the current selection will submit. #}
-  <div class="sticky bottom-0 -mx-4 sm:-mx-6 lg:-mx-8 mt-8 bg-base-100/95 backdrop-blur border-t border-base-300 px-4 sm:px-6 lg:px-8 py-3 z-10"
-       x-data="{
-         get statusLine() {
-           if (this.tab === 'url') {
-             const urlInput = this.$root.querySelector('textarea[name=&quot;url&quot;]');
-             const lines = urlInput ? urlInput.value.split('\\n').map(s => s.trim()).filter(Boolean) : [];
-             if (!lines.length) return '{{ labels.UPLOAD_SUBMIT_STATUS_EMPTY }}';
-             return '{{ labels.UPLOAD_SUBMIT_STATUS_URLS }}'.replace('{count}', lines.length);
-           }
-           if (this.selectedFiles && this.selectedFiles.length) {
-             return '{{ labels.UPLOAD_SUBMIT_STATUS_FILES }}'.replace('{count}', this.selectedFiles.length);
-           }
-           return '{{ labels.UPLOAD_SUBMIT_STATUS_EMPTY }}';
-         }
-       }">
+  <div class="sticky bottom-0 -mx-4 sm:-mx-6 lg:-mx-8 mt-8 bg-base-100/95 backdrop-blur border-t border-base-300 px-4 sm:px-6 lg:px-8 py-3 z-10">
     <div class="flex items-center gap-3">
       <span class="text-sm opacity-70 flex-1 min-w-0 truncate" x-text="statusLine"></span>
       <button type="submit" class="btn btn-primary btn-lg gap-2" :disabled="uploading">
@@ -355,9 +342,21 @@ function uploadForm() {
     uploading: false,
     progress: 0,
     selectedFiles: [],
+    urlText: '',
     activePreset: null,
     presetsTouched: false,
     _applyingPreset: false,
+    get statusLine() {
+      if (this.tab === 'url') {
+        const lines = this.urlText.split('\n').map(s => s.trim()).filter(Boolean);
+        if (!lines.length) return '{{ labels.UPLOAD_SUBMIT_STATUS_EMPTY }}';
+        return '{{ labels.UPLOAD_SUBMIT_STATUS_URLS }}'.replace('{count}', lines.length);
+      }
+      if (this.selectedFiles && this.selectedFiles.length) {
+        return '{{ labels.UPLOAD_SUBMIT_STATUS_FILES }}'.replace('{count}', this.selectedFiles.length);
+      }
+      return '{{ labels.UPLOAD_SUBMIT_STATUS_EMPTY }}';
+    },
     init() {
       // Switching source tab clears any pending selection so the sticky
       // footer count and the disabled-but-still-populated input can't go
