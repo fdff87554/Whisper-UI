@@ -234,14 +234,22 @@
   })[c]);
   const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   window.whisperHighlight = function(text, query) {
-    const escaped = escapeHtml(text);
-    if (!query) return escaped;
+    if (!query) return escapeHtml(text);
     const q = String(query).trim();
-    if (!q) return escaped;
+    if (!q) return escapeHtml(text);
     try {
-      return escaped.replace(new RegExp(escapeRegex(q), 'gi'), (m) => '<mark>' + m + '</mark>');
+      // Split the RAW text on the query, then escape each part. Escaping
+      // before the regex (the previous approach) corrupted entities: a
+      // search for "amp" inside text containing "&" would match the "amp"
+      // of "&amp;" and produce "&<mark>amp</mark>;". Splitting first keeps
+      // the match aligned with the source text; every part — including the
+      // matched run — is still escaped, so the output stays XSS-safe.
+      const parts = text.split(new RegExp('(' + escapeRegex(q) + ')', 'gi'));
+      return parts
+        .map((part, i) => (i % 2 === 0 ? escapeHtml(part) : '<mark>' + escapeHtml(part) + '</mark>'))
+        .join('');
     } catch (_) {
-      return escaped;
+      return escapeHtml(text);
     }
   };
 })();
