@@ -530,6 +530,11 @@ class TestViewerRoutes:
         assert resp.status_code == 200
         assert "已停用即時搜尋" in resp.text
         assert 'placeholder="輸入關鍵字篩選' not in resp.text
+        # Search is disabled for performance, so the per-segment data-raw copy
+        # and x-html highlight eval must be skipped — but the text still renders
+        # server-side so it stays visible.
+        assert "data-raw=" not in resp.text
+        assert ">seg0</span>" in resp.text
 
     def test_viewer_keeps_search_under_limit(self, client, db, filestore):
         from whisper_ui.core.constants import VIEWER_SEARCH_SEGMENT_LIMIT
@@ -606,6 +611,8 @@ class TestViewerRoutes:
 
         assert resp.status_code == 200
         assert f">{marker}</span>" in resp.text
+        # Search is enabled under the limit, so the highlight path is wired up.
+        assert "data-raw=" in resp.text
 
     def test_viewer_segment_copy_button_is_keyboard_reachable(self, client, db, filestore):
         """Regression for WCAG 2.1.1 + 1.4.13 (plan §4 P0): the per-segment

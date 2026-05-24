@@ -180,9 +180,13 @@
         {% endif %}
         {#- Text renders server-side so it survives Alpine/JS failure; x-html
             re-renders it (with search highlighting) only when Alpine is alive.
-            Reading from data-raw avoids tojson's quotes breaking the attribute. -#}
-        <span data-raw="{{ seg.text|e }}"
-              x-html="window.whisperHighlight($el.dataset.raw, search)">{{ seg.text }}</span>
+            Gated on the same search_disabled flag as the row above (line ~168):
+            a huge transcript has search turned off for performance, so there is
+            nothing to highlight and the per-segment data-raw copy + x-html eval
+            would be wasted work. Reading from data-raw also avoids tojson's
+            quotes breaking the attribute. -#}
+        <span {% if not search_disabled %}data-raw="{{ seg.text|e }}"
+              x-html="window.whisperHighlight($el.dataset.raw, search)"{% endif %}>{{ seg.text }}</span>
       </div>
       <button class="btn btn-ghost btn-xs opacity-60 hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 transition-opacity flex-shrink-0"
               type="button"
