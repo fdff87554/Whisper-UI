@@ -349,7 +349,7 @@ const UPLOAD_PRESETS = {
 
 function uploadForm() {
   return {
-    tab: 'files',
+    tab: '{{ initial_tab|default("files") }}',
     uploading: false,
     progress: 0,
     selectedFiles: [],

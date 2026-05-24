@@ -124,6 +124,26 @@ class TestUploadRoutes:
         assert resp.status_code == 200
         assert "上傳音訊" in resp.text
 
+    def test_upload_page_defaults_to_files_tab(self, client):
+        resp = client.get("/upload")
+        assert resp.status_code == 200
+        assert "tab: 'files'" in resp.text
+
+    def test_upload_page_selects_tab_from_mode_query(self, client):
+        """Dashboard quick-action /upload?mode=folder|url must land the user
+        on the matching tab (plan §B Finding F2)."""
+        for mode in ("folder", "url"):
+            resp = client.get(f"/upload?mode={mode}")
+            assert resp.status_code == 200
+            assert f"tab: '{mode}'" in resp.text
+
+    def test_upload_page_falls_back_to_files_for_unknown_mode(self, client):
+        """An unrecognised mode is a UX hint, not a hard error — fall back
+        to the files tab rather than 4xx."""
+        resp = client.get("/upload?mode=bogus")
+        assert resp.status_code == 200
+        assert "tab: 'files'" in resp.text
+
 
 class TestJobsRoutes:
     def test_jobs_page_empty(self, client):
