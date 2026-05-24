@@ -24,6 +24,9 @@ from whisper_ui.worker.stage_tasks import (
 def _make_runtime(redis_client) -> WorkerRuntime:
     settings = MagicMock()
     settings.ollama_base_url = "http://ollama.internal:11434"
+    # Mirror the real Settings.llm_correction_available property (derived from
+    # ollama_base_url) so is_llm_active gates on a bool, not a MagicMock.
+    settings.llm_correction_available = True
     settings.device = "cpu"
     settings.compute_type = "int8"
     settings.youtube_max_duration = 3600
@@ -61,6 +64,7 @@ def test_pick_stage_weights_ignores_llm_when_ollama_url_is_blank():
     job = Job(llm_correction_enabled=True)
     runtime = _make_runtime(fakeredis.FakeRedis())
     runtime.settings.ollama_base_url = ""
+    runtime.settings.llm_correction_available = False
     assert pick_stage_weights(job, runtime) == build_stage_weights(has_download=False, has_llm=False)
 
 

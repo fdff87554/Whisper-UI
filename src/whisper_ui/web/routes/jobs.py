@@ -380,9 +380,12 @@ async def re_transcribe_job(
         language=language,
         model_name=model_name,
         num_speakers=num_speakers if num_speakers > 0 else None,
-        enable_diarization=enable_diarization,
+        # Clamp opt-in flags to deployment availability so the new version's
+        # persisted flags are honest even if the source job (or a tampered
+        # request) carries flags this deployment cannot run.
+        enable_diarization=enable_diarization and settings.diarization_available,
         convert_to_traditional=convert_to_traditional,
-        llm_correction_enabled=llm_correction_enabled,
+        llm_correction_enabled=llm_correction_enabled and settings.llm_correction_available,
         source_url=src.source_url,
         owner_id=user.id,
         source_job_id=root_id,

@@ -332,6 +332,12 @@ function batchDownloadDialog() {
   }
 }
 
+// Deployment availability mirrors the disabled state on the modal toggles,
+// so the pre-filled state never enables a feature this deployment cannot run
+// (the backend clamps too; this keeps the UI honest).
+const RT_HF_AVAILABLE = {{ 'true' if settings.hf_token else 'false' }};
+const RT_OLLAMA_AVAILABLE = {{ 'true' if settings.ollama_base_url else 'false' }};
+
 function retranscribeDialog() {
   return {
     jobId: '',
@@ -347,9 +353,9 @@ function retranscribeDialog() {
       this.language = detail.language;
       this.modelName = detail.model;
       this.numSpeakers = detail.numSpeakers || 0;
-      this.diarization = !!detail.diarization;
+      this.diarization = !!detail.diarization && RT_HF_AVAILABLE;
       this.traditional = !!detail.traditional;
-      this.llm = !!detail.llm;
+      this.llm = !!detail.llm && RT_OLLAMA_AVAILABLE;
       this.submitting = false;
       this.$refs.rtDialog.showModal();
     },

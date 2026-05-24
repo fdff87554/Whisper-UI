@@ -389,7 +389,9 @@ class TestJobsRoutes:
         assert job.id in msg
         assert "previous_error=" in msg
 
-    def test_re_transcribe_creates_new_version_and_preserves_original(self, client, db, filestore):
+    def test_re_transcribe_creates_new_version_and_preserves_original(self, client, db, filestore, app):
+        # hf_token present so the diarization flag passes through un-clamped.
+        app.state.settings = app.state.settings.model_copy(update={"hf_token": "hf-test-not-real"})
         src = _completed_upload_job_with_audio(db, filestore)
         with (
             patch("whisper_ui.web.routes.jobs.enqueue_pipeline") as mock_enqueue,
@@ -414,6 +416,23 @@ class TestJobsRoutes:
         original = db.get_job(src.id)
         assert original.status == JobStatus.COMPLETED
         assert original.result_path == src.result_path
+
+    def test_re_transcribe_clamps_diarization_when_hf_token_absent(self, client, db, filestore, app):
+        # Force no hf_token so a posted diarization flag must be clamped to
+        # False (honest persisted flag, no no-op sub-job).
+        app.state.settings = app.state.settings.model_copy(update={"hf_token": ""})
+        src = _completed_upload_job_with_audio(db, filestore)
+        with (
+            patch("whisper_ui.web.routes.jobs.enqueue_pipeline") as mock_enqueue,
+            patch("whisper_ui.web.routes.jobs.get_audio_duration_seconds", return_value=42.0),
+        ):
+            resp = client.post(
+                f"/jobs/{src.id}/re-transcribe",
+                data={"language": "zh", "model_name": "large-v3", "enable_diarization": "true"},
+            )
+
+        assert resp.status_code == 204
+        assert mock_enqueue.call_args[0][0].enable_diarization is False
 
     def test_re_transcribe_copies_audio_to_new_job_dir(self, client, db, filestore):
         src = _completed_upload_job_with_audio(db, filestore, filename="meeting.mp3")
@@ -895,6 +914,50 @@ class TestUploadPost:
             resp = self._upload(client)
         assert resp.status_code == 303
         assert "/jobs?submitted=" in resp.headers["location"]
+
+    def test_upload_clamps_diarization_and_llm_when_unavailable(self, client, db, app):
+        # Force neither hf_token nor ollama_base_url, so both opt-in flags must
+        # be clamped to False at persistence even when posted true.
+        app.state.settings = app.state.settings.model_copy(update={"hf_token": "", "ollama_base_url": ""})
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline") as mock_enqueue:
+            resp = client.post(
+                "/upload",
+                data={
+                    "language": "zh",
+                    "model_name": "large-v3",
+                    "num_speakers": "0",
+                    "enable_diarization": "true",
+                    "llm_correction_enabled": "true",
+                },
+                files=[("files", ("test.mp3", b"fake audio data", "audio/mpeg"))],
+                follow_redirects=False,
+            )
+        assert resp.status_code == 303
+        job = mock_enqueue.call_args[0][0]
+        assert job.enable_diarization is False
+        assert job.llm_correction_enabled is False
+
+    def test_upload_passes_through_flags_when_services_available(self, client, db, app):
+        app.state.settings = app.state.settings.model_copy(
+            update={"hf_token": "hf-test-not-real", "ollama_base_url": "http://ollama:11434"}
+        )
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline") as mock_enqueue:
+            resp = client.post(
+                "/upload",
+                data={
+                    "language": "zh",
+                    "model_name": "large-v3",
+                    "num_speakers": "0",
+                    "enable_diarization": "true",
+                    "llm_correction_enabled": "true",
+                },
+                files=[("files", ("test.mp3", b"fake audio data", "audio/mpeg"))],
+                follow_redirects=False,
+            )
+        assert resp.status_code == 303
+        job = mock_enqueue.call_args[0][0]
+        assert job.enable_diarization is True
+        assert job.llm_correction_enabled is True
 
     def test_upload_no_file_redirects(self, client):
         resp = client.post("/upload", data={"language": "zh"}, follow_redirects=False)

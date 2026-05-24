@@ -182,6 +182,26 @@ class Settings(BaseSettings):
         return v
 
     @property
+    def diarization_available(self) -> bool:
+        """Whether speaker diarization can run on this deployment.
+
+        Diarization needs a HuggingFace token to fetch the pyannote model.
+        Routes clamp ``enable_diarization`` against this so a job is never
+        persisted (or a diarize sub-job enqueued) for a feature the stage
+        would only skip — see ``DiarizeStage.execute``.
+        """
+        return bool(self.hf_token)
+
+    @property
+    def llm_correction_available(self) -> bool:
+        """Whether the LLM correction stage can run on this deployment.
+
+        Single source of truth for the "Ollama configured" check, consumed
+        by both the route-level flag clamp and ``is_llm_active``.
+        """
+        return bool(self.ollama_base_url)
+
+    @property
     def stale_job_timeout(self) -> int:
         """Threshold (seconds) after which a PROCESSING job is considered stale.
 

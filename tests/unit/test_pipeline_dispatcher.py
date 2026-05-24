@@ -43,6 +43,9 @@ def _build_settings(*, ollama: str = "http://ollama.internal:11434") -> MagicMoc
     settings = MagicMock()
     settings.batch_size = 16
     settings.ollama_base_url = ollama
+    # Mirror the real Settings.llm_correction_available property so is_llm_active
+    # gates on a concrete bool rather than a truthy MagicMock attribute.
+    settings.llm_correction_available = bool(ollama)
     settings.job_timeout_default = 3600
     settings.job_timeout_floor = 300
     settings.job_timeout_max = 14_400
