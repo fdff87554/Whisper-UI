@@ -178,7 +178,11 @@
           [{{ seg.speaker }}]
         </strong>
         {% endif %}
-        <span x-html="window.whisperHighlight({{ seg.text|tojson }}, search)"></span>
+        {#- Text renders server-side so it survives Alpine/JS failure; x-html
+            re-renders it (with search highlighting) only when Alpine is alive.
+            Reading from data-raw avoids tojson's quotes breaking the attribute. -#}
+        <span data-raw="{{ seg.text|e }}"
+              x-html="window.whisperHighlight($el.dataset.raw, search)">{{ seg.text }}</span>
       </div>
       <button class="btn btn-ghost btn-xs opacity-60 hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 transition-opacity flex-shrink-0"
               type="button"
