@@ -174,10 +174,6 @@ class LLMCorrectionStage:
         segments = transcript.segments
         chunks = self._build_chunks(segments)
         total = len(chunks)
-        if total == 0:
-            if on_progress:
-                on_progress(1.0, LLM_CORRECTION_SKIPPED)
-            return context
 
         client = self._get_client()
         failed_chunks: list[int] = []

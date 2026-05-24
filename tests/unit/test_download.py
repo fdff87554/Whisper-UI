@@ -122,6 +122,17 @@ class TestDownloadStageWithMock:
             with pytest.raises(DownloadError, match="Failed to download"):
                 stage.execute(context)
 
+    def test_restricts_yt_dlp_to_youtube_extractor(self, context, download_dir):
+        mock_ydl = self._make_mock_ydl(download_dir)
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl
+
+        with patch.dict("sys.modules", {"yt_dlp": mock_module}):
+            DownloadStage().execute(context)
+
+        ydl_opts = mock_module.YoutubeDL.call_args.args[0]
+        assert ydl_opts["allowed_extractors"] == ["youtube"]
+
     def test_cleanup_is_noop(self):
         stage = DownloadStage()
         stage.cleanup()  # Should not raise
