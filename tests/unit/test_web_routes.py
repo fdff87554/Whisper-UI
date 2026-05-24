@@ -530,6 +530,11 @@ class TestViewerRoutes:
         assert resp.status_code == 200
         assert "已停用即時搜尋" in resp.text
         assert 'placeholder="輸入關鍵字篩選' not in resp.text
+        # Search is disabled for performance, so the per-segment data-raw copy
+        # and x-html highlight eval must be skipped — but the text still renders
+        # server-side so it stays visible.
+        assert "data-raw=" not in resp.text
+        assert ">seg0</span>" in resp.text
 
     def test_viewer_keeps_search_under_limit(self, client, db, filestore):
         from whisper_ui.core.constants import VIEWER_SEARCH_SEGMENT_LIMIT
@@ -581,6 +586,33 @@ class TestViewerRoutes:
         resp = client.get(f"/viewer/{job.id}")
         assert resp.status_code == 200
         assert "下載影片" not in resp.text
+
+    def test_viewer_renders_segment_text_server_side(self, client, db, filestore):
+        """Regression: transcript text must render as server-side element content,
+        not only inside a client-side ``x-html`` attribute.
+
+        v2.3.0 rendered text via ``x-html="whisperHighlight({{ seg.text|tojson }},
+        ...)"``. ``tojson`` emits a double-quoted JSON string, which closed the
+        double-quoted attribute early and left the expression malformed, so the
+        text never rendered whenever Alpine evaluated it. The text must appear as
+        visible element body, independent of JS."""
+        marker = "逐字稿可見內容XYZ"
+        result = TranscriptResult(
+            segments=[Segment(start=0.0, end=1.0, text=marker, speaker="SPEAKER_00")],
+            language="zh",
+            duration=1.0,
+        )
+        job = Job(filename="render.mp3", status=JobStatus.COMPLETED, language="zh")
+        result_path = filestore.save_result(job.id, result)
+        job.result_path = str(result_path)
+        db.insert_job(job)
+
+        resp = client.get(f"/viewer/{job.id}")
+
+        assert resp.status_code == 200
+        assert f">{marker}</span>" in resp.text
+        # Search is enabled under the limit, so the highlight path is wired up.
+        assert "data-raw=" in resp.text
 
     def test_viewer_segment_copy_button_is_keyboard_reachable(self, client, db, filestore):
         """Regression for WCAG 2.1.1 + 1.4.13 (plan §4 P0): the per-segment
