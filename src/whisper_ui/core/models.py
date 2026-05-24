@@ -76,6 +76,11 @@ class Job:
     batch_id: str | None = None
     source_url: str | None = None
     owner_id: int | None = None
+    # Points at the root job whose uploaded audio this job was created from
+    # when re-transcribing with different parameters. None for jobs created
+    # by a direct upload. Used only to group transcript versions in the UI;
+    # it carries no foreign-key constraint and never gates deletion.
+    source_job_id: str | None = None
 
     def touch(self) -> None:
         self.updated_at = datetime.now(UTC).isoformat()

@@ -49,6 +49,7 @@ _JOB_COLUMNS = [
     "batch_id",
     "source_url",
     "owner_id",
+    "source_job_id",
 ]
 
 
@@ -272,6 +273,26 @@ class JobDatabase:
             rows = self._conn.execute(
                 "SELECT * FROM jobs WHERE batch_id = ? ORDER BY created_at ASC",
                 (batch_id,),
+            ).fetchall()
+        return [_row_to_job(r) for r in rows]
+
+    def list_jobs_by_source(self, source_job_id: str, *, owner_id: int | None = None) -> list[Job]:
+        """Return every re-transcribe version sharing ``source_job_id``, oldest first.
+
+        Only returns the version jobs (those whose ``source_job_id`` column
+        matches), not the root job itself — callers that need the root fetch
+        it via :meth:`get_job`. Pass ``owner_id`` to scope to one user, same
+        semantics as :meth:`list_jobs_by_batch`.
+        """
+        if owner_id is not None:
+            rows = self._conn.execute(
+                "SELECT * FROM jobs WHERE source_job_id = ? AND owner_id = ? ORDER BY created_at ASC",
+                (source_job_id, owner_id),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM jobs WHERE source_job_id = ? ORDER BY created_at ASC",
+                (source_job_id,),
             ).fetchall()
         return [_row_to_job(r) for r in rows]
 

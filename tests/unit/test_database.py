@@ -722,3 +722,105 @@ def test_list_terminal_job_ids_older_than_returns_empty_when_threshold_in_past(d
     db.insert_job(Job(filename="f.mp3", filepath="/tmp/f.mp3", status=JobStatus.COMPLETED))
     far_past = (datetime.now(UTC) - timedelta(days=365)).isoformat()
     assert db.list_terminal_job_ids_older_than(far_past) == []
+
+
+def test_insert_and_get_preserves_source_job_id(db: JobDatabase):
+    job = Job(filename="v2.mp3", filepath="/tmp/v2.mp3", source_job_id="root-abc")
+    db.insert_job(job)
+    fetched = db.get_job(job.id)
+    assert fetched is not None
+    assert fetched.source_job_id == "root-abc"
+
+
+def test_source_job_id_defaults_to_none_for_direct_uploads(db: JobDatabase):
+    job = Job(filename="root.mp3", filepath="/tmp/root.mp3")
+    db.insert_job(job)
+    fetched = db.get_job(job.id)
+    assert fetched is not None
+    assert fetched.source_job_id is None
+
+
+def test_list_jobs_by_source_returns_versions_oldest_first(db: JobDatabase):
+    root = Job(filename="root.mp3", filepath="/tmp/root.mp3")
+    db.insert_job(root)
+    older = Job(filename="v1.mp3", filepath="/tmp/v1.mp3", source_job_id=root.id)
+    newer = Job(filename="v2.mp3", filepath="/tmp/v2.mp3", source_job_id=root.id)
+    db.insert_job(older)
+    db.insert_job(newer)
+    # created_at is set at construction; force a deterministic ordering.
+    older.created_at = "2024-01-01T00:00:00+00:00"
+    newer.created_at = "2024-02-01T00:00:00+00:00"
+    db.update_job(older)
+    db.update_job(newer)
+
+    versions = db.list_jobs_by_source(root.id)
+
+    # Only the version jobs are returned, not the root, and oldest first.
+    assert [j.id for j in versions] == [older.id, newer.id]
+
+
+def test_list_jobs_by_source_respects_owner_filter(db: JobDatabase):
+    root = Job(filename="root.mp3", filepath="/tmp/root.mp3", owner_id=1)
+    db.insert_job(root)
+    mine = Job(filename="mine.mp3", filepath="/tmp/mine.mp3", source_job_id=root.id, owner_id=1)
+    theirs = Job(filename="theirs.mp3", filepath="/tmp/theirs.mp3", source_job_id=root.id, owner_id=2)
+    db.insert_job(mine)
+    db.insert_job(theirs)
+
+    versions = db.list_jobs_by_source(root.id, owner_id=1)
+
+    assert [j.id for j in versions] == [mine.id]
+
+
+def test_legacy_db_without_source_job_id_column_upgrades(tmp_dir: Path):
+    """A deployment predating versioning has no source_job_id column. After
+    init_db migrates the schema, the column exists, legacy rows read as None,
+    and new inserts persist the value.
+    """
+    db_path = tmp_dir / "legacy_source.db"
+    legacy_schema = """
+    CREATE TABLE IF NOT EXISTS jobs (
+        id TEXT PRIMARY KEY,
+        filename TEXT NOT NULL,
+        filepath TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        progress REAL NOT NULL DEFAULT 0.0,
+        progress_message TEXT DEFAULT '',
+        language TEXT NOT NULL DEFAULT 'zh',
+        model_name TEXT NOT NULL DEFAULT 'large-v3',
+        num_speakers INTEGER,
+        enable_diarization INTEGER NOT NULL DEFAULT 1,
+        convert_to_traditional INTEGER NOT NULL DEFAULT 1,
+        llm_correction_enabled INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        error TEXT,
+        result_path TEXT,
+        duration REAL,
+        batch_id TEXT,
+        source_url TEXT,
+        owner_id INTEGER
+    );
+    """
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(legacy_schema)
+    conn.execute(
+        "INSERT INTO jobs (id, filename, filepath, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        ("legacy-3", "old.mp3", "/tmp/old.mp3", "2024-01-01T00:00:00+00:00", "2024-01-01T00:00:00+00:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    database = JobDatabase(db_path)
+    try:
+        legacy = database.get_job("legacy-3")
+        assert legacy is not None
+        assert legacy.source_job_id is None
+
+        version = Job(filename="v.mp3", filepath="/tmp/v.mp3", source_job_id="legacy-3")
+        database.insert_job(version)
+        fetched = database.get_job(version.id)
+        assert fetched is not None
+        assert fetched.source_job_id == "legacy-3"
+    finally:
+        database.close()
