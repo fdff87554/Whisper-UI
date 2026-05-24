@@ -7,6 +7,28 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-05-24
+
+### Fixed
+
+- Viewer transcript text no longer disappears. v2.3.0 rendered each
+  segment's text client-side via
+  `x-html="window.whisperHighlight({{ seg.text|tojson }}, search)"`;
+  `tojson` emits a double-quoted JSON string, which closed the
+  double-quoted attribute early and left the expression malformed, so
+  the text never rendered while timestamps and speaker labels (rendered
+  server-side) stayed visible. Text now renders server-side as element
+  content — visible even if Alpine/JS fails — and `x-html` only
+  re-renders it (with `<mark>` search highlighting) when Alpine is alive.
+
+### Changed
+
+- Viewer skips the per-segment `data-raw` copy and `x-html` highlight
+  markup for search-disabled large transcripts (> `VIEWER_SEARCH_SEGMENT_LIMIT`
+  segments), where search — and therefore highlighting — is already off,
+  avoiding redundant client-side work and a duplicate copy of each segment's
+  text.
+
 ## [2.3.0] - 2026-05-24
 
 ### Added
