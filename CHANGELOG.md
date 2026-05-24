@@ -7,6 +7,72 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- v2 UI redesign across Login, Dashboard, Upload, Jobs, and Viewer
+  driven by the Claude Design handoff bundle and the evaluation
+  report in the PR description. Visual language (OKLCH palette,
+  Noto Sans TC, 8 px radii, status colors) is preserved; only
+  structure and interaction change.
+  - Dashboard: time-aware greeting, hero in-flight tracker with
+    stage pill row and ETA, quick-action grid (檔案 / 資料夾 /
+    YouTube), 7-day completed sparkline, first-run onboarding.
+  - Upload: scene presets (會議 / Podcast / 訪談 / 演講課程) that
+    one-tap configure the form, basic / advanced split with InfoTip
+    tooltips and an "已啟用 N 項" advanced summary, sticky submit
+    footer.
+  - Jobs: sticky filter header with per-status chip counts, search
+    box now covers source URL, bulk select via checkbox + floating
+    action bar with retry / delete / export, processing badge
+    pulses for non-color cue.
+  - Viewer: per-segment 複製此段 buttons are keyboard-accessible
+    (WCAG 2.1.1, 1.4.13); speaker labels gain a glyph (●▲■◆★✦◉♦)
+    as a non-color cue (WCAG 1.4.1); `/`, ↑/↓, c, Esc keyboard
+    shortcuts with discoverable hint panel; search matches
+    highlighted via `<mark>`.
+  - Login: show/hide password toggle (icon_eye / icon_eye_off
+    Lucide macros added). Register bootstrap mode now renders a
+    warning banner so first-run admin creation is unmissable.
+  - Sidebar: bundled waveform logo mark (assets/logo-mark.svg)
+    sits next to the existing "Whisper UI" wordmark. The mark is
+    invented for the bundle, not an official brand asset; the
+    text wordmark remains canonical.
+- `POST /jobs/bulk/{action}` endpoint (action ∈ retry / delete /
+  export). Per-job ownership enforced; partial failures surfaced
+  via HX-Trigger-After-Settle `bulkPartial` / `bulkComplete`.
+- `JobDatabase.count_completed_by_day(days, owner_id)` for the
+  dashboard sparkline.
+- Upload result toast now persists across one page reload via
+  localStorage (`whisper-ui-upload-flash`, 60-second TTL).
+
+### Changed
+
+- `templates/_dashboard_active.html` now renders stage indicator
+  derived from the existing progress message. Hash field set
+  written by `RedisProgressReporter` is unchanged.
+- `JOBS_SEARCH_PLACEHOLDER` updated to mention 網址 since the
+  search now matches source URLs.
+
+### Deploy notes
+
+- **Docker deployments do not require any extra step.** The CSS
+  rebuild is handled by `docker/Dockerfile.frontend` Stage 1
+  (`node:24-alpine` runs `npx @tailwindcss/cli --minify` and the
+  output is copied into the Python runtime image); the
+  development compose file ships a `css-watcher` sidecar that
+  rebuilds on file change. Both paths pick up the new
+  `.status-pulse` keyframe and v2 utility classes automatically.
+- **Bare-metal deployments** (running `uvicorn whisper_ui.web.app`
+  without Docker) need to run `mise run css` once after pulling
+  to refresh `src/whisper_ui/web/static/style.css`. The artifact
+  is gitignored; `mise run css:watch` keeps it live during local
+  development. See CONTRIBUTING.md for the full local non-Docker
+  workflow.
+- No backend contract changes: form field names, status enum
+  values, URL paths, htmx polling structure, and theme strings
+  are all preserved. See evaluation report §6 for the full
+  "do-not-touch" list.
+
 ## [2.2.0] - 2026-05-22
 
 ### Added

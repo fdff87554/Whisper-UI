@@ -62,8 +62,15 @@ async def _stream_to_file(upload: UploadFile, dest: Path, max_size: int) -> bool
     return True
 
 
+_UPLOAD_TABS = frozenset({"files", "folder", "url"})
+
+
 @router.get("/upload", response_class=HTMLResponse)
-async def upload_page(request: Request, settings: SettingsDep, user: CurrentUserDep):
+async def upload_page(request: Request, settings: SettingsDep, user: CurrentUserDep, mode: str = "files"):
+    # `mode` is a UX hint from the dashboard quick-action cards
+    # (/upload?mode=folder|url), not a security boundary — an unknown
+    # value simply falls back to the default files tab.
+    initial_tab = mode if mode in _UPLOAD_TABS else "files"
     return templates.TemplateResponse(
         request=request,
         name="upload.html",
@@ -73,6 +80,7 @@ async def upload_page(request: Request, settings: SettingsDep, user: CurrentUser
             "supported_extensions": sorted(SUPPORTED_EXTENSIONS),
             "supported_languages": SUPPORTED_LANGUAGES,
             "whisper_models": WHISPER_MODELS,
+            "initial_tab": initial_tab,
         },
     )
 

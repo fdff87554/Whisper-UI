@@ -47,9 +47,63 @@
       @htmx:config-request="if (tab === 'url') { $event.detail.path = '/upload/url' }"
       @htmx:xhr:progress.window="onProgress($event)"
       @htmx:before-request="uploading = true"
-      @htmx:after-request="uploading = false; progress = 0">
+      @htmx:after-request="uploading = false; progress = 0"
+      @input="markCustomised($event)"
+      @change="markCustomised($event)">
 
   <div id="upload-feedback"></div>
+
+  {# Scene presets — one-tap configure of the basic + advanced controls. #}
+  <section class="mb-6" aria-label="{{ labels.UPLOAD_PRESET_SECTION }}">
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="text-sm font-medium opacity-80">{{ labels.UPLOAD_PRESET_SECTION }}</h2>
+      <span class="text-xs opacity-60"
+            x-show="activePreset === null && presetsTouched"
+            x-cloak>{{ labels.UPLOAD_PRESET_CUSTOM }}</span>
+    </div>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <button type="button"
+              class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary"
+              :class="activePreset === 'meeting' ? 'border-primary' : 'border-base-300'"
+              :aria-pressed="(activePreset === 'meeting').toString()"
+              @click="applyPreset('meeting')">
+        <div class="card-body p-3">
+          <div class="text-sm font-medium">{{ labels.UPLOAD_PRESET_MEETING }}</div>
+          <div class="text-xs opacity-60">{{ labels.UPLOAD_PRESET_MEETING_DESC }}</div>
+        </div>
+      </button>
+      <button type="button"
+              class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary"
+              :class="activePreset === 'podcast' ? 'border-primary' : 'border-base-300'"
+              :aria-pressed="(activePreset === 'podcast').toString()"
+              @click="applyPreset('podcast')">
+        <div class="card-body p-3">
+          <div class="text-sm font-medium">{{ labels.UPLOAD_PRESET_PODCAST }}</div>
+          <div class="text-xs opacity-60">{{ labels.UPLOAD_PRESET_PODCAST_DESC }}</div>
+        </div>
+      </button>
+      <button type="button"
+              class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary"
+              :class="activePreset === 'interview' ? 'border-primary' : 'border-base-300'"
+              :aria-pressed="(activePreset === 'interview').toString()"
+              @click="applyPreset('interview')">
+        <div class="card-body p-3">
+          <div class="text-sm font-medium">{{ labels.UPLOAD_PRESET_INTERVIEW }}</div>
+          <div class="text-xs opacity-60">{{ labels.UPLOAD_PRESET_INTERVIEW_DESC }}</div>
+        </div>
+      </button>
+      <button type="button"
+              class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary"
+              :class="activePreset === 'lecture' ? 'border-primary' : 'border-base-300'"
+              :aria-pressed="(activePreset === 'lecture').toString()"
+              @click="applyPreset('lecture')">
+        <div class="card-body p-3">
+          <div class="text-sm font-medium">{{ labels.UPLOAD_PRESET_LECTURE }}</div>
+          <div class="text-xs opacity-60">{{ labels.UPLOAD_PRESET_LECTURE_DESC }}</div>
+        </div>
+      </button>
+    </div>
+  </section>
 
   {# Upload progress overlay #}
   <template x-if="uploading">
@@ -104,7 +158,7 @@
              accept="{{ supported_extensions|join(',') }}"
              :disabled="tab !== 'files'"
              x-ref="fileInput"
-             @change="updateFileList()"
+             @change="updateFileList($event)"
              class="hidden">
     </div>
     {# File preview list #}
@@ -129,6 +183,8 @@
     <label for="upload-folder" class="btn btn-outline btn-sm">{{ labels.UPLOAD_CHOOSE_FOLDER }}</label>
     <input type="file" id="upload-folder" name="files" webkitdirectory
            :disabled="tab !== 'folder'"
+           x-ref="folderInput"
+           @change="updateFileList($event)"
            class="hidden">
   </div>
 
@@ -136,6 +192,7 @@
   <div x-show="tab === 'url'" x-transition.opacity>
     <p class="text-sm opacity-60 mb-3">{{ labels.UPLOAD_URL_DESCRIPTION }}</p>
     <textarea id="upload-url" name="url" rows="4"
+              x-model="urlText"
               placeholder="{{ labels.UPLOAD_URL_PLACEHOLDER }}"
               :disabled="tab !== 'url'"
               class="textarea w-full"></textarea>
@@ -143,8 +200,10 @@
   </div>
 
   {# Settings #}
+  {# Basic settings — always visible, the two controls every user adjusts. #}
   <section class="mt-8 pt-6 border-t border-base-300">
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+    <h2 class="text-sm font-medium opacity-80 mb-3">{{ labels.UPLOAD_SECTION_BASIC }}</h2>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
       <fieldset class="fieldset w-full">
         <legend class="fieldset-legend text-sm">{{ labels.UPLOAD_LANGUAGE }}</legend>
         <select name="language" class="select w-full">
@@ -164,23 +223,43 @@
         </select>
       </fieldset>
     </div>
+  </section>
 
-    <div class="space-y-3">
-      <div class="fieldset"
-           x-data="{ diarEnabled: {{ 'true' if settings.hf_token else 'false' }} }">
+  {# Advanced settings — collapsed by default. The "已啟用 N 項" pill is a
+     summary so users never have to expand the panel just to see whether
+     diarization / 繁體 / LLM are on. #}
+  <section class="mt-6 pt-6 border-t border-base-300">
+    <button type="button"
+            class="w-full flex items-center justify-between gap-3 text-left focus-visible:outline-none"
+            :aria-expanded="advancedOpen.toString()"
+            :aria-label="advancedOpen ? '{{ labels.UPLOAD_ADVANCED_TOGGLE_COLLAPSE }}' : '{{ labels.UPLOAD_ADVANCED_TOGGLE_EXPAND }}'"
+            @click="advancedOpen = !advancedOpen">
+      <h2 class="text-sm font-medium opacity-80">{{ labels.UPLOAD_SECTION_ADVANCED }}</h2>
+      <span class="flex items-center gap-2 text-xs">
+        <span class="badge badge-ghost badge-sm" x-text="`{{ labels.UPLOAD_ADVANCED_ENABLED_COUNT }}`.replace('{count}', enabledCount)"></span>
+        <span class="opacity-50" x-text="advancedOpen ? '−' : '+'"></span>
+      </span>
+    </button>
+
+    <div x-show="advancedOpen" x-transition class="space-y-3 mt-4" x-cloak>
+      <div class="fieldset">
         <label class="fieldset-label gap-3">
           <input type="checkbox" name="enable_diarization" value="true"
                  class="toggle toggle-primary toggle-sm"
-                 x-model="diarEnabled"
+                 x-model="diarization"
                  {% if not settings.hf_token %}disabled{% endif %}>
-          <div>
-            <span>{{ labels.UPLOAD_ENABLE_DIARIZATION }}</span>
-            {% if not settings.hf_token %}
-            <p class="text-xs opacity-40">{{ labels.UPLOAD_DIARIZATION_UNAVAILABLE }}</p>
-            {% endif %}
+          <div class="flex-1">
+            <span class="inline-flex items-center gap-1">
+              {{ labels.UPLOAD_ENABLE_DIARIZATION }}
+              {% if not settings.hf_token %}
+              <span class="tooltip tooltip-right" data-tip="{{ labels.UPLOAD_DIARIZATION_UNAVAILABLE }}">
+                <span class="text-xs opacity-60 cursor-help" tabindex="0" aria-label="{{ labels.UPLOAD_INFOTIP_LABEL }}">ⓘ</span>
+              </span>
+              {% endif %}
+            </span>
           </div>
         </label>
-        <div x-show="diarEnabled" x-transition class="ml-12 mt-2">
+        <div x-show="diarization" x-transition class="ml-12 mt-2">
           <fieldset class="fieldset w-full max-w-xs">
             <legend class="fieldset-legend text-sm">{{ labels.UPLOAD_NUM_SPEAKERS }}</legend>
             <input type="number" name="num_speakers" value="0" min="0" max="20"
@@ -192,10 +271,14 @@
       <div class="fieldset">
         <label class="fieldset-label gap-3">
           <input type="checkbox" name="convert_to_traditional" value="true"
-                 class="toggle toggle-primary toggle-sm" checked>
-          <div>
-            <span>{{ labels.UPLOAD_CONVERT_TRADITIONAL }}</span>
-            <p class="text-xs opacity-40">{{ labels.UPLOAD_CONVERT_TRADITIONAL_HELP }}</p>
+                 class="toggle toggle-primary toggle-sm" x-model="convertTraditional">
+          <div class="flex-1">
+            <span class="inline-flex items-center gap-1">
+              {{ labels.UPLOAD_CONVERT_TRADITIONAL }}
+              <span class="tooltip tooltip-right" data-tip="{{ labels.UPLOAD_CONVERT_TRADITIONAL_HELP }}">
+                <span class="text-xs opacity-60 cursor-help" tabindex="0" aria-label="{{ labels.UPLOAD_INFOTIP_LABEL }}">ⓘ</span>
+              </span>
+            </span>
           </div>
         </label>
       </div>
@@ -204,45 +287,101 @@
         <label class="fieldset-label gap-3">
           <input type="checkbox" name="llm_correction_enabled" value="true"
                  class="toggle toggle-primary toggle-sm"
+                 x-model="llmCorrection"
                  {% if not settings.ollama_base_url %}disabled{% endif %}>
-          <div>
-            <span>{{ labels.UPLOAD_ENABLE_LLM_CORRECTION }}</span>
-            {% if settings.ollama_base_url %}
-            <p class="text-xs opacity-40">{{ labels.UPLOAD_LLM_CORRECTION_HELP }}</p>
-            {% else %}
-            <p class="text-xs opacity-40">{{ labels.UPLOAD_LLM_CORRECTION_UNAVAILABLE }}</p>
-            {% endif %}
+          <div class="flex-1">
+            <span class="inline-flex items-center gap-1">
+              {{ labels.UPLOAD_ENABLE_LLM_CORRECTION }}
+              <span class="tooltip tooltip-right"
+                    data-tip="{% if settings.ollama_base_url %}{{ labels.UPLOAD_LLM_CORRECTION_HELP }}{% else %}{{ labels.UPLOAD_LLM_CORRECTION_UNAVAILABLE }}{% endif %}">
+                <span class="text-xs opacity-60 cursor-help" tabindex="0" aria-label="{{ labels.UPLOAD_INFOTIP_LABEL }}">ⓘ</span>
+              </span>
+            </span>
           </div>
         </label>
       </div>
     </div>
   </section>
 
-  <button type="submit" class="btn btn-primary btn-lg w-full mt-6" :disabled="uploading">
-    {{ icon_upload("w-5 h-5") }}
-    {{ labels.UPLOAD_START }}
-  </button>
+  {# Sticky submit footer — keeps the primary action close to the user's
+     cursor regardless of how far they've scrolled (Fitts's Law). The status
+     line previews how many files / URLs the current selection will submit. #}
+  <div class="sticky bottom-0 -mx-4 sm:-mx-6 lg:-mx-8 mt-8 bg-base-100/95 backdrop-blur border-t border-base-300 px-4 sm:px-6 lg:px-8 py-3 z-10">
+    <div class="flex items-center gap-3">
+      <span class="text-sm opacity-70 flex-1 min-w-0 truncate" x-text="statusLine"></span>
+      <button type="submit" class="btn btn-primary btn-lg gap-2" :disabled="uploading">
+        {{ icon_upload("w-5 h-5") }}
+        {{ labels.UPLOAD_START }}
+      </button>
+    </div>
+  </div>
 </form>
 {% endblock %}
 
 {% block scripts %}
 <script>
+const UPLOAD_PRESETS = {
+  meeting:   { language: 'zh', enable_diarization: true,  num_speakers: 0, convert_to_traditional: true,  llm_correction_enabled: true  },
+  podcast:   { language: 'zh', enable_diarization: true,  num_speakers: 2, convert_to_traditional: true,  llm_correction_enabled: true  },
+  interview: { language: 'zh', enable_diarization: true,  num_speakers: 2, convert_to_traditional: true,  llm_correction_enabled: false },
+  lecture:   { language: 'zh', enable_diarization: false, num_speakers: 0, convert_to_traditional: true,  llm_correction_enabled: true  }
+};
+
 function uploadForm() {
   return {
-    tab: 'files',
+    tab: '{{ initial_tab|default("files") }}',
     uploading: false,
     progress: 0,
     selectedFiles: [],
+    urlText: '',
+    advancedOpen: false,
+    diarization: {{ 'true' if settings.hf_token else 'false' }},
+    convertTraditional: true,
+    llmCorrection: false,
+    activePreset: null,
+    presetsTouched: false,
+    _applyingPreset: false,
+    get enabledCount() {
+      // Reactive: reads the three toggle booleans, so the badge updates
+      // whenever any of them changes. Disabled toggles start false and
+      // applyPreset skips disabled fields, so filtering on truthiness is
+      // equivalent to the old "!disabled && checked" DOM check.
+      return [this.diarization, this.convertTraditional, this.llmCorrection].filter(Boolean).length;
+    },
+    get statusLine() {
+      if (this.tab === 'url') {
+        const lines = this.urlText.split('\n').map(s => s.trim()).filter(Boolean);
+        if (!lines.length) return '{{ labels.UPLOAD_SUBMIT_STATUS_EMPTY }}';
+        return '{{ labels.UPLOAD_SUBMIT_STATUS_URLS }}'.replace('{count}', lines.length);
+      }
+      if (this.selectedFiles && this.selectedFiles.length) {
+        return '{{ labels.UPLOAD_SUBMIT_STATUS_FILES }}'.replace('{count}', this.selectedFiles.length);
+      }
+      return '{{ labels.UPLOAD_SUBMIT_STATUS_EMPTY }}';
+    },
+    init() {
+      // Switching source tab clears any pending selection so the sticky
+      // footer count and the disabled-but-still-populated input can't go
+      // stale between tabs.
+      this.$watch('tab', () => this.resetSelection());
+    },
     onProgress(event) {
       if (event.detail && event.detail.loaded !== undefined && event.detail.total) {
         this.progress = (event.detail.loaded / event.detail.total) * 100;
       }
     },
-    updateFileList() {
-      const input = this.$refs.fileInput;
+    updateFileList(event) {
+      // Works for the files input, the folder input, and the drag-drop
+      // handler (which calls without an event after writing $refs.fileInput).
+      const input = (event && event.target) ? event.target : this.$refs.fileInput;
       if (input && input.files) {
         this.selectedFiles = Array.from(input.files);
       }
+    },
+    resetSelection() {
+      this.selectedFiles = [];
+      if (this.$refs.fileInput) this.$refs.fileInput.value = '';
+      if (this.$refs.folderInput) this.$refs.folderInput.value = '';
     },
     removeFile(idx) {
       this.selectedFiles.splice(idx, 1);
@@ -256,6 +395,37 @@ function uploadForm() {
       if (bytes >= 1024 * 1024) return (bytes / (1024 ** 2)).toFixed(0) + ' MB';
       if (bytes >= 1024) return (bytes / 1024).toFixed(0) + ' KB';
       return bytes + ' B';
+    },
+    applyPreset(id) {
+      const config = UPLOAD_PRESETS[id];
+      if (!config) return;
+      this._applyingPreset = true;
+      this.activePreset = id;
+      this.presetsTouched = true;
+      const form = this.$root;
+      for (const [name, value] of Object.entries(config)) {
+        const field = form.querySelector(`[name="${name}"]`);
+        if (!field || field.disabled) continue;
+        if (field.type === 'checkbox') {
+          field.checked = !!value;
+        } else {
+          field.value = String(value);
+        }
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        field.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      // Release the suppression flag after the dispatch cycle settles.
+      Promise.resolve().then(() => { this._applyingPreset = false; });
+    },
+    markCustomised(event) {
+      if (this._applyingPreset) return;
+      // Files, URL textarea, and preset buttons should not invalidate
+      // the active preset — only the persisted form controls do.
+      const name = event.target && event.target.name;
+      const trackedFields = new Set(Object.keys(UPLOAD_PRESETS.meeting));
+      if (!trackedFields.has(name)) return;
+      this.activePreset = null;
+      this.presetsTouched = true;
     }
   }
 }

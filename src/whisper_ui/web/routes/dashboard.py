@@ -33,6 +33,7 @@ async def dashboard_page(request: Request, db: DbDep, redis: RedisDep, user: Cur
 
     active_jobs, progress_data = _get_active_jobs_with_progress(db, redis, owner_id)
     recent_completed = db.list_jobs_filtered(status=JobStatus.COMPLETED.value, limit=5, owner_id=owner_id)
+    completed_by_day = db.count_completed_by_day(days=7, owner_id=owner_id)
 
     return templates.TemplateResponse(
         request=request,
@@ -46,6 +47,7 @@ async def dashboard_page(request: Request, db: DbDep, redis: RedisDep, user: Cur
             "progress_data": progress_data,
             "recent_completed": recent_completed,
             "status_counts": status_counts,
+            "completed_by_day": completed_by_day,
         },
     )
 

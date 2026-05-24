@@ -1,8 +1,11 @@
 {% from "_icons.html" import icon_home, icon_upload, icon_list, icon_sun, icon_moon %}
 {# Desktop sidebar (>= lg) and tablet icon rail (md-lg) #}
 <div class="flex flex-col h-full bg-base-200">
-  {# Logo #}
+  {# Logo: mark on rail; mark + wordmark on full sidebar #}
   <div class="p-4 flex items-center gap-2 border-b border-base-300">
+    <img src="{{ url_for('static', path='images/logo-mark.svg') }}"
+         alt="Whisper UI" width="32" height="32"
+         class="w-8 h-8 shrink-0" />
     <span class="font-bold text-lg whitespace-nowrap overflow-hidden text-ellipsis hidden lg:block">Whisper UI</span>
   </div>
 

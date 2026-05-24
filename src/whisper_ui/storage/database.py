@@ -344,6 +344,30 @@ class JobDatabase:
             ).fetchone()
         return row[0]
 
+    def count_completed_by_day(self, days: int = 7, *, owner_id: int | None = None) -> list[int]:
+        """Return completed-job counts for the last `days` days, oldest first.
+
+        Uses updated_at because that is when a job transitions to COMPLETED;
+        created_at is the upload moment. The buckets are inclusive of the
+        current calendar day in UTC. Length is exactly `days` so the
+        sparkline renderer can rely on a fixed-width input.
+        """
+        today_utc = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        start_day = today_utc - timedelta(days=days - 1)
+        params: list = [JobStatus.COMPLETED.value, start_day.isoformat()]
+        sql = "SELECT substr(updated_at, 1, 10) AS day, COUNT(*) FROM jobs WHERE status = ? AND updated_at >= ?"
+        if owner_id is not None:
+            sql += " AND owner_id = ?"
+            params.append(owner_id)
+        sql += " GROUP BY day"
+        rows = self._conn.execute(sql, params).fetchall()
+        counts_by_day = {row[0]: row[1] for row in rows}
+        result = []
+        for offset in range(days):
+            day = (start_day + timedelta(days=offset)).date().isoformat()
+            result.append(counts_by_day.get(day, 0))
+        return result
+
     def has_active_jobs(self, *, owner_id: int | None = None) -> bool:
         if owner_id is not None:
             row = self._conn.execute(

@@ -124,6 +124,26 @@ class TestUploadRoutes:
         assert resp.status_code == 200
         assert "上傳音訊" in resp.text
 
+    def test_upload_page_defaults_to_files_tab(self, client):
+        resp = client.get("/upload")
+        assert resp.status_code == 200
+        assert "tab: 'files'" in resp.text
+
+    def test_upload_page_selects_tab_from_mode_query(self, client):
+        """Dashboard quick-action /upload?mode=folder|url must land the user
+        on the matching tab (plan §B Finding F2)."""
+        for mode in ("folder", "url"):
+            resp = client.get(f"/upload?mode={mode}")
+            assert resp.status_code == 200
+            assert f"tab: '{mode}'" in resp.text
+
+    def test_upload_page_falls_back_to_files_for_unknown_mode(self, client):
+        """An unrecognised mode is a UX hint, not a hard error — fall back
+        to the files tab rather than 4xx."""
+        resp = client.get("/upload?mode=bogus")
+        assert resp.status_code == 200
+        assert "tab: 'files'" in resp.text
+
 
 class TestJobsRoutes:
     def test_jobs_page_empty(self, client):
@@ -140,6 +160,18 @@ class TestJobsRoutes:
         resp = client.get("/jobs/list")
         assert resp.status_code == 200
         assert "job-list-wrapper" in resp.text
+
+    def test_jobs_all_chip_shows_unfiltered_total_when_filtered(self, client, db, filestore):
+        """Finding F5: opening /jobs?status=failed must still show the true
+        total on the 全部 chip, not the failed-only count."""
+        _create_completed_job(db, filestore)
+        _create_failed_job(db)
+
+        resp = client.get("/jobs?status=failed")
+
+        assert resp.status_code == 200
+        # The 全部 chip badge must reflect both jobs, not just the 1 failed.
+        assert '<span class="badge badge-sm">2</span>' in resp.text
 
     def test_jobs_list_fragment_emits_stable_id_for_single_job(self, client, db, filestore):
         """Without a stable wrapper id Idiomorph falls back to positional
@@ -322,6 +354,130 @@ class TestJobsRoutes:
         assert job.id in msg
         assert "previous_error=" in msg
 
+    def test_bulk_retry_requeues_failed_jobs_and_emits_trigger(self, client, db):
+        """Two failed jobs → bulk retry → both transition to QUEUED and the
+        response carries HX-Trigger: refreshJobList (plan §5.6)."""
+        failed_a = _create_failed_job(db)
+        failed_b = _create_failed_job(db)
+
+        with (
+            patch("whisper_ui.web.routes.jobs.enqueue_pipeline"),
+            patch("whisper_ui.web.routes.jobs.get_audio_duration_seconds", return_value=None),
+        ):
+            resp = client.post("/jobs/bulk/retry", data={"job_ids": f"{failed_a.id},{failed_b.id}"})
+
+        assert resp.status_code == 204
+        assert resp.headers.get("hx-trigger") == "refreshJobList"
+        # After-settle event carries the success summary so the client can
+        # surface a single toast for the operation.
+        after_settle = resp.headers.get("hx-trigger-after-settle", "")
+        assert "bulkComplete" in after_settle
+        for original in (failed_a, failed_b):
+            refreshed = db.get_job(original.id)
+            assert refreshed.status == JobStatus.QUEUED
+
+    def test_bulk_delete_keeps_active_jobs_and_reports_partial_failure(self, client, db, filestore):
+        """COMPLETED jobs delete; PROCESSING jobs are reported failed so the
+        active worker is not interrupted (status enum is the gate). Partial
+        failure surfaces as bulkPartial in HX-Trigger-After-Settle."""
+        completed = _create_completed_job(db, filestore)
+        active = Job(filename="active.mp3", status=JobStatus.PROCESSING, language="zh")
+        db.insert_job(active)
+
+        resp = client.post(
+            "/jobs/bulk/delete",
+            data={"job_ids": f"{completed.id},{active.id}"},
+        )
+
+        assert resp.status_code == 204
+        assert resp.headers.get("hx-trigger") == "refreshJobList"
+        after_settle = resp.headers.get("hx-trigger-after-settle", "")
+        assert "bulkPartial" in after_settle
+        assert db.get_job(completed.id) is None
+        assert db.get_job(active.id) is not None
+
+    def test_bulk_action_rejects_unknown_action(self, client, db):
+        failed = _create_failed_job(db)
+
+        resp = client.post("/jobs/bulk/banana", data={"job_ids": failed.id})
+
+        assert resp.status_code == 400
+
+    def test_bulk_action_isolates_jobs_owned_by_other_users(self, client, db, filestore, test_admin):
+        """Bulk routes must respect owner_filter — passing another user's
+        job_id should be reported as failed, not silently succeed."""
+        their_job = Job(filename="theirs.mp3", status=JobStatus.FAILED, owner_id=test_admin.id + 999)
+        db.insert_job(their_job)
+
+        resp = client.post("/jobs/bulk/retry", data={"job_ids": their_job.id})
+
+        assert resp.status_code == 204
+        # No partial-complete trigger because the job was not owned by the
+        # current user → the failed counter went up, succeeded stayed at 0.
+        after_settle = resp.headers.get("hx-trigger-after-settle", "")
+        assert "bulkPartial" in after_settle
+        assert "bulkComplete" not in after_settle
+        # The stranger's job is unchanged.
+        refreshed = db.get_job(their_job.id)
+        assert refreshed.status == JobStatus.FAILED
+
+    def test_jobs_page_renders_per_status_chip_counts(self, client, db, filestore):
+        """v2 sticky filter shows each status's count, not just total."""
+        _create_completed_job(db, filestore)
+        _create_failed_job(db)
+
+        resp = client.get("/jobs")
+
+        assert resp.status_code == 200
+        assert "已完成" in resp.text
+        assert "失敗" in resp.text
+        assert "JOBS_SEARCH_PLACEHOLDER" not in resp.text  # label is rendered, not the constant name
+
+    def test_jobs_list_fragment_includes_data_job_search_with_url(self, client, db):
+        """URL jobs must be findable via the search box — the new
+        data-job-search attribute combines filename + source URL."""
+        url = "https://www.youtube.com/watch?v=abc123"
+        failed = _create_failed_job(db, source_url=url)
+
+        resp = client.get("/jobs/list")
+
+        assert resp.status_code == 200
+        assert f'data-job-search="{failed.filename} {url}"' in resp.text
+
+    def test_jobs_card_renders_bulk_select_checkbox_for_completed_jobs(self, client, db, filestore):
+        """Bulk-eligible rows (completed / failed) carry the selection
+        checkbox bound to $store.jobSelection."""
+        completed = _create_completed_job(db, filestore)
+
+        resp = client.get("/jobs/list")
+
+        assert resp.status_code == 200
+        assert f"$store.jobSelection.has('{completed.id}')" in resp.text
+        assert "checkbox checkbox-sm" in resp.text
+
+    def test_jobs_card_omits_bulk_checkbox_for_active_jobs(self, client, db):
+        """Active jobs (queued / processing) cannot be retried or deleted
+        in bulk, so they must NOT render a selection checkbox."""
+        active = Job(filename="busy.mp3", status=JobStatus.PROCESSING)
+        db.insert_job(active)
+
+        resp = client.get("/jobs/list")
+
+        assert resp.status_code == 200
+        assert f"$store.jobSelection.has('{active.id}')" not in resp.text
+
+    def test_jobs_card_checkbox_carries_status_for_bulk_gating(self, client, db, filestore):
+        """The selection toggle must pass the job status so the bulk bar can
+        gate export (needs completed) / retry (needs failed). Finding F3."""
+        completed = _create_completed_job(db, filestore)
+        failed = _create_failed_job(db)
+
+        resp = client.get("/jobs/list")
+
+        assert resp.status_code == 200
+        assert f"toggle('{completed.id}', 'completed')" in resp.text
+        assert f"toggle('{failed.id}', 'failed')" in resp.text
+
     def test_delete_job_returns_500_and_preserves_db_row_when_filestore_fails(self, client, db, filestore, caplog):
         """PR #53 review F2: a filesystem failure must NOT lead to a
         DB-deleted-but-files-still-on-disk inconsistency. The route must
@@ -425,6 +581,54 @@ class TestViewerRoutes:
         resp = client.get(f"/viewer/{job.id}")
         assert resp.status_code == 200
         assert "下載影片" not in resp.text
+
+    def test_viewer_segment_copy_button_is_keyboard_reachable(self, client, db, filestore):
+        """Regression for WCAG 2.1.1 + 1.4.13 (plan §4 P0): the per-segment
+        copy button must be visible without hover and expose an aria-label."""
+        segments = [Segment(start=0.0, end=1.0, text="hello")]
+        result = TranscriptResult(segments=segments, language="zh", duration=1.0)
+        job = Job(filename="copy.mp3", status=JobStatus.COMPLETED, language="zh")
+        result_path = filestore.save_result(job.id, result)
+        job.result_path = str(result_path)
+        db.insert_job(job)
+
+        resp = client.get(f"/viewer/{job.id}")
+
+        assert resp.status_code == 200
+        assert "opacity-0 group-hover:opacity-100" not in resp.text
+        assert 'aria-label="複製此段"' in resp.text
+
+    def test_viewer_renders_speaker_glyph_when_speaker_assigned(self, client, db, filestore):
+        """Non-color cue for speakers (WCAG 1.4.1): segments with a speaker
+        should render one of the eight glyphs alongside the speaker label."""
+        segments = [Segment(start=0.0, end=1.0, text="hello", speaker="SPEAKER_00")]
+        result = TranscriptResult(segments=segments, language="zh", duration=1.0)
+        job = Job(filename="diar.mp3", status=JobStatus.COMPLETED, language="zh")
+        result_path = filestore.save_result(job.id, result)
+        job.result_path = str(result_path)
+        db.insert_job(job)
+
+        resp = client.get(f"/viewer/{job.id}")
+
+        assert resp.status_code == 200
+        assert "[SPEAKER_00]" in resp.text
+        assert any(glyph in resp.text for glyph in "●▲■◆★✦◉♦")
+
+    def test_viewer_includes_keyboard_shortcut_hint(self, client, db, filestore):
+        """Viewer should expose its keyboard shortcuts so they are
+        discoverable (Nielsen #7 + 6)."""
+        segments = [Segment(start=0.0, end=1.0, text="hello")]
+        result = TranscriptResult(segments=segments, language="zh", duration=1.0)
+        job = Job(filename="hint.mp3", status=JobStatus.COMPLETED, language="zh")
+        result_path = filestore.save_result(job.id, result)
+        job.result_path = str(result_path)
+        db.insert_job(job)
+
+        resp = client.get(f"/viewer/{job.id}")
+
+        assert resp.status_code == 200
+        assert "鍵盤捷徑" in resp.text
+        assert "聚焦搜尋" in resp.text
 
     def test_viewer_hides_download_media_in_no_segments_branch(self, client, db, filestore):
         """No-segments fallback toolbar must also gate Download Media on

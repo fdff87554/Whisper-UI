@@ -118,6 +118,25 @@
   border-left-color: oklch(58% 0.2 25);
 }
 
+/* Status pulse — animated dot rendered next to the processing badge so
+   colorblind users have a non-color cue that work is actively in flight.
+   The animation is short and low-amplitude to avoid distraction. */
+.status-pulse {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background-color: currentColor;
+  animation: whisper-pulse 1.4s ease-in-out infinite;
+}
+@keyframes whisper-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50%      { opacity: 1;    transform: scale(1.15); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .status-pulse { animation: none; opacity: 0.8; }
+}
+
 /* Speaker colors for viewer */
 .speaker-1 { color: oklch(55% 0.2 240); }
 .speaker-2 { color: oklch(55% 0.2 25); }

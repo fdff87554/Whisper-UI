@@ -4,38 +4,71 @@
 {% block content %}
 <h1 class="text-2xl font-medium mb-4">{{ labels.JOBS_HEADER }}</h1>
 
-{# Status filter chips #}
-<div class="flex flex-wrap gap-2 mb-4" x-data="{ activeFilter: {{ status|tojson }} }">
-  {% set filter_options = [('', labels.JOBS_FILTER_ALL)] %}
-  {% for value, label in labels.STATUS_LABELS.items() %}
-    {% set _ = filter_options.append((value, label)) %}
-  {% endfor %}
-  {% for value, label in [('', labels.JOBS_FILTER_ALL)] + labels.STATUS_LABELS.items()|list %}
-  <button class="btn btn-sm"
-          :class="activeFilter === '{{ value }}' ? 'btn-primary' : 'btn-ghost border border-base-300'"
-          hx-get="/jobs/list?status={{ value }}" hx-target="#job-list-wrapper" hx-swap="outerHTML"
-          @click="activeFilter = '{{ value }}'">
-    {{ label }}
-    {% if value == '' %}
-    <span class="badge badge-sm">{{ total_count }}</span>
-    {% endif %}
-  </button>
-  {% endfor %}
-</div>
+{# Sticky filter+search header. Chips show per-status counts so the user
+   can scan workload at a glance without expanding the lists. The search
+   input filters by filename AND source URL — useful for YouTube-heavy
+   workflows where the filename is just the video id. #}
+<div class="sticky top-0 z-10 bg-base-100 pt-1 pb-3 mb-4 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 border-b border-base-300">
+  <div class="flex flex-wrap gap-2 mb-3" x-data="{ activeFilter: {{ status|tojson }} }">
+    {# total_count is filtered by the active status, so it can't stand in for
+       the "全部" chip — sum the per-status counts for the true total. #}
+    {% set _all_count = status_counts.values()|sum %}
+    {% for value, label in [('', labels.JOBS_FILTER_ALL)] + labels.STATUS_LABELS.items()|list %}
+    {%- set _count = _all_count if value == '' else status_counts.get(value, 0) -%}
+    <button class="btn btn-sm gap-1.5"
+            :class="activeFilter === '{{ value }}' ? 'btn-primary' : 'btn-ghost border border-base-300'"
+            hx-get="/jobs/list?status={{ value }}" hx-target="#job-list-wrapper" hx-swap="outerHTML"
+            @click="activeFilter = '{{ value }}'">
+      <span>{{ label }}</span>
+      <span class="badge badge-sm">{{ _count }}</span>
+    </button>
+    {% endfor %}
+  </div>
 
-{# Search box #}
-<div class="relative mb-4" x-data="{ query: '' }">
-  <span class="absolute left-3 top-1/2 -translate-y-1/2 opacity-40">{{ icon_search("w-4 h-4") }}</span>
-  <input type="search" x-model="query"
-         @input="document.querySelectorAll('[data-job-name]').forEach(el => {
-           el.style.display = !query || el.dataset.jobName.toLowerCase().includes(query.toLowerCase()) ? '' : 'none';
-         })"
-         placeholder="{{ labels.JOBS_SEARCH_PLACEHOLDER }}"
-         class="input input-sm w-full max-w-sm pl-9">
+  <div class="relative max-w-sm" x-data="{ query: '' }">
+    <span class="absolute left-3 top-1/2 -translate-y-1/2 opacity-40">{{ icon_search("w-4 h-4") }}</span>
+    <input type="search" x-model="query"
+           @input="document.querySelectorAll('[data-job-search]').forEach(el => {
+             el.style.display = !query || el.dataset.jobSearch.toLowerCase().includes(query.toLowerCase()) ? '' : 'none';
+           })"
+           placeholder="{{ labels.JOBS_SEARCH_PLACEHOLDER }}"
+           class="input input-sm w-full pl-9">
+  </div>
 </div>
 
 {# Job list fragment — replaced by htmx polling and actions #}
 {% include "_job_list.html" %}
+
+{# Bulk action bar — sticky at the bottom when any rows are selected. #}
+<div class="fixed inset-x-0 bottom-0 md:left-14 lg:left-60 z-30 px-4 sm:px-6 lg:px-8 pb-4"
+     x-data x-show="$store.jobSelection.size > 0" x-transition.opacity x-cloak>
+  <div class="card bg-base-200 border border-base-300 shadow-lg max-w-3xl mx-auto">
+    <div class="card-body p-3 flex flex-row flex-wrap items-center gap-3">
+      <span class="text-sm font-medium" x-text="`{{ labels.JOBS_BULK_SELECTED }}`.replace('{count}', $store.jobSelection.size)"></span>
+      <div class="flex flex-wrap gap-2 ml-auto">
+        <button class="btn btn-sm btn-ghost"
+                :disabled="!$store.jobSelection.hasFailed"
+                :title="$store.jobSelection.hasFailed ? '' : '{{ labels.JOBS_BULK_RETRY_HINT }}'"
+                @click="$store.jobSelection.bulkAction('retry', '{{ labels.JOBS_BULK_CONFIRM_RETRY }}')">
+          {{ labels.JOBS_BULK_RETRY }}
+        </button>
+        <button class="btn btn-sm btn-ghost"
+                :disabled="!$store.jobSelection.hasCompleted"
+                :title="$store.jobSelection.hasCompleted ? '' : '{{ labels.JOBS_BULK_EXPORT_HINT }}'"
+                @click="$store.jobSelection.bulkAction('export')">
+          {{ labels.JOBS_BULK_EXPORT }}
+        </button>
+        <button class="btn btn-sm btn-ghost text-error"
+                @click="$store.jobSelection.bulkAction('delete', '{{ labels.JOBS_BULK_CONFIRM_DELETE }}')">
+          {{ labels.JOBS_BULK_DELETE }}
+        </button>
+        <button class="btn btn-sm btn-ghost" @click="$store.jobSelection.clear()">
+          {{ labels.JOBS_BULK_CLEAR_SELECTION }}
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
 
 {# Confirm dialog #}
 <div x-data="confirmDialog()" @open-confirm.window="show($event.detail)">
@@ -82,6 +115,111 @@
 
 {% block scripts %}
 <script>
+document.addEventListener('alpine:init', () => {
+  Alpine.store('jobSelection', {
+    // id -> status, so the bar can gate actions on the selected jobs'
+    // states (export needs a completed job, retry needs a failed one).
+    items: new Map(),
+    get size() { return this.items.size; },
+    get hasCompleted() {
+      for (const status of this.items.values()) if (status === 'completed') return true;
+      return false;
+    },
+    get hasFailed() {
+      for (const status of this.items.values()) if (status === 'failed') return true;
+      return false;
+    },
+    has(id) { return this.items.has(id); },
+    toggle(id, status) {
+      if (this.items.has(id)) this.items.delete(id);
+      else this.items.set(id, status);
+    },
+    clear() { this.items = new Map(); },
+    _toast(message, type) {
+      if (Alpine.store('toasts')) Alpine.store('toasts').add({ message, type });
+    },
+    _handleAuthRedirect(resp) {
+      // These fetches carry no HX-Request header, so an expired session is
+      // answered with a 302 to /login that fetch transparently follows —
+      // resp.ok would be true for the login page. Detect it and send the
+      // user to log in again.
+      if (resp.redirected) {
+        window.location.href = resp.url;
+        return true;
+      }
+      return false;
+    },
+    bulkExport() {
+      const ids = Array.from(this.items.keys());
+      if (!ids.length) return;
+      const formData = new FormData();
+      formData.set('job_ids', ids.join(','));
+      let filename = 'selection.zip';
+      fetch('/jobs/bulk/export', { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(resp => {
+          if (this._handleAuthRedirect(resp)) return null;
+          if (!resp.ok) throw new Error(`bulk export failed with ${resp.status}`);
+          const disposition = resp.headers.get('Content-Disposition') || '';
+          const match = disposition.match(/filename="?([^"]+)"?/);
+          if (match) filename = match[1];
+          return resp.blob();
+        })
+        .then(blob => {
+          if (!blob) return;
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+          this.clear();
+        })
+        .catch(() => this._toast('{{ labels.TOAST_ACTION_FAILED }}', 'error'));
+    },
+    bulkAction(action, confirmTpl) {
+      if (action === 'export') { this.bulkExport(); return; }
+      const ids = Array.from(this.items.keys());
+      if (!ids.length) return;
+      if (confirmTpl) {
+        const msg = confirmTpl.replace('{count}', ids.length);
+        if (!window.confirm(msg)) return;
+      }
+      const formData = new FormData();
+      formData.set('job_ids', ids.join(','));
+      fetch(`/jobs/bulk/${action}`, { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(resp => {
+          if (this._handleAuthRedirect(resp)) return;
+          if (!resp.ok) {
+            throw new Error(`bulk ${action} failed with ${resp.status}`);
+          }
+          this.clear();
+          // Server emits HX-Trigger: refreshJobList, which htmx listens for —
+          // dispatch it manually since this fetch bypasses htmx.
+          document.body.dispatchEvent(new CustomEvent('refreshJobList'));
+          const settle = resp.headers.get('HX-Trigger-After-Settle');
+          if (settle) {
+            try {
+              const events = JSON.parse(settle);
+              if (events.bulkPartial) {
+                const { ok, failed } = events.bulkPartial;
+                this._toast('{{ labels.JOBS_BULK_PARTIAL }}'.replace('{ok}', ok).replace('{failed}', failed), 'warning');
+              } else if (events.bulkComplete) {
+                this._toast('{{ labels.JOBS_BULK_SUCCESS }}'.replace('{count}', events.bulkComplete.ok), 'success');
+              }
+            } catch (_) { /* ignore malformed trigger payload */ }
+          }
+        })
+        .catch(() => {
+          // Covers both network failures and the explicit throw on a 4xx/5xx
+          // status above. Keep the selection intact so the user can retry.
+          this._toast('{{ labels.TOAST_ACTION_FAILED }}', 'error');
+        });
+    }
+  });
+});
+
 function confirmDialog() {
   return {
     title: '',

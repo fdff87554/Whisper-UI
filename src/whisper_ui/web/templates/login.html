@@ -1,3 +1,4 @@
+{% from "_icons.html" import icon_eye, icon_eye_off %}
 <!DOCTYPE html>
 <html lang="zh-Hant"
       x-data="{ theme: $persist(
@@ -41,14 +42,29 @@
                  minlength="3" maxlength="32">
         </div>
 
-        <div>
+        <div x-data="{ showPassword: false }">
           <label class="label" for="password">
             <span class="label-text">{{ labels.AUTH_PASSWORD }}</span>
           </label>
-          <input id="password" name="password" type="password" required
-                 autocomplete="current-password"
-                 class="input input-bordered w-full"
-                 minlength="8">
+          <div class="relative">
+            <input id="password" name="password" required
+                   :type="showPassword ? 'text' : 'password'"
+                   autocomplete="current-password"
+                   class="input input-bordered w-full pr-12"
+                   minlength="8">
+            <button type="button"
+                    class="absolute inset-y-0 right-0 px-3 flex items-center opacity-60 hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 transition-opacity"
+                    :aria-label="showPassword ? '{{ labels.AUTH_PASSWORD_HIDE }}' : '{{ labels.AUTH_PASSWORD_SHOW }}'"
+                    :title="showPassword ? '{{ labels.AUTH_PASSWORD_HIDE }}' : '{{ labels.AUTH_PASSWORD_SHOW }}'"
+                    @click="showPassword = !showPassword">
+              <template x-if="!showPassword">
+                <span>{{ icon_eye("w-4 h-4") }}</span>
+              </template>
+              <template x-if="showPassword">
+                <span>{{ icon_eye_off("w-4 h-4") }}</span>
+              </template>
+            </button>
+          </div>
         </div>
 
         <button type="submit" class="btn btn-primary w-full">

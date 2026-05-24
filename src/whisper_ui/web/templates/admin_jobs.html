@@ -13,7 +13,9 @@
      class="btn btn-sm {% if status == value %}btn-primary{% else %}btn-ghost border border-base-300{% endif %}">
     {{ label }}
     {% if value == '' %}
-    <span class="badge badge-sm">{{ total_count }}</span>
+    {# total_count is filtered by the active status; sum per-status counts
+       for the true "全部" total (matches the /jobs page fix). #}
+    <span class="badge badge-sm">{{ status_counts.values()|sum }}</span>
     {% endif %}
   </a>
   {% endfor %}
