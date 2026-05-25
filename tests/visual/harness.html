@@ -1,0 +1,28 @@
+<!doctype html>
+<!--
+  Static visual-test harness for tests/visual/test_contrast.py.
+
+  Loads the COMPILED stylesheet (built by `mise run css`, gitignored) and
+  renders a representative card in each theme so a headless browser can read
+  the rendered colors. No app/redis needed — opened directly via file://.
+  Keep the card classes in sync with the real templates' card pattern
+  (`card bg-base-200 border border-line`).
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="../../src/whisper_ui/web/static/style.css" />
+  </head>
+  <body>
+    <section data-theme="whisper-light">
+      <div id="card-light" class="card bg-base-200 border border-line">
+        <div class="card-body">light card</div>
+      </div>
+    </section>
+    <section data-theme="whisper-dark">
+      <div id="card-dark" class="card bg-base-200 border border-line">
+        <div class="card-body">dark card</div>
+      </div>
+    </section>
+  </body>
+</html>
