@@ -23,7 +23,9 @@ FLASH_SESSION_KEY = "_flash"
 
 def set_flash(request: Request, message: str, category: str = "info") -> None:
     """Queue a flash message for the next full-page render."""
-    request.session.setdefault(FLASH_SESSION_KEY, []).append({"message": message, "type": category})
+    messages = request.session.get(FLASH_SESSION_KEY, [])
+    messages.append({"message": message, "type": category})
+    request.session[FLASH_SESSION_KEY] = messages
 
 
 def consume_flash(request: Request) -> list[dict[str, str]]:
