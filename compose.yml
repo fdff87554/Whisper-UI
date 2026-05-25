@@ -51,6 +51,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      volume-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     # Cap the json-file driver so unbounded structured logs cannot fill
     # /var/lib/docker on long-running deployments. 20 MB x 5 files per
@@ -78,6 +80,32 @@ services:
       options:
         max-size: "20m"
         max-file: "5"
+  # One-shot init sidecar. The worker/frontend images run as USER 1000, but
+  # a named volume can keep root:root ownership inherited from an earlier
+  # root-era deployment — the Dockerfile build-time chown only seeds an
+  # *empty* volume on its first mount, never a populated one. When that
+  # happens app-data fails DB/upload writes, and model-cache floods every
+  # job's log with HuggingFace ".no_exist" Permission-denied warnings.
+  # Re-own both volumes to uid 1000 before any dependent service starts.
+  #
+  # Guarded so steady-state restarts cost one stat per volume instead of a
+  # full walk: the recursive chown runs only when the volume is not already
+  # uid-1000 owned. The chown itself is a metadata-only pass — quick on a
+  # local volume, though a very large cache on a slow/network backend adds a
+  # one-time startup cost. A volume whose top level is uid 1000 but holds a
+  # root-written subdir (e.g. a manual `docker run --user root`) is not
+  # self-healed; recover it with a manual chown or `docker volume rm`.
+  # No profile: the always-on frontend needs app-data, so this must run in
+  # every deployment. ($$ escapes compose variable interpolation.)
+  volume-init:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'for d in /data /cache; do [ "$$(stat -c %u "$$d")" = 1000 ] || chown -R 1000:1000 "$$d"; done'
+    volumes:
+      - app-data:/data
+      - model-cache:/cache
+    restart: "no"
   worker-gpu:
     profiles: [gpu]
     image: ghcr.io/fdff87554/whisper-ui-worker:${WHISPER_UI_VERSION:-latest}
@@ -126,6 +154,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      volume-init:
+        condition: service_completed_successfully
     deploy:
       resources:
         reservations:
@@ -185,6 +215,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      volume-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     logging:
       driver: json-file
@@ -240,6 +272,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      volume-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     logging:
       driver: json-file
