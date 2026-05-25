@@ -14,7 +14,7 @@
         <button class="btn btn-sm btn-ghost"
                 :disabled="!$store.jobSelection.hasFailed"
                 :title="$store.jobSelection.hasFailed ? '' : '{{ labels.JOBS_BULK_RETRY_HINT }}'"
-                @click="$store.jobSelection.bulkAction('retry', '{{ labels.JOBS_BULK_CONFIRM_RETRY }}')">
+                @click="$store.jobSelection.bulkAction('retry', '{{ labels.JOBS_BULK_CONFIRM_RETRY }}', '{{ labels.JOBS_BULK_RETRY }}')">
           {{ labels.JOBS_BULK_RETRY }}
         </button>
         <button class="btn btn-sm btn-ghost"
@@ -24,7 +24,7 @@
           {{ labels.JOBS_BULK_EXPORT }}
         </button>
         <button class="btn btn-sm btn-ghost text-error"
-                @click="$store.jobSelection.bulkAction('delete', '{{ labels.JOBS_BULK_CONFIRM_DELETE }}')">
+                @click="$store.jobSelection.bulkAction('delete', '{{ labels.JOBS_BULK_CONFIRM_DELETE }}', '{{ labels.JOBS_BULK_DELETE }}')">
           {{ labels.JOBS_BULK_DELETE }}
         </button>
         <button class="btn btn-sm btn-ghost" @click="$store.jobSelection.clear()">
@@ -146,14 +146,26 @@ function registerJobSelectionStore() {
         })
         .catch(() => this._toast('{{ labels.TOAST_ACTION_FAILED }}', 'error'));
     },
-    bulkAction(action, confirmTpl) {
+    bulkAction(action, confirmTpl, title) {
       if (action === 'export') { this.bulkExport(); return; }
       const ids = Array.from(this.items.keys());
       if (!ids.length) return;
       if (confirmTpl) {
-        const msg = confirmTpl.replace('{count}', ids.length);
-        if (!window.confirm(msg)) return;
+        // Route through the shared v2 confirm modal (same one row/batch
+        // actions use) instead of a native window.confirm, so the bulk flow
+        // matches the rest of the UI. The callback runs the request on OK.
+        window.dispatchEvent(new CustomEvent('open-confirm', { detail: {
+          title: title || '',
+          message: confirmTpl.replace('{count}', ids.length),
+          onConfirm: () => this._runBulk(action),
+        } }));
+        return;
       }
+      this._runBulk(action);
+    },
+    _runBulk(action) {
+      const ids = Array.from(this.items.keys());
+      if (!ids.length) return;
       const formData = new FormData();
       formData.set('job_ids', ids.join(','));
       fetch(`/jobs/bulk/${action}`, { method: 'POST', body: formData, credentials: 'same-origin' })
@@ -198,12 +210,15 @@ function confirmDialog() {
     confirmText: '',
     actionUrl: '',
     actionMethod: 'POST',
+    onConfirm: null,
     show(detail) {
       this.title = detail.title;
       this.message = detail.message;
       this.confirmText = detail.confirmText || '{{ labels.DIALOG_CONFIRM }}';
-      this.actionUrl = detail.url;
+      this.actionUrl = detail.url || '';
       this.actionMethod = detail.method || 'POST';
+      // Reset each open so a callback from a previous dialog never lingers.
+      this.onConfirm = detail.onConfirm || null;
       this.$refs.dialog.showModal();
     },
     cancel() {
@@ -211,6 +226,9 @@ function confirmDialog() {
     },
     doConfirm() {
       this.$refs.dialog.close();
+      // Callback form (bulk actions); otherwise the htmx url/method form
+      // used by per-row and batch actions.
+      if (this.onConfirm) { this.onConfirm(); return; }
       htmx.ajax(this.actionMethod, this.actionUrl, {target: 'body', swap: 'none'});
     }
   }
