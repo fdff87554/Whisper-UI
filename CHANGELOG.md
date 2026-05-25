@@ -7,7 +7,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- Visual-contrast regression tests (`tests/visual`, `pytest -m visual`, new
+  `visual-tests` CI job). A headless Chromium renders the compiled stylesheet
+  and reads computed colors to assert the card border stays perceptibly
+  distinct from the card surface in both themes — guarding against the dark
+  border regressing to invisible again. Requires `playwright install chromium`.
+
 ### Changed
+
+- Dark-theme card borders are visible again. They previously used
+  `border-base-300`, whose lightness sits ~3% from the `base-200` card surface
+  in dark mode, so the outline all but disappeared. Borders now use a dedicated
+  `--color-line` token (decoupled from `base-300`, which still backs surface
+  fills like `bg-base-300` hovers/badges), tuned for a clearly perceptible
+  outline in both themes (measured ≈1.7:1 light, ≈2.2:1 dark).
 
 - Admin pages aligned with the v2 design language. `/admin/jobs` now reuses the
   user-facing job list (`_job_list.html`/`_job_card.html`) with a sticky filter,
