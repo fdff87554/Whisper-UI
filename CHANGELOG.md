@@ -9,6 +9,15 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- Admin pages aligned with the v2 design language. `/admin/jobs` now reuses the
+  user-facing job list (`_job_list.html`/`_job_card.html`) with a sticky filter,
+  search, per-job owner badges, and **multi-select bulk delete / retry / export**
+  — these reuse the existing `/jobs/bulk/*` endpoints, which already operate
+  across every owner for admins (no new authorization surface). The shared
+  selection store and confirm/batch-download dialogs were extracted into
+  `_job_interactions.html` so the user and admin job pages share one copy.
+  `/admin/users` gains role/status filter chips and moves the reset-password
+  form into a shared modal. (Re-transcribe stays hidden on the admin view.)
 - Upload result toasts ("已提交 N 個任務" …) now use a server-side session
   flash instead of redirect query params persisted to `localStorage`. The
   upload handlers stash the message in the session and redirect to a clean
