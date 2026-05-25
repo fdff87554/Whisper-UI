@@ -87,3 +87,24 @@ jobs:
           push: false
           cache-from: type=gha,scope=${{ matrix.dockerfile }}
           cache-to: type=gha,mode=max,scope=${{ matrix.dockerfile }}
+  # Browser-rendered theme/contrast checks (tests/visual). Single Python slot —
+  # rendering is interpreter-independent. Needs the compiled stylesheet (built
+  # here, since style.css is gitignored) and a headless Chromium.
+  visual-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install mise
+        uses: jdx/mise-action@v4
+      - name: Install Python 3.13
+        run: uv python install 3.13
+      - name: Install dependencies
+        run: uv sync --extra dev --frozen --python 3.13
+      - name: Install Node deps (Tailwind/daisyUI for the CSS build)
+        run: npm ci
+      - name: Build CSS
+        run: mise run css
+      - name: Install Playwright Chromium
+        run: uv run playwright install --with-deps chromium
+      - name: Visual tests
+        run: uv run pytest -m visual --tb=short -q

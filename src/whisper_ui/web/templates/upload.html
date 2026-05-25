@@ -64,7 +64,7 @@
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
       <button type="button"
               class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary"
-              :class="activePreset === 'meeting' ? 'border-primary' : 'border-base-300'"
+              :class="activePreset === 'meeting' ? 'border-primary' : 'border-line'"
               :aria-pressed="(activePreset === 'meeting').toString()"
               @click="applyPreset('meeting')">
         <div class="card-body p-3">
@@ -74,7 +74,7 @@
       </button>
       <button type="button"
               class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary"
-              :class="activePreset === 'podcast' ? 'border-primary' : 'border-base-300'"
+              :class="activePreset === 'podcast' ? 'border-primary' : 'border-line'"
               :aria-pressed="(activePreset === 'podcast').toString()"
               @click="applyPreset('podcast')">
         <div class="card-body p-3">
@@ -84,7 +84,7 @@
       </button>
       <button type="button"
               class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary"
-              :class="activePreset === 'interview' ? 'border-primary' : 'border-base-300'"
+              :class="activePreset === 'interview' ? 'border-primary' : 'border-line'"
               :aria-pressed="(activePreset === 'interview').toString()"
               @click="applyPreset('interview')">
         <div class="card-body p-3">
@@ -94,7 +94,7 @@
       </button>
       <button type="button"
               class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary"
-              :class="activePreset === 'lecture' ? 'border-primary' : 'border-base-300'"
+              :class="activePreset === 'lecture' ? 'border-primary' : 'border-line'"
               :aria-pressed="(activePreset === 'lecture').toString()"
               @click="applyPreset('lecture')">
         <div class="card-body p-3">
@@ -108,7 +108,7 @@
   {# Upload progress overlay #}
   <template x-if="uploading">
     <div class="fixed inset-0 bg-base-100/80 z-50 flex items-center justify-center">
-      <div class="card bg-base-100 border border-base-300 shadow-lg w-80">
+      <div class="card bg-base-100 border border-line shadow-lg w-80">
         <div class="card-body items-center text-center p-6">
           <span class="loading loading-spinner loading-lg text-primary mb-2"></span>
           <progress class="progress progress-primary w-full" :value="progress" max="100"></progress>
@@ -145,7 +145,7 @@
 
   {# Files tab #}
   <div x-show="tab === 'files'" x-transition.opacity>
-    <div class="border-2 border-dashed border-base-300 rounded-box p-8 sm:p-12 text-center transition-colors"
+    <div class="border-2 border-dashed border-line rounded-box p-8 sm:p-12 text-center transition-colors"
          :class="{ 'border-primary bg-primary/5': dragging }"
          x-data="{ dragging: false }"
          @dragover.prevent="dragging = true"
@@ -201,7 +201,7 @@
 
   {# Settings #}
   {# Basic settings — always visible, the two controls every user adjusts. #}
-  <section class="mt-8 pt-6 border-t border-base-300">
+  <section class="mt-8 pt-6 border-t border-line">
     <h2 class="text-sm font-medium opacity-80 mb-3">{{ labels.UPLOAD_SECTION_BASIC }}</h2>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
       <fieldset class="fieldset w-full">
@@ -228,7 +228,7 @@
   {# Advanced settings — collapsed by default. The "已啟用 N 項" pill is a
      summary so users never have to expand the panel just to see whether
      diarization / 繁體 / LLM are on. #}
-  <section class="mt-6 pt-6 border-t border-base-300">
+  <section class="mt-6 pt-6 border-t border-line">
     <button type="button"
             class="w-full flex items-center justify-between gap-3 text-left focus-visible:outline-none"
             :aria-expanded="advancedOpen.toString()"
@@ -306,7 +306,7 @@
   {# Sticky submit footer — keeps the primary action close to the user's
      cursor regardless of how far they've scrolled (Fitts's Law). The status
      line previews how many files / URLs the current selection will submit. #}
-  <div class="sticky bottom-0 -mx-4 sm:-mx-6 lg:-mx-8 mt-8 bg-base-100/95 backdrop-blur border-t border-base-300 px-4 sm:px-6 lg:px-8 py-3 z-10">
+  <div class="sticky bottom-0 -mx-4 sm:-mx-6 lg:-mx-8 mt-8 bg-base-100/95 backdrop-blur border-t border-line px-4 sm:px-6 lg:px-8 py-3 z-10">
     <div class="flex items-center gap-3">
       <span class="text-sm opacity-70 flex-1 min-w-0 truncate" x-text="statusLine"></span>
       <button type="submit" class="btn btn-primary btn-lg gap-2" :disabled="uploading">

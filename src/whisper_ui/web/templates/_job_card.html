@@ -55,7 +55,7 @@
     {# Inline export dropdown #}
     <div class="dropdown dropdown-end" x-data="{ open: false }" @click.away="open = false">
       <button class="btn btn-ghost btn-xs" @click="open = !open">{{ labels.JOBS_INLINE_EXPORT }}</button>
-      <ul class="dropdown-content menu bg-base-100 rounded-box shadow-lg z-10 w-36 p-1 border border-base-300" x-show="open" x-transition>
+      <ul class="dropdown-content menu bg-base-100 rounded-box shadow-lg z-10 w-36 p-1 border border-line" x-show="open" x-transition>
         {% for fmt in export_formats %}
         <li><a href="/viewer/{{ job.id }}/export/{{ fmt }}" download class="text-xs">{{ fmt|upper }}</a></li>
         {% endfor %}

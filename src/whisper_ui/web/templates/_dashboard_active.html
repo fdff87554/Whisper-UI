@@ -41,7 +41,7 @@
     {%- else %}{% set _stage = 'transcribe' %}{% endif -%}
     {%- set _stage_idx = _stage_keys.index(_stage) -%}
     <div id="dashboard-active-{{ job.id }}"
-         class="card bg-base-200 border border-base-300 mb-2"
+         class="card bg-base-200 border border-line mb-2"
          x-data="{
            createdAt: {{ (job.created_at or '')|tojson }},
            progress: {{ progress_val }},
@@ -76,7 +76,7 @@
           <span class="px-2 py-0.5 rounded-full
             {% if is_current %}bg-primary text-primary-content
             {% elif is_done %}bg-base-300 opacity-70
-            {% else %}border border-base-300 opacity-50{% endif %}">
+            {% else %}border border-line opacity-50{% endif %}">
             {{ _stage_labels[key] }}
           </span>
           {% if not loop.last %}<span class="opacity-30">›</span>{% endif %}

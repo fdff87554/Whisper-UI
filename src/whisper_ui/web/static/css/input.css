@@ -38,6 +38,21 @@
   --border: 1px;
   --depth: 1;
   --noise: 0;
+  /* Custom tokens — defined inside the theme so daisyUI emits them across all
+     of its selectors (:root default, [data-theme], theme-controller, and the
+     prefers-dark `:root:not([data-theme])` media block). That makes them track
+     the theme exactly like the base colors, including before Alpine sets
+     data-theme and inside a nested [data-theme="whisper-light"] subtree. */
+  --whisper-line: oklch(80% 0.01 260); /* card/divider border; see border-line */
+  --whisper-loader: oklch(52% 0.13 168); /* #page-loader progress bar */
+  --speaker-1: oklch(55% 0.2 240);
+  --speaker-2: oklch(55% 0.2 25);
+  --speaker-3: oklch(55% 0.2 168);
+  --speaker-4: oklch(55% 0.2 310);
+  --speaker-5: oklch(55% 0.2 80);
+  --speaker-6: oklch(55% 0.2 130);
+  --speaker-7: oklch(55% 0.2 200);
+  --speaker-8: oklch(55% 0.2 55);
 }
 
 /* Custom dark theme */
@@ -74,10 +89,32 @@
   --border: 1px;
   --depth: 1;
   --noise: 0;
+  /* Dark counterparts of the custom tokens (see the light theme block). */
+  --whisper-line: oklch(42% 0.02 260);
+  --whisper-loader: oklch(65% 0.14 168);
+  --speaker-1: oklch(75% 0.15 240);
+  --speaker-2: oklch(75% 0.15 25);
+  --speaker-3: oklch(75% 0.15 168);
+  --speaker-4: oklch(75% 0.15 310);
+  --speaker-5: oklch(75% 0.15 80);
+  --speaker-6: oklch(75% 0.15 130);
+  --speaker-7: oklch(75% 0.15 200);
+  --speaker-8: oklch(75% 0.15 55);
 }
 
 @theme {
   --font-sans: "Noto Sans TC", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* Expose the themed --whisper-line (defined in the daisyUI theme blocks above)
+   as a Tailwind color so `border-line` utilities exist. `inline` keeps the
+   utility referencing the variable, so it tracks the active theme. The border
+   is decoupled from base-300, which doubles as a surface fill (bg-base-300
+   hover/badge) and so can't also serve as a visible border in dark mode where
+   its L15 sits ~3% from the L18 card surface (issue #61). Values tuned against
+   tests/visual (OKLCH lightness is not WCAG luminance). */
+@theme inline {
+  --color-line: var(--whisper-line);
 }
 
 /* htmx transition classes */
@@ -95,13 +132,10 @@
   top: 0;
   left: 0;
   height: 3px;
-  background: oklch(52% 0.13 168);
+  background: var(--whisper-loader);
   z-index: 9999;
   transition: width 0.3s ease;
   width: 0;
-}
-[data-theme="whisper-dark"] #page-loader {
-  background: oklch(65% 0.14 168);
 }
 
 /* Status accent border colors for job cards */
@@ -137,24 +171,17 @@
   .status-pulse { animation: none; opacity: 0.8; }
 }
 
-/* Speaker colors for viewer */
-.speaker-1 { color: oklch(55% 0.2 240); }
-.speaker-2 { color: oklch(55% 0.2 25); }
-.speaker-3 { color: oklch(55% 0.2 168); }
-.speaker-4 { color: oklch(55% 0.2 310); }
-.speaker-5 { color: oklch(55% 0.2 80); }
-.speaker-6 { color: oklch(55% 0.2 130); }
-.speaker-7 { color: oklch(55% 0.2 200); }
-.speaker-8 { color: oklch(55% 0.2 55); }
-
-[data-theme="whisper-dark"] .speaker-1 { color: oklch(75% 0.15 240); }
-[data-theme="whisper-dark"] .speaker-2 { color: oklch(75% 0.15 25); }
-[data-theme="whisper-dark"] .speaker-3 { color: oklch(75% 0.15 168); }
-[data-theme="whisper-dark"] .speaker-4 { color: oklch(75% 0.15 310); }
-[data-theme="whisper-dark"] .speaker-5 { color: oklch(75% 0.15 80); }
-[data-theme="whisper-dark"] .speaker-6 { color: oklch(75% 0.15 130); }
-[data-theme="whisper-dark"] .speaker-7 { color: oklch(75% 0.15 200); }
-[data-theme="whisper-dark"] .speaker-8 { color: oklch(75% 0.15 55); }
+/* Speaker colors for viewer. Values live in the daisyUI theme blocks
+   (--speaker-N) so they track the theme — including prefers-dark before
+   data-theme is set, and nested [data-theme] subtrees — automatically. */
+.speaker-1 { color: var(--speaker-1); }
+.speaker-2 { color: var(--speaker-2); }
+.speaker-3 { color: var(--speaker-3); }
+.speaker-4 { color: var(--speaker-4); }
+.speaker-5 { color: var(--speaker-5); }
+.speaker-6 { color: var(--speaker-6); }
+.speaker-7 { color: var(--speaker-7); }
+.speaker-8 { color: var(--speaker-8); }
 
 /* Transcript reading experience */
 .transcript-container {
