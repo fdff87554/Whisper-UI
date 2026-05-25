@@ -1,0 +1,12 @@
+{# Job-list search box. Filters [data-job-search] rows within #job-list-wrapper
+   by filename / source URL, and re-applies on every htmx swap (poll, filter,
+   bulk refresh) so the filter survives list re-renders. Depends on
+   filterJobs() from _job_interactions.html. #}
+{% from "_icons.html" import icon_search %}
+<div class="relative max-w-sm" x-data="{ query: '' }"
+     @htmx:after-swap.window="filterJobs(query)">
+  <span class="absolute left-3 top-1/2 -translate-y-1/2 opacity-40">{{ icon_search("w-4 h-4") }}</span>
+  <input type="search" x-model="query" @input="filterJobs(query)"
+         placeholder="{{ labels.JOBS_SEARCH_PLACEHOLDER }}"
+         class="input input-sm w-full pl-9">
+</div>

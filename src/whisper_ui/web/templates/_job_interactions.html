@@ -78,7 +78,12 @@
 </div>
 
 <script>
-document.addEventListener('alpine:init', () => {
+function registerJobSelectionStore() {
+  // Idempotent. hx-boost only swaps #page-content, so this script re-runs when
+  // the user navigates into /jobs or /admin/jobs *after* Alpine has already
+  // started — at which point an `alpine:init` listener would never fire again.
+  // The guard also preserves an in-progress selection across re-runs.
+  if (window.Alpine && Alpine.store('jobSelection')) return;
   Alpine.store('jobSelection', {
     // id -> status, so the bar can gate actions on the selected jobs'
     // states (export needs a completed job, retry needs a failed one).
@@ -181,7 +186,10 @@ document.addEventListener('alpine:init', () => {
         });
     }
   });
-});
+}
+document.addEventListener('alpine:init', registerJobSelectionStore);
+// Boosted nav re-runs this script after alpine:init already fired — register now.
+if (window.Alpine) registerJobSelectionStore();
 
 function confirmDialog() {
   return {
@@ -221,5 +229,15 @@ function batchDownloadDialog() {
       this.$refs.dlDialog.close();
     }
   }
+}
+
+// Client-side job search. Scoped to the list wrapper and re-applied after
+// every htmx swap (3s poll / filter change), since a morph drops the inline
+// display styles a one-shot @input filter would have set.
+function filterJobs(query) {
+  const q = (query || '').toLowerCase();
+  document.querySelectorAll('#job-list-wrapper [data-job-search]').forEach(el => {
+    el.style.display = !q || el.dataset.jobSearch.toLowerCase().includes(q) ? '' : 'none';
+  });
 }
 </script>

@@ -329,6 +329,36 @@ def test_admin_bulk_delete_operates_across_owners(app, db, test_admin, test_user
     assert db.get_job(job.id) is None
 
 
+# The following three assert the *markup* that drives JS-only fixes (the runtime
+# behaviour needs a browser); they guard against the wiring regressing.
+def test_admin_jobs_registers_bulk_store_idempotently(app, test_admin):
+    """The store must register on a boosted nav too, not only at alpine:init."""
+    client = authed_test_client(app, test_admin)
+
+    resp = client.get("/admin/jobs")
+
+    assert "registerJobSelectionStore" in resp.text
+    assert "if (window.Alpine) registerJobSelectionStore()" in resp.text
+
+
+def test_admin_jobs_search_reapplies_after_swap(app, test_admin):
+    client = authed_test_client(app, test_admin)
+
+    resp = client.get("/admin/jobs")
+
+    assert "filterJobs(query)" in resp.text
+    assert "htmx:after-swap" in resp.text  # re-filter after poll/filter swaps
+
+
+def test_admin_users_reset_modal_clears_input(app, test_admin):
+    client = authed_test_client(app, test_admin)
+
+    resp = client.get("/admin/users")
+
+    assert 'x-ref="form"' in resp.text
+    assert "$refs.form.reset()" in resp.text
+
+
 def test_admin_create_user_validates_username_pattern(app, db, test_admin):
     client = authed_test_client(app, test_admin)
 

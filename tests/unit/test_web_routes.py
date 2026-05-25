@@ -163,6 +163,15 @@ class TestJobsRoutes:
         assert resp.status_code == 200
         assert "任務列表" in resp.text
 
+    def test_jobs_page_has_idempotent_store_and_reapplying_search(self, client):
+        # The shared interactions partial must register the bulk store even on
+        # a boosted nav, and the search must re-apply after list swaps. These
+        # fixes live in the shared partial, so /jobs benefits too.
+        resp = client.get("/jobs")
+        assert "if (window.Alpine) registerJobSelectionStore()" in resp.text
+        assert "filterJobs(query)" in resp.text
+        assert "htmx:after-swap" in resp.text
+
     def test_jobs_page_htmx_request_does_not_consume_flash(self, client):
         # Queue a flash via an upload, then fetch /jobs as an htmx request:
         # partial/boosted fetches must not pop a pending flash.
