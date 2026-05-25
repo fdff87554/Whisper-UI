@@ -13,6 +13,7 @@ from whisper_ui.core.config import Settings
 from whisper_ui.core.constants import JOB_ID_DISPLAY_LENGTH, MAX_BATCH_SIZE, TIMESTAMP_DISPLAY_LENGTH
 from whisper_ui.storage.database import JobDatabase
 from whisper_ui.storage.filestore import FileStore
+from whisper_ui.web.flash import consume_flash
 
 _WEB_DIR = Path(__file__).parent
 
@@ -71,6 +72,8 @@ templates.env.filters["relative_time"] = _format_relative_time
 templates.env.globals["JOB_ID_DISPLAY_LENGTH"] = JOB_ID_DISPLAY_LENGTH
 templates.env.globals["TIMESTAMP_DISPLAY_LENGTH"] = TIMESTAMP_DISPLAY_LENGTH
 templates.env.globals["MAX_BATCH_SIZE"] = MAX_BATCH_SIZE
+# base.html consumes queued flash messages on full-page renders (see flash.py).
+templates.env.globals["consume_flash"] = consume_flash
 
 
 def get_settings(request: Request) -> Settings:

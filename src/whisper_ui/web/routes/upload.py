@@ -18,6 +18,7 @@ from whisper_ui.pipeline.audio_probe import get_audio_duration_seconds
 from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
 from whisper_ui.ui import labels as ui_labels
 from whisper_ui.web.deps import CurrentUserDep, DbDep, FileStoreDep, RedisDep, SettingsDep, templates
+from whisper_ui.web.flash import set_flash
 from whisper_ui.web.url_validation import PlaylistURLError, YouTubeURLError, validate_youtube_url
 from whisper_ui.worker.pipeline_dispatcher import enqueue_pipeline
 
@@ -25,6 +26,24 @@ _READ_CHUNK_SIZE = 1024 * 1024  # 1 MB
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _build_upload_toast(submitted: int, failed: int = 0, skipped: int = 0, deduped: int = 0) -> tuple[str, str]:
+    """Compose the post-upload toast message and category.
+
+    Mirrors the label concatenation the client used to do from query params:
+    a success base line plus optional failed / skipped / deduped clauses. The
+    category is ``warning`` whenever anything was failed or skipped.
+    """
+    message = ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", str(submitted))
+    if failed:
+        message += ui_labels.TOAST_UPLOAD_FAILED.replace("{count}", str(failed))
+    if skipped:
+        message += ui_labels.TOAST_URL_SKIPPED.replace("{count}", str(skipped))
+    if deduped:
+        message += ui_labels.TOAST_URL_DEDUPED.replace("{count}", str(deduped))
+    category = "warning" if (failed or skipped) else "success"
+    return message, category
 
 
 def _format_size(size_bytes: int) -> str:
@@ -213,12 +232,11 @@ async def upload_submit(
         batch_id or "-",
     )
 
-    redirect_url = f"/jobs?submitted={submitted_count}"
-    if failed_count:
-        redirect_url += f"&failed={failed_count}"
+    message, category = _build_upload_toast(submitted_count, failed=failed_count)
+    set_flash(request, message, category)
     if htmx:
-        return Response(status_code=204, headers={"HX-Redirect": redirect_url})
-    return RedirectResponse(redirect_url, status_code=303)
+        return Response(status_code=204, headers={"HX-Redirect": "/jobs"})
+    return RedirectResponse("/jobs", status_code=303)
 
 
 @router.post("/upload/url")
@@ -348,16 +366,13 @@ async def upload_url_submit(
     # Queue itself could not be constructed — that happens before any job is
     # persisted, so there is nothing to show on /jobs.
 
-    # Build redirect URL with toast info
-    parts = [f"/jobs?submitted={submitted_count}"]
-    if failed_count:
-        parts.append(f"failed={failed_count}")
-    if invalid_line_nums:
-        parts.append(f"skipped={len(invalid_line_nums)}")
-    if duplicates_removed > 0:
-        parts.append(f"deduped={duplicates_removed}")
-    redirect_url = "&".join(parts)
-
+    message, category = _build_upload_toast(
+        submitted_count,
+        failed=failed_count,
+        skipped=len(invalid_line_nums),
+        deduped=duplicates_removed,
+    )
+    set_flash(request, message, category)
     if htmx:
-        return Response(status_code=204, headers={"HX-Redirect": redirect_url})
-    return RedirectResponse(redirect_url, status_code=303)
+        return Response(status_code=204, headers={"HX-Redirect": "/jobs"})
+    return RedirectResponse("/jobs", status_code=303)

@@ -4,8 +4,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tests.conftest import authed_test_client
+from tests.conftest import authed_test_client, flash_messages
 from whisper_ui.core.models import Job, JobStatus, Segment, TranscriptResult
+from whisper_ui.ui import labels as ui_labels
 from whisper_ui.web.app import create_app
 from whisper_ui.web.deps import _format_relative_time, _format_time, make_content_disposition
 
@@ -162,10 +163,21 @@ class TestJobsRoutes:
         assert resp.status_code == 200
         assert "任務列表" in resp.text
 
-    def test_jobs_page_with_submitted(self, client):
-        resp = client.get("/jobs?submitted=3")
-        assert resp.status_code == 200
-        assert "3" in resp.text
+    def test_jobs_page_htmx_request_does_not_consume_flash(self, client):
+        # Queue a flash via an upload, then fetch /jobs as an htmx request:
+        # partial/boosted fetches must not pop a pending flash.
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
+            client.post(
+                "/upload",
+                data={"language": "zh", "model_name": "large-v3", "num_speakers": "0"},
+                files=[("files", ("test.mp3", b"fake audio data", "audio/mpeg"))],
+                follow_redirects=False,
+            )
+        htmx_resp = client.get("/jobs", headers={"HX-Request": "true"})
+        assert 'id="flash-data"' not in htmx_resp.text
+        # The flash survives and shows on the next genuine full-page load.
+        full_resp = client.get("/jobs")
+        assert 'id="flash-data"' in full_resp.text
 
     def test_jobs_list_fragment(self, client):
         resp = client.get("/jobs/list")
@@ -909,11 +921,24 @@ class TestUploadPost:
         file_list = files or [("files", ("test.mp3", b"fake audio data", "audio/mpeg"))]
         return client.post("/upload", data=data, files=file_list, follow_redirects=False)
 
-    def test_upload_post_submits_job(self, client, app):
+    def test_upload_post_redirects_to_clean_jobs_and_flashes(self, client, app):
         with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
             resp = self._upload(client)
         assert resp.status_code == 303
-        assert "/jobs?submitted=" in resp.headers["location"]
+        assert resp.headers["location"] == "/jobs"
+        # The success toast rides in the session flash, rendered on the next
+        # full-page load rather than via query params.
+        page = client.get("/jobs")
+        assert flash_messages(page.text) == [ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", "1")]
+
+    def test_upload_flash_is_consumed_after_one_render(self, client, app):
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
+            self._upload(client)
+        first = client.get("/jobs")
+        assert 'id="flash-data"' in first.text
+        # Flash is one-shot: a reload no longer re-shows the toast.
+        second = client.get("/jobs")
+        assert 'id="flash-data"' not in second.text
 
     def test_upload_clamps_diarization_and_llm_when_unavailable(self, client, db, app):
         # Force neither hf_token nor ollama_base_url, so both opt-in flags must
@@ -1080,9 +1105,12 @@ class TestUploadPost:
         ):
             resp = self._upload(client, files=files)
         assert resp.status_code == 303
-        location = resp.headers["location"]
-        assert "submitted=1" in location
-        assert "failed=1" in location
+        assert resp.headers["location"] == "/jobs"
+        page = client.get("/jobs")
+        expected = ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", "1") + ui_labels.TOAST_UPLOAD_FAILED.replace(
+            "{count}", "1"
+        )
+        assert flash_messages(page.text) == [expected]
         statuses = sorted(j.status for j in db.list_jobs())
         assert statuses == sorted([JobStatus.QUEUED, JobStatus.FAILED])
 
@@ -1114,7 +1142,9 @@ class TestUploadURLPost:
         with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
             resp = self._post_url(client)
         assert resp.status_code == 303
-        assert "/jobs?submitted=1" in resp.headers["location"]
+        assert resp.headers["location"] == "/jobs"
+        page = client.get("/jobs")
+        assert flash_messages(page.text) == [ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", "1")]
 
     def test_upload_url_creates_job_with_source_url(self, client, app, db):
         with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
@@ -1156,7 +1186,7 @@ class TestUploadURLPost:
                 follow_redirects=False,
             )
         assert resp.status_code == 204
-        assert resp.headers.get("HX-Redirect") == "/jobs?submitted=1"
+        assert resp.headers.get("HX-Redirect") == "/jobs"
 
     def test_upload_url_passes_job_without_probed_duration(self, client, app, db):
         with patch("whisper_ui.web.routes.upload.enqueue_pipeline") as mock_enqueue:
@@ -1180,10 +1210,12 @@ class TestUploadURLPost:
         ):
             resp = self._post_url(client)
         assert resp.status_code == 303
-        location = resp.headers["location"]
-        assert "/jobs?submitted=0" in location
-        assert "failed=1" in location
-        assert "error=queue" not in location
+        assert resp.headers["location"] == "/jobs"
+        page = client.get("/jobs")
+        assert flash_messages(page.text) == [
+            ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", "0")
+            + ui_labels.TOAST_UPLOAD_FAILED.replace("{count}", "1")
+        ]
         jobs = db.list_jobs()
         assert len(jobs) == 1
         assert jobs[0].status == JobStatus.FAILED
@@ -1208,9 +1240,7 @@ class TestUploadURLPost:
                 follow_redirects=False,
             )
         assert resp.status_code == 204
-        hx_redirect = resp.headers.get("HX-Redirect", "")
-        assert "/jobs?submitted=0" in hx_redirect
-        assert "failed=1" in hx_redirect
+        assert resp.headers.get("HX-Redirect") == "/jobs"
         jobs = db.list_jobs()
         assert len(jobs) == 1
         assert jobs[0].status == JobStatus.FAILED
