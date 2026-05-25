@@ -163,6 +163,22 @@ class TestJobsRoutes:
         assert resp.status_code == 200
         assert "任務列表" in resp.text
 
+    def test_jobs_page_has_idempotent_store_and_reapplying_search(self, client):
+        # The shared interactions partial must register the bulk store even on
+        # a boosted nav, and the search must re-apply after list swaps. These
+        # fixes live in the shared partial, so /jobs benefits too.
+        resp = client.get("/jobs")
+        assert "if (window.Alpine) registerJobSelectionStore()" in resp.text
+        assert "filterJobs(query)" in resp.text
+        assert "htmx:after-swap" in resp.text
+
+    def test_jobs_bulk_confirm_uses_v2_modal_not_native_confirm(self, client):
+        # Bulk retry/delete should open the shared confirm modal, matching the
+        # per-row/batch actions, rather than a native window.confirm.
+        resp = client.get("/jobs")
+        assert "window.confirm(" not in resp.text  # no native confirm *call*
+        assert "onConfirm: () => this._runBulk(action)" in resp.text
+
     def test_jobs_page_htmx_request_does_not_consume_flash(self, client):
         # Queue a flash via an upload, then fetch /jobs as an htmx request:
         # partial/boosted fetches must not pop a pending flash.

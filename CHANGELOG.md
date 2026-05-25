@@ -9,6 +9,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- Admin pages aligned with the v2 design language. `/admin/jobs` now reuses the
+  user-facing job list (`_job_list.html`/`_job_card.html`) with a sticky filter,
+  search, per-job owner badges, and **multi-select bulk delete / retry / export**
+  — these reuse the existing `/jobs/bulk/*` endpoints, which already operate
+  across every owner for admins (no new authorization surface). The shared
+  selection store and confirm/batch-download dialogs were extracted into
+  `_job_interactions.html` so the user and admin job pages share one copy.
+  `/admin/users` gains role/status filter chips and moves the reset-password
+  form into a shared modal. (Re-transcribe stays hidden on the admin view.)
+  Bulk retry/delete confirmation now routes through the same v2 confirm modal
+  as the per-row and batch actions instead of a native `window.confirm`.
 - Upload result toasts ("已提交 N 個任務" …) now use a server-side session
   flash instead of redirect query params persisted to `localStorage`. The
   upload handlers stash the message in the session and redirect to a clean
@@ -20,6 +31,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- The jobs bulk-select store now initializes on hx-boosted navigation, not
+  only on first full page load. Because `hx-boost` swaps only `#page-content`,
+  arriving at `/jobs` (or `/admin/jobs`) from another page re-ran the store
+  script after `alpine:init` had already fired, leaving `$store.jobSelection`
+  undefined and the row checkboxes / bulk bar inert. Registration is now
+  idempotent. The job-list search likewise re-applies after each htmx
+  poll/filter swap instead of being cleared by the list re-render.
 - Named volumes no longer keep `root:root` ownership inherited from an
   earlier root-era deployment. The Dockerfile build-time `chown` only seeds
   an empty volume on first mount, so a populated `app-data` or `model-cache`

@@ -34,6 +34,18 @@
 
 <div class="flex items-center justify-between gap-2 mt-1">
   <span class="text-xs opacity-50">
+    {# owner_usernames is only passed on the admin jobs view, so this badge
+       is invisible on the user-facing /jobs page. Legacy NULL-owner jobs and
+       deleted owners fall back to the "no owner" label. #}
+    {% if owner_usernames is defined %}
+    <span class="badge badge-ghost badge-xs mr-1">
+      {%- if job.owner_id and owner_usernames.get(job.owner_id) -%}
+        {{ owner_usernames[job.owner_id] }}
+      {%- else -%}
+        {{ labels.ADMIN_JOBS_OWNER_UNKNOWN }}
+      {%- endif -%}
+    </span>
+    {% endif %}
     {{ job.language }} | {{ job.model_name }} | {{ job.created_at|relative_time }}
     {% if job.source_job_id %}<span class="badge badge-ghost badge-xs ml-1">{{ labels.JOBS_VERSION_BADGE }}</span>{% endif %}
   </span>
@@ -52,6 +64,10 @@
         {% endif %}
       </ul>
     </div>
+    {# Re-transcribe is hidden on the admin view (admin_view): oversight does
+       not re-run other users' jobs, and it avoids pulling the re-transcribe
+       modal dependency into the admin page. #}
+    {% if not admin_view %}
     <button class="btn btn-ghost btn-xs"
             @click="$dispatch('open-retranscribe', {
               jobId: '{{ job.id }}',
@@ -62,6 +78,7 @@
               traditional: {{ job.convert_to_traditional|tojson }},
               llm: {{ job.llm_correction_enabled|tojson }}
             })">{{ labels.JOBS_RE_TRANSCRIBE }}</button>
+    {% endif %}
     {% endif %}
 
     {% if job.status.value == 'failed' %}

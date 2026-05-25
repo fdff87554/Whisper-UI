@@ -22,6 +22,7 @@ from argon2.exceptions import VerificationError, VerifyMismatchError
 
 if TYPE_CHECKING:
     import sqlite3
+    from collections.abc import Iterable
 
 # Production uses argon2-cffi's safe defaults (time_cost=3, memory_cost=64MiB,
 # parallelism=4). Tests monkeypatch this to a cheap configuration.
@@ -117,6 +118,24 @@ def get_user_by_username(conn: sqlite3.Connection, username: str) -> User | None
 def list_users(conn: sqlite3.Connection) -> list[User]:
     rows = conn.execute("SELECT * FROM users ORDER BY created_at ASC").fetchall()
     return [_row_to_user(r) for r in rows]
+
+
+def usernames_for(conn: sqlite3.Connection, user_ids: Iterable[int]) -> dict[int, str]:
+    """Return ``{id: username}`` for the given ids in one query.
+
+    Used by the admin jobs list to label only the owners visible on the current
+    page, instead of scanning the whole users table on every poll. Unknown ids
+    are simply absent from the result; an empty input returns ``{}``.
+    """
+    ids = list(dict.fromkeys(user_ids))  # de-dupe, preserve order
+    if not ids:
+        return {}
+    placeholders = ",".join("?" * len(ids))
+    rows = conn.execute(
+        f"SELECT id, username FROM users WHERE id IN ({placeholders})",
+        ids,
+    ).fetchall()
+    return {row["id"]: row["username"] for row in rows}
 
 
 def count_active_admins(conn: sqlite3.Connection) -> int:

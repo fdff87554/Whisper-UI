@@ -45,6 +45,17 @@ def test_admin_can_load_admin_users_page(app, db, test_admin, bob):
     assert test_admin.username in resp.text
 
 
+def test_admin_users_page_has_v2_filter_and_reset_modal(app, db, test_admin, bob):
+    client = authed_test_client(app, test_admin)
+
+    resp = client.get("/admin/users")
+
+    assert resp.status_code == 200
+    assert "x-data=\"{ f: 'all' }\"" in resp.text  # client-side filter chips
+    assert "open-reset-pw" in resp.text  # reset-password opens the shared modal
+    assert "resetPasswordDialog()" in resp.text
+
+
 def test_admin_users_page_uses_admin_users_active_value(app, test_admin):
     """The sidebar's Alpine :class binding compares activePage to the
     literal 'admin_users' (not 'admin'), so the route must set that
@@ -267,6 +278,85 @@ def test_admin_jobs_page_blocks_non_admin(app, test_user):
     resp = client.get("/admin/jobs")
 
     assert resp.status_code == 403
+
+
+def test_admin_jobs_page_renders_v2_bulk_select(app, db, test_admin, test_user):
+    """The admin jobs page reuses the v2 job list: per-row select checkboxes
+    bound to the shared store and a sticky filter pointing at the admin
+    fragment endpoint."""
+    db.insert_job(Job(filename="a.mp3", status=JobStatus.COMPLETED, language="zh", owner_id=test_user.id))
+    client = authed_test_client(app, test_admin)
+
+    resp = client.get("/admin/jobs")
+
+    assert resp.status_code == 200
+    assert "$store.jobSelection.toggle" in resp.text  # row checkbox wired to bulk store
+    assert "/admin/jobs/list?status=" in resp.text  # filter/poll stays in admin scope
+    assert "$store.jobSelection.bulkAction('export'" in resp.text  # bulk bar present
+
+
+def test_admin_jobs_list_fragment_returns_all_owners(app, db, test_admin, test_user, bob):
+    db.insert_job(Job(filename="alices.mp3", status=JobStatus.COMPLETED, language="zh", owner_id=test_user.id))
+    db.insert_job(Job(filename="bobs.mp3", status=JobStatus.COMPLETED, language="zh", owner_id=bob.id))
+    db.insert_job(Job(filename="legacy.mp3", status=JobStatus.COMPLETED, language="zh"))  # NULL owner
+    client = authed_test_client(app, test_admin)
+
+    resp = client.get("/admin/jobs/list")
+
+    assert resp.status_code == 200
+    for name in ("alices.mp3", "bobs.mp3", "legacy.mp3"):
+        assert name in resp.text
+
+
+def test_admin_jobs_list_fragment_blocks_non_admin(app, test_user):
+    client = authed_test_client(app, test_user)
+
+    resp = client.get("/admin/jobs/list")
+
+    assert resp.status_code == 403
+
+
+def test_admin_bulk_delete_operates_across_owners(app, db, test_admin, test_user):
+    """Admin bulk actions reuse /jobs/bulk/* — owner_filter is None for admins,
+    so they act on jobs owned by other users."""
+    job = Job(filename="alices.mp3", status=JobStatus.COMPLETED, language="zh", owner_id=test_user.id)
+    db.insert_job(job)
+    client = authed_test_client(app, test_admin)
+
+    resp = client.post("/jobs/bulk/delete", data={"job_ids": job.id}, follow_redirects=False)
+
+    assert resp.status_code == 204
+    assert db.get_job(job.id) is None
+
+
+# The following three assert the *markup* that drives JS-only fixes (the runtime
+# behaviour needs a browser); they guard against the wiring regressing.
+def test_admin_jobs_registers_bulk_store_idempotently(app, test_admin):
+    """The store must register on a boosted nav too, not only at alpine:init."""
+    client = authed_test_client(app, test_admin)
+
+    resp = client.get("/admin/jobs")
+
+    assert "registerJobSelectionStore" in resp.text
+    assert "if (window.Alpine) registerJobSelectionStore()" in resp.text
+
+
+def test_admin_jobs_search_reapplies_after_swap(app, test_admin):
+    client = authed_test_client(app, test_admin)
+
+    resp = client.get("/admin/jobs")
+
+    assert "filterJobs(query)" in resp.text
+    assert "htmx:after-swap" in resp.text  # re-filter after poll/filter swaps
+
+
+def test_admin_users_reset_modal_clears_input(app, test_admin):
+    client = authed_test_client(app, test_admin)
+
+    resp = client.get("/admin/users")
+
+    assert 'x-ref="form"' in resp.text
+    assert "$refs.form.reset()" in resp.text
 
 
 def test_admin_create_user_validates_username_pattern(app, db, test_admin):

@@ -3,7 +3,7 @@
    reference (defined in base.html) makes data-morph-skip-checked elements opt
    out of `checked` syncing so user-toggled batch collapses are not reset. #}
 <div id="job-list-wrapper"
-     hx-get="/jobs/list?status={{ status|default('', true) }}&page={{ page }}"
+     hx-get="{{ list_url|default('/jobs/list', true) }}?status={{ status|default('', true) }}&page={{ page }}"
      {% if has_active %}hx-trigger="every 3s, refreshJobList from:body"{% else %}hx-trigger="refreshJobList from:body"{% endif %}
      hx-swap="morph:{morphStyle:'outerHTML', ignoreActiveValue:true, callbacks:window.__whisperUiMorphCallbacks}">
 
@@ -104,14 +104,14 @@
   <div class="flex items-center justify-center gap-4 mt-6 text-sm">
     <button class="btn btn-ghost btn-sm"
             {% if page <= 0 %}disabled{% endif %}
-            hx-get="/jobs/list?status={{ status|default('', true) }}&page={{ page - 1 }}"
+            hx-get="{{ list_url|default('/jobs/list', true) }}?status={{ status|default('', true) }}&page={{ page - 1 }}"
             hx-target="#job-list-wrapper" hx-swap="morph:outerHTML">
       {{ labels.JOBS_PAGE_PREV }}
     </button>
     <span class="opacity-60">{{ labels.JOBS_PAGE_INFO.format(current=page + 1, total=total_pages, count=total_count) }}</span>
     <button class="btn btn-ghost btn-sm"
             {% if page >= total_pages - 1 %}disabled{% endif %}
-            hx-get="/jobs/list?status={{ status|default('', true) }}&page={{ page + 1 }}"
+            hx-get="{{ list_url|default('/jobs/list', true) }}?status={{ status|default('', true) }}&page={{ page + 1 }}"
             hx-target="#job-list-wrapper" hx-swap="morph:outerHTML">
       {{ labels.JOBS_PAGE_NEXT }}
     </button>
