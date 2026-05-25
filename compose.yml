@@ -78,6 +78,21 @@ services:
       options:
         max-size: "20m"
         max-file: "5"
+  # One-shot init sidecar: the worker images run as USER 1000, but the
+  # model-cache named volume can keep root:root ownership inherited from an
+  # earlier root-era deployment (the Dockerfile build-time chown only seeds
+  # an *empty* volume on its first mount; a populated volume is left as-is).
+  # When that happens HuggingFace Hub cannot write its .no_exist negative
+  # cache and floods every job's log with "Permission denied". Re-chown the
+  # whole volume to uid 1000 on each `up` so the worker can write it.
+  # Idempotent and fast; runs once then exits before the workers start.
+  model-cache-init:
+    profiles: [gpu, cpu]
+    image: alpine:3
+    command: ["chown", "-R", "1000:1000", "/cache"]
+    volumes:
+      - model-cache:/cache
+    restart: "no"
   worker-gpu:
     profiles: [gpu]
     image: ghcr.io/fdff87554/whisper-ui-worker:${WHISPER_UI_VERSION:-latest}
@@ -126,6 +141,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      model-cache-init:
+        condition: service_completed_successfully
     deploy:
       resources:
         reservations:
@@ -185,6 +202,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      model-cache-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     logging:
       driver: json-file
