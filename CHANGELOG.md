@@ -7,6 +7,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- Upload result toasts ("已提交 N 個任務" …) now use a server-side session
+  flash instead of redirect query params persisted to `localStorage`. The
+  upload handlers stash the message in the session and redirect to a clean
+  `/jobs` (no `?submitted=&failed=…`); `base.html` consumes and renders it
+  once per genuine full-page load (htmx partial fetches and hx-boosted swaps
+  are skipped, so a poll never pops a pending flash). The flash is now truly
+  one-shot — a page reload no longer re-shows a stale toast, dropping the
+  previous 60-second `localStorage` recovery hack.
+
 ### Fixed
 
 - Named volumes no longer keep `root:root` ownership inherited from an
