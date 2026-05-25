@@ -29,6 +29,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- The jobs bulk-select store now initializes on hx-boosted navigation, not
+  only on first full page load. Because `hx-boost` swaps only `#page-content`,
+  arriving at `/jobs` (or `/admin/jobs`) from another page re-ran the store
+  script after `alpine:init` had already fired, leaving `$store.jobSelection`
+  undefined and the row checkboxes / bulk bar inert. Registration is now
+  idempotent. The job-list search likewise re-applies after each htmx
+  poll/filter swap instead of being cleared by the list re-render.
 - Named volumes no longer keep `root:root` ownership inherited from an
   earlier root-era deployment. The Dockerfile build-time `chown` only seeds
   an empty volume on first mount, so a populated `app-data` or `model-cache`
