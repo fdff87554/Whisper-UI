@@ -22,7 +22,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   in dark mode, so the outline all but disappeared. Borders now use a dedicated
   `--color-line` token (decoupled from `base-300`, which still backs surface
   fills like `bg-base-300` hovers/badges), tuned for a clearly perceptible
-  outline in both themes (measured ≈1.7:1 light, ≈2.2:1 dark).
+  outline in both themes (measured ≈1.7:1 light, ≈2.2:1 dark). The border (and
+  the page loader / speaker colors) now also follow `prefers-color-scheme: dark`
+  before a `data-theme` is set, so nothing flashes a light value on a dark
+  surface before Alpine hydrates (or when JS is unavailable).
 
 - Admin pages aligned with the v2 design language. `/admin/jobs` now reuses the
   user-facing job list (`_job_list.html`/`_job_card.html`) with a sticky filter,
