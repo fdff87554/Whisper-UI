@@ -80,6 +80,24 @@
   --font-sans: "Noto Sans TC", system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
+/* Dedicated card/divider border color, decoupled from base-300.
+   base-300 doubles as a surface fill (bg-base-300 hover/badge), so it cannot
+   also be tuned for a visible border: in dark mode its L15 sits ~3% from the
+   L18 card surface and the border all but disappears (issue #61). `--color-line`
+   is owned solely by borders. The `@theme inline` form makes the generated
+   border-line utility reference the variable directly, so the per-theme
+   override below cascades. Exact values are tuned against the contrast check
+   in tests/visual (OKLCH lightness is not WCAG luminance). */
+:root {
+  --whisper-line: oklch(80% 0.01 260);
+}
+[data-theme="whisper-dark"] {
+  --whisper-line: oklch(42% 0.02 260);
+}
+@theme inline {
+  --color-line: var(--whisper-line);
+}
+
 /* htmx transition classes */
 .htmx-settling {
   opacity: 1;

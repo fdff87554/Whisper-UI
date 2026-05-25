@@ -30,7 +30,7 @@
    full-card click target (Fitts) leading to the matching upload tab. #}
 <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
   <a href="/upload?mode=files"
-     class="card bg-base-200 border border-base-300 hover:border-primary/40 hover:bg-base-300 focus-visible:border-primary transition-colors"
+     class="card bg-base-200 border border-line hover:border-primary/40 hover:bg-base-300 focus-visible:border-primary transition-colors"
      hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true">
     <div class="card-body p-4">
       <div class="flex items-center gap-3">
@@ -43,7 +43,7 @@
     </div>
   </a>
   <a href="/upload?mode=folder"
-     class="card bg-base-200 border border-base-300 hover:border-primary/40 hover:bg-base-300 focus-visible:border-primary transition-colors"
+     class="card bg-base-200 border border-line hover:border-primary/40 hover:bg-base-300 focus-visible:border-primary transition-colors"
      hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true">
     <div class="card-body p-4">
       <div class="flex items-center gap-3">
@@ -56,7 +56,7 @@
     </div>
   </a>
   <a href="/upload?mode=url"
-     class="card bg-base-200 border border-base-300 hover:border-primary/40 hover:bg-base-300 focus-visible:border-primary transition-colors"
+     class="card bg-base-200 border border-line hover:border-primary/40 hover:bg-base-300 focus-visible:border-primary transition-colors"
      hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true">
     <div class="card-body p-4">
       <div class="flex items-center gap-3">
@@ -114,7 +114,7 @@
   <h2 class="text-lg font-medium mb-3">{{ labels.DASHBOARD_RECENT_SECTION }}</h2>
   <div class="flex flex-col gap-2">
     {% for job in recent_completed %}
-    <a href="/viewer/{{ job.id }}" class="card bg-base-200 border border-base-300 hover:border-primary/30 transition-colors">
+    <a href="/viewer/{{ job.id }}" class="card bg-base-200 border border-line hover:border-primary/30 transition-colors">
       <div class="card-body p-4">
         <div class="flex items-center justify-between gap-4">
           <div class="flex-1 min-w-0">
@@ -138,7 +138,7 @@
 
 {# Onboarding — first-run guidance replaces the lonely empty-state glyph. #}
 {% if total_jobs == 0 %}
-<section class="card bg-base-200 border border-base-300 mb-8">
+<section class="card bg-base-200 border border-line mb-8">
   <div class="card-body p-6">
     <h2 class="text-lg font-medium mb-4">{{ labels.DASHBOARD_ONBOARDING_TITLE }}</h2>
     <ol class="space-y-3">

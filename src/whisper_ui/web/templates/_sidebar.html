@@ -2,7 +2,7 @@
 {# Desktop sidebar (>= lg) and tablet icon rail (md-lg) #}
 <div class="flex flex-col h-full bg-base-200">
   {# Logo: mark on rail; mark + wordmark on full sidebar #}
-  <div class="p-4 flex items-center gap-2 border-b border-base-300">
+  <div class="p-4 flex items-center gap-2 border-b border-line">
     <img src="{{ url_for('static', path='images/logo-mark.svg') }}"
          alt="Whisper UI" width="32" height="32"
          class="w-8 h-8 shrink-0" />
@@ -63,7 +63,7 @@
   </nav>
 
   {# Theme toggle #}
-  <div class="p-4 border-t border-base-300">
+  <div class="p-4 border-t border-line">
     <button class="btn btn-ghost btn-sm w-full justify-start gap-2"
             :aria-label="theme === 'whisper-light' ? '{{ labels.THEME_TOGGLE_DARK }}' : '{{ labels.THEME_TOGGLE_LIGHT }}'"
             @click="theme = theme === 'whisper-light' ? 'whisper-dark' : 'whisper-light'">
@@ -78,7 +78,7 @@
 
   {# Current user + logout — only rendered when a user is on request.state. #}
   {% if request.state and request.state.user %}
-  <div class="p-4 border-t border-base-300">
+  <div class="p-4 border-t border-line">
     <div class="hidden lg:block text-xs opacity-70 mb-2 truncate" title="{{ request.state.user.username }}">
       {{ labels.AUTH_SIGNED_IN_AS.format(username=request.state.user.username) }}
       {% if request.state.user.is_admin %}

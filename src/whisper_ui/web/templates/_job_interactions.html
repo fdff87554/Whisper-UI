@@ -7,7 +7,7 @@
 {# Bulk action bar — sticky at the bottom when any rows are selected. #}
 <div class="fixed inset-x-0 bottom-0 md:left-14 lg:left-60 z-30 px-4 sm:px-6 lg:px-8 pb-4"
      x-data x-show="$store.jobSelection.size > 0" x-transition.opacity x-cloak>
-  <div class="card bg-base-200 border border-base-300 shadow-lg max-w-3xl mx-auto">
+  <div class="card bg-base-200 border border-line shadow-lg max-w-3xl mx-auto">
     <div class="card-body p-3 flex flex-row flex-wrap items-center gap-3">
       <span class="text-sm font-medium" x-text="`{{ labels.JOBS_BULK_SELECTED }}`.replace('{count}', $store.jobSelection.size)"></span>
       <div class="flex flex-wrap gap-2 ml-auto">

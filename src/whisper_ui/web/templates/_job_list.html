@@ -28,7 +28,7 @@
   {% set bi = batch_info[group_key] %}
   {%- set _batch_search = (group_jobs|map(attribute='filename')|join(' ')) + ' ' + (group_jobs|map(attribute='source_url')|select|join(' ')) -%}
   <div id="job-group-{{ group_key }}"
-       class="collapse collapse-arrow bg-base-200 border border-base-300"
+       class="collapse collapse-arrow bg-base-200 border border-line"
        data-job-name="{{ group_jobs[0].filename if group_jobs else '' }}"
        data-job-search="{{ _batch_search }}"
        {% if not bi.all_done %}open{% endif %}>
@@ -87,7 +87,7 @@
   {# Single job #}
   {% set job = group_jobs[0] %}
   <div id="job-{{ job.id }}"
-       class="card bg-base-200 border border-base-300 border-l-3 border-status-{{ job.status.value }}"
+       class="card bg-base-200 border border-line border-l-3 border-status-{{ job.status.value }}"
        data-job-name="{{ job.filename }}"
        data-job-search="{{ job.filename }}{% if job.source_url %} {{ job.source_url }}{% endif %}">
     <div class="card-body p-4">

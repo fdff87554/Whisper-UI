@@ -93,7 +93,7 @@
   else if (!inField && ($event.key === 'c' || $event.key === 'C')) { copyActive(); }
 ">
   {# Sticky toolbar #}
-  <div class="sticky top-0 z-10 bg-base-100 border-b border-base-300 pb-3 mb-4 pt-2">
+  <div class="sticky top-0 z-10 bg-base-100 border-b border-line pb-3 mb-4 pt-2">
     {# Export buttons #}
     <div class="flex flex-wrap items-center gap-2 mb-3">
       <div class="flex flex-wrap gap-1">
@@ -209,7 +209,7 @@
 </div>
 {% else %}
 {# No segments: export-only toolbar #}
-<div class="sticky top-0 z-10 bg-base-100 border-b border-base-300 pb-3 mb-4 pt-2">
+<div class="sticky top-0 z-10 bg-base-100 border-b border-line pb-3 mb-4 pt-2">
   <div class="flex flex-wrap items-center gap-2">
     <div class="flex flex-wrap gap-1">
       {% for fmt in export_formats %}
