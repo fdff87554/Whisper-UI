@@ -106,7 +106,6 @@ async def jobs_page(
     filestore: FileStoreDep,
     settings: SettingsDep,
     user: CurrentUserDep,
-    submitted: int | None = None,
     status: str = "",
     page: int = 0,
 ):
@@ -115,7 +114,6 @@ async def jobs_page(
     owner_id = owner_filter(user)
     ctx = _build_list_context(db, redis, filestore, status, page, owner_id)
     ctx["active_page"] = "jobs"
-    ctx["submitted"] = submitted
     ctx["status_counts"] = db.get_status_counts(owner_id=owner_id)
     # The re-transcribe modal (full page only, not the /jobs/list fragment)
     # reuses the upload form's option choices.
