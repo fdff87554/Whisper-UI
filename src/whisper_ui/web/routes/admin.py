@@ -46,6 +46,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin")
 
 
+def _add_admin_list_context(ctx: dict, db: DbDep) -> None:
+    """Augment a ``_build_list_context`` dict for the admin jobs view.
+
+    Adds the per-job owner-name lookup (for the card's owner badge), points
+    the shared ``_job_list.html`` polling/pagination at the admin fragment,
+    and flags ``admin_view`` so the card hides re-transcribe.
+    """
+    ctx["owner_usernames"] = {u.id: u.username for u in users_repo.list_users(db.conn)}
+    ctx["list_url"] = "/admin/jobs/list"
+    ctx["admin_view"] = True
+
+
 @router.get("/users", response_class=HTMLResponse)
 async def admin_users_page(request: Request, db: DbDep, admin: AdminUserDep, error: str = ""):
     """Render the user list with per-user action buttons."""
@@ -223,9 +235,26 @@ async def admin_jobs_page(
     ctx["active_page"] = "admin_jobs"
     ctx["status_counts"] = db.get_status_counts()
     ctx["DEFAULT_JOBS_PER_PAGE"] = DEFAULT_JOBS_PER_PAGE
-
-    # Provide username lookup for the per-job "owner" badge so the template
-    # does not have to query per row.
-    users = {u.id: u.username for u in users_repo.list_users(db.conn)}
-    ctx["owner_usernames"] = users
+    _add_admin_list_context(ctx, db)
     return templates.TemplateResponse(request=request, name="admin_jobs.html", context=ctx)
+
+
+@router.get("/jobs/list", response_class=HTMLResponse)
+async def admin_jobs_list_fragment(
+    request: Request,
+    db: DbDep,
+    redis: RedisDep,
+    filestore: FileStoreDep,
+    admin: AdminUserDep,
+    status: str = "",
+    page: int = 0,
+):
+    """Admin counterpart of ``/jobs/list``: the htmx-polled list fragment with
+    no owner filter, so it stays in the ``/admin/jobs`` context (owner badges,
+    admin filter/pagination URLs)."""
+    valid_statuses = {"", *JobStatus}
+    if status not in valid_statuses:
+        status = ""
+    ctx = _build_list_context(db, redis, filestore, status, page, owner_id=None)
+    _add_admin_list_context(ctx, db)
+    return templates.TemplateResponse(request=request, name="_job_list.html", context=ctx)
