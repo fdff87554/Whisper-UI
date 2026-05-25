@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from tests.conftest import flash_messages
 from whisper_ui.core.config import Settings
 from whisper_ui.core.constants import (
     WORKER_QUEUE_CPU,
@@ -35,6 +36,7 @@ from whisper_ui.pipeline.align import AlignStage
 from whisper_ui.pipeline.transcribe import TranscribeStage
 from whisper_ui.storage.database import JobDatabase
 from whisper_ui.storage.filestore import FileStore
+from whisper_ui.ui import labels as ui_labels
 from whisper_ui.web.app import create_app
 from whisper_ui.worker.runtime import WorkerRuntime
 
@@ -279,7 +281,12 @@ def test_upload_to_export_golden_path(
             follow_redirects=False,
         )
     assert resp.status_code == 303, resp.text
-    assert "submitted=1" in resp.headers["location"]
+    assert resp.headers["location"] == "/jobs"
+    # The success toast is delivered as a server-side session flash, shown
+    # once on the next full-page load rather than via query params. Verifying
+    # it here exercises the flash round-trip through the real SessionMiddleware.
+    page = integration_client.get("/jobs")
+    assert flash_messages(page.text) == [ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", "1")]
 
     jobs = db.list_jobs()
     assert len(jobs) == 1
