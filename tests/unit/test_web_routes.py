@@ -1,28 +1,14 @@
 from __future__ import annotations
 
-import json
-import re
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tests.conftest import authed_test_client
+from tests.conftest import authed_test_client, flash_messages
 from whisper_ui.core.models import Job, JobStatus, Segment, TranscriptResult
 from whisper_ui.ui import labels as ui_labels
 from whisper_ui.web.app import create_app
 from whisper_ui.web.deps import _format_relative_time, _format_time, make_content_disposition
-
-_FLASH_RE = re.compile(r'<script id="flash-data" type="application/json">(.*?)</script>', re.S)
-
-
-def _flash_messages(html: str) -> list[str]:
-    """Extract the messages from the rendered flash-data JSON island.
-
-    Jinja's ``tojson`` escapes non-ASCII (e.g. Chinese → ``\\uXXXX``), so the
-    raw HTML is not a reliable substring target; parse the JSON instead.
-    """
-    match = _FLASH_RE.search(html)
-    return [entry["message"] for entry in json.loads(match.group(1))] if match else []
 
 
 @pytest.fixture
@@ -943,7 +929,7 @@ class TestUploadPost:
         # The success toast rides in the session flash, rendered on the next
         # full-page load rather than via query params.
         page = client.get("/jobs")
-        assert _flash_messages(page.text) == [ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", "1")]
+        assert flash_messages(page.text) == [ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", "1")]
 
     def test_upload_flash_is_consumed_after_one_render(self, client, app):
         with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
@@ -1124,7 +1110,7 @@ class TestUploadPost:
         expected = ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", "1") + ui_labels.TOAST_UPLOAD_FAILED.replace(
             "{count}", "1"
         )
-        assert _flash_messages(page.text) == [expected]
+        assert flash_messages(page.text) == [expected]
         statuses = sorted(j.status for j in db.list_jobs())
         assert statuses == sorted([JobStatus.QUEUED, JobStatus.FAILED])
 
@@ -1158,7 +1144,7 @@ class TestUploadURLPost:
         assert resp.status_code == 303
         assert resp.headers["location"] == "/jobs"
         page = client.get("/jobs")
-        assert _flash_messages(page.text) == [ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", "1")]
+        assert flash_messages(page.text) == [ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", "1")]
 
     def test_upload_url_creates_job_with_source_url(self, client, app, db):
         with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
@@ -1226,7 +1212,7 @@ class TestUploadURLPost:
         assert resp.status_code == 303
         assert resp.headers["location"] == "/jobs"
         page = client.get("/jobs")
-        assert _flash_messages(page.text) == [
+        assert flash_messages(page.text) == [
             ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", "0")
             + ui_labels.TOAST_UPLOAD_FAILED.replace("{count}", "1")
         ]

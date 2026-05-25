@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from typing import TYPE_CHECKING
 
 import pytest
@@ -22,6 +23,18 @@ if TYPE_CHECKING:
 # sign manufactured session cookies in the helpers below, so it must match
 # the SESSION_SECRET env var that `_test_session_secret` injects.
 TEST_SESSION_SECRET = "test-session-secret-not-real-do-not-reuse"
+
+_FLASH_ISLAND_RE = re.compile(r'<script id="flash-data" type="application/json">(.*?)</script>', re.S)
+
+
+def flash_messages(html: str) -> list[str]:
+    """Extract the flash messages base.html renders into its JSON island.
+
+    Jinja's ``tojson`` escapes non-ASCII (e.g. Chinese → ``\\uXXXX``), so the
+    raw HTML is not a reliable substring target; parse the JSON instead.
+    """
+    match = _FLASH_ISLAND_RE.search(html)
+    return [entry["message"] for entry in json.loads(match.group(1))] if match else []
 
 
 @pytest.fixture
