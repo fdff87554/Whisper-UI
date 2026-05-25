@@ -53,7 +53,10 @@ def _add_admin_list_context(ctx: dict, db: DbDep) -> None:
     the shared ``_job_list.html`` polling/pagination at the admin fragment,
     and flags ``admin_view`` so the card hides re-transcribe.
     """
-    ctx["owner_usernames"] = {u.id: u.username for u in users_repo.list_users(db.conn)}
+    # Look up only the owners shown on this page (the list is paginated), not
+    # the whole users table — this fragment is re-rendered by the 3s poll.
+    owner_ids = {job.owner_id for _, jobs in ctx["groups"] for job in jobs if job.owner_id}
+    ctx["owner_usernames"] = users_repo.usernames_for(db.conn, owner_ids)
     ctx["list_url"] = "/admin/jobs/list"
     ctx["admin_view"] = True
 

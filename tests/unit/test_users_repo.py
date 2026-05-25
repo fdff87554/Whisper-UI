@@ -31,6 +31,35 @@ def test_create_user_admin_flag_persists(conn):
     assert user.is_admin is True
 
 
+def test_usernames_for_returns_mapping_for_requested_ids(conn):
+    alice = users_repo.create_user(conn, "alice", "password123")
+    bob = users_repo.create_user(conn, "bob", "password123")
+
+    result = users_repo.usernames_for(conn, [alice.id, bob.id])
+
+    assert result == {alice.id: "alice", bob.id: "bob"}
+
+
+def test_usernames_for_skips_unknown_ids(conn):
+    alice = users_repo.create_user(conn, "alice", "password123")
+
+    result = users_repo.usernames_for(conn, [alice.id, 999999])
+
+    assert result == {alice.id: "alice"}
+
+
+def test_usernames_for_empty_input_returns_empty_dict(conn):
+    users_repo.create_user(conn, "alice", "password123")
+
+    assert users_repo.usernames_for(conn, []) == {}
+
+
+def test_usernames_for_deduplicates_ids(conn):
+    alice = users_repo.create_user(conn, "alice", "password123")
+
+    assert users_repo.usernames_for(conn, [alice.id, alice.id]) == {alice.id: "alice"}
+
+
 def test_create_user_duplicate_username_raises(conn):
     users_repo.create_user(conn, "alice", "password123")
 
