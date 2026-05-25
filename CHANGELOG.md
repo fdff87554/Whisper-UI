@@ -7,6 +7,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- Worker logs no longer flood with HuggingFace Hub "Could not cache
+  non-existence ... Permission denied" warnings on every job. The
+  `model-cache` volume could retain `root:root` ownership inherited from an
+  earlier root-era deployment, which blocked the uid-1000 worker from
+  writing the Hub's `.no_exist` negative cache. A one-shot `model-cache-init`
+  sidecar now `chown`s the volume to uid 1000 before the workers start
+  (runs on both the `gpu` and `cpu` profiles).
+
 ## [2.4.0] - 2026-05-24
 
 ### Added
