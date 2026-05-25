@@ -79,3 +79,26 @@ def test_auto_theme_border_follows_prefers_dark(page: Page) -> None:
     auto = tuple(page.locator("#card-auto").evaluate(_TO_RGB, "borderTopColor"))
     dark = tuple(page.locator("#card-dark").evaluate(_TO_RGB, "borderTopColor"))
     assert auto == dark, f"auto-theme border {auto} != dark border {dark} (bright-border regression)"
+
+
+def test_explicit_light_border_ignores_system_dark_preference(page: Page) -> None:
+    """A nested/explicit data-theme=whisper-light keeps the light border even
+    when the OS prefers dark — it must not inherit the root's dark fallback."""
+    page.emulate_media(color_scheme="light")
+    page.goto(_HARNESS.resolve().as_uri())
+    under_light = tuple(page.locator("#card-light").evaluate(_TO_RGB, "borderTopColor"))
+    page.emulate_media(color_scheme="dark")
+    page.goto(_HARNESS.resolve().as_uri())
+    under_dark = tuple(page.locator("#card-light").evaluate(_TO_RGB, "borderTopColor"))
+    dark_border = tuple(page.locator("#card-dark").evaluate(_TO_RGB, "borderTopColor"))
+    assert under_dark == under_light, f"explicit-light border drifted under dark pref: {under_dark} != {under_light}"
+    assert under_dark != dark_border, "explicit-light border matched the dark theme (regression)"
+
+
+def test_speaker_colors_switch_between_themes(page: Page) -> None:
+    """Guards the var-based speaker colors: the same .speaker-1 renders a
+    different color under whisper-light vs whisper-dark."""
+    page.goto(_HARNESS.resolve().as_uri())
+    light = tuple(page.locator("#spk-light").evaluate(_TO_RGB, "color"))
+    dark = tuple(page.locator("#spk-dark").evaluate(_TO_RGB, "color"))
+    assert light != dark, f"speaker color did not switch per theme: {light} == {dark}"
