@@ -9,13 +9,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- Worker logs no longer flood with HuggingFace Hub "Could not cache
-  non-existence ... Permission denied" warnings on every job. The
-  `model-cache` volume could retain `root:root` ownership inherited from an
-  earlier root-era deployment, which blocked the uid-1000 worker from
-  writing the Hub's `.no_exist` negative cache. A one-shot `model-cache-init`
-  sidecar now `chown`s the volume to uid 1000 before the workers start
-  (runs on both the `gpu` and `cpu` profiles).
+- Named volumes no longer keep `root:root` ownership inherited from an
+  earlier root-era deployment. The Dockerfile build-time `chown` only seeds
+  an empty volume on first mount, so a populated `app-data` or `model-cache`
+  could stay root-owned and block the uid-1000 services: `app-data` failed
+  DB/upload writes, and `model-cache` flooded every job's log with
+  HuggingFace "Could not cache non-existence ... Permission denied" warnings
+  for its `.no_exist` negative cache. A one-shot `volume-init` sidecar now
+  re-owns both volumes to uid 1000 before the frontend and workers start. It
+  is guarded — the recursive `chown` runs only when a volume is not already
+  uid-1000 owned, so steady-state restarts cost one `stat` per volume rather
+  than a full walk.
 
 ## [2.4.0] - 2026-05-24
 
