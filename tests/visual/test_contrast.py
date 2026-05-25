@@ -68,3 +68,14 @@ def test_card_border_is_distinct_from_surface(page: Page, card_id: str) -> None:
     assert ratio >= _MIN_CONTRAST, (
         f"{card_id}: border {border} vs surface {surface} contrast {ratio:.2f} < required {_MIN_CONTRAST}"
     )
+
+
+def test_auto_theme_border_follows_prefers_dark(page: Page) -> None:
+    """With no data-theme set (pre-hydration / JS off) and the system preferring
+    dark, the border must use the dark value — not the bright light default.
+    Asserts the no-data-theme card matches the explicit dark card."""
+    page.emulate_media(color_scheme="dark")
+    page.goto(_HARNESS.resolve().as_uri())
+    auto = tuple(page.locator("#card-auto").evaluate(_TO_RGB, "borderTopColor"))
+    dark = tuple(page.locator("#card-dark").evaluate(_TO_RGB, "borderTopColor"))
+    assert auto == dark, f"auto-theme border {auto} != dark border {dark} (bright-border regression)"

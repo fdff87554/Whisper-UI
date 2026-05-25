@@ -94,6 +94,15 @@
 [data-theme="whisper-dark"] {
   --whisper-line: oklch(42% 0.02 260);
 }
+/* Before Alpine sets data-theme (or with JS disabled) daisyUI already serves
+   its dark surfaces under prefers-dark via :root:not([data-theme]); mirror
+   that here so the border doesn't stay bright on a dark surface. Explicit
+   data-theme (either value) still takes over once present. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --whisper-line: oklch(42% 0.02 260);
+  }
+}
 @theme inline {
   --color-line: var(--whisper-line);
 }
@@ -120,6 +129,11 @@
 }
 [data-theme="whisper-dark"] #page-loader {
   background: oklch(65% 0.14 168);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) #page-loader {
+    background: oklch(65% 0.14 168);
+  }
 }
 
 /* Status accent border colors for job cards */
@@ -173,6 +187,18 @@
 [data-theme="whisper-dark"] .speaker-6 { color: oklch(75% 0.15 130); }
 [data-theme="whisper-dark"] .speaker-7 { color: oklch(75% 0.15 200); }
 [data-theme="whisper-dark"] .speaker-8 { color: oklch(75% 0.15 55); }
+
+/* prefers-dark fallback (before data-theme is set), mirroring daisyUI. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .speaker-1 { color: oklch(75% 0.15 240); }
+  :root:not([data-theme]) .speaker-2 { color: oklch(75% 0.15 25); }
+  :root:not([data-theme]) .speaker-3 { color: oklch(75% 0.15 168); }
+  :root:not([data-theme]) .speaker-4 { color: oklch(75% 0.15 310); }
+  :root:not([data-theme]) .speaker-5 { color: oklch(75% 0.15 80); }
+  :root:not([data-theme]) .speaker-6 { color: oklch(75% 0.15 130); }
+  :root:not([data-theme]) .speaker-7 { color: oklch(75% 0.15 200); }
+  :root:not([data-theme]) .speaker-8 { color: oklch(75% 0.15 55); }
+}
 
 /* Transcript reading experience */
 .transcript-container {

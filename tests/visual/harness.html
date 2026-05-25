@@ -14,6 +14,11 @@
     <link rel="stylesheet" href="../../src/whisper_ui/web/static/style.css" />
   </head>
   <body>
+    <!-- No data-theme wrapper: exercises the pre-hydration / JS-off state
+         where daisyUI + our fallbacks follow prefers-color-scheme. -->
+    <div id="card-auto" class="card bg-base-200 border border-line">
+      <div class="card-body">auto card</div>
+    </div>
     <section data-theme="whisper-light">
       <div id="card-light" class="card bg-base-200 border border-line">
         <div class="card-body">light card</div>
