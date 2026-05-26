@@ -448,7 +448,7 @@ async def delete_job(job_id: str, db: DbDep, filestore: FileStoreDep, redis: Red
     except OSError as exc:
         # Keep the DB row + Redis state + audit log silent so retrying the
         # delete is a no-op-then-real-delete instead of "DB row gone but
-        # files still on disk". See PR #53 review F2.
+        # files still on disk".
         logger.error(
             "job delete aborted: filestore reclaim failed for job_id=%s user_id=%s: %s",
             job.id,
@@ -530,7 +530,7 @@ async def delete_batch(batch_id: str, db: DbDep, filestore: FileStoreDep, redis:
         except OSError as exc:
             # Per-job atomicity: keep the failing job's DB row + Redis
             # state so the user can retry just that one. Other jobs in
-            # the batch still get cleaned. See PR #53 review F2.
+            # the batch still get cleaned.
             logger.error(
                 "batch delete skipped one job: job_id=%s batch_id=%s user_id=%s: %s",
                 job.id,

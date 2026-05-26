@@ -115,10 +115,10 @@ def cancel_remaining_subjobs(
        running job — it only removes pending / deferred ones from the
        queue. For running jobs ``send_stop_job_command`` is fired first;
        RQ delivers it via Redis pub/sub and the owning worker raises a
-       stop exception at the next safe point. (See PR #39 review R3:
-       without this, the diarize branch could keep running after
-       transcribe failed and eventually write its result into the Redis
-       context store, polluting a later retry.)
+       stop exception at the next safe point. Without this, the diarize
+       branch could keep running after transcribe failed and eventually
+       write its result into the Redis context store, polluting a later
+       retry.
     2. **Still queued / deferred.** ``send_stop_job_command`` is a no-op
        for jobs that have not started, so it is followed by ``cancel()``
        to evict them from the queue registry. Downstream dependent jobs

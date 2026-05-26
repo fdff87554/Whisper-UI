@@ -181,8 +181,8 @@ def _log_stage_start(stage_name: str, parent_job_id: str) -> int:
 
     Shared between :func:`_run_single_stage` and :func:`run_transcribe_align`
     (which has its own driver but still wants identical observability
-    coverage — PR #53 review F3) so the two paths cannot drift on log
-    format or which context fields are included.
+    coverage) so the two paths cannot drift on log format or which
+    context fields are included.
     """
     timeout_seconds = _current_job_timeout()
     generation = _current_generation()

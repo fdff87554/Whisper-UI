@@ -84,10 +84,9 @@ logger = logging.getLogger(__name__)
 # Redis keys for tracking sub-jobs and the generation counter. The
 # subjobs set is scoped per-generation so a stale callback from a
 # superseded attempt cannot accidentally enumerate the new attempt's
-# sub-jobs. See Commit 18 / PR #39 Round 2 review for the full rationale:
-# an earlier version of this module stored all sub-jobs under a single
-# parent-scoped key and cleared it on retry, which made attempt 2's ids
-# visible to attempt 1's late finalize callback.
+# sub-jobs. An earlier design stored all sub-jobs under a single
+# parent-scoped key and cleared it on retry, which made a new attempt's
+# ids visible to the previous attempt's late finalize callback.
 def _subjobs_key(parent_job_id: str, generation: int) -> str:
     return f"whisper:pipeline:{parent_job_id}:subjobs:{generation}"
 
@@ -201,7 +200,7 @@ def enqueue_pipeline(
     # its own finalize callback (or expire naturally via PIPELINE_STATE_TTL_SECONDS),
     # and attempt 2's callback only ever looks at its own generation's set.
     # This is what keeps a stale attempt 1 callback from cancelling attempt
-    # 2's live sub-jobs — the mechanism that broke in Round 2 review.
+    # 2's live sub-jobs.
 
     timeout = calculate_job_timeout(job.duration, settings)
     success_cb = Callback("whisper_ui.worker.pipeline_dispatcher.finalize_success")
@@ -302,8 +301,7 @@ def finalize_success(rq_job, connection, _result) -> None:
     since this sub-job was enqueued (e.g. the user retried mid-pipeline),
     the callback short-circuits without touching any state. Without this
     guard, a stale attempt-1 success callback could mark an in-progress
-    attempt 2 as COMPLETED with attempt 1's transcript file — see PR #39
-    Round 2 review R2-1.
+    attempt 2 as COMPLETED with attempt 1's transcript file.
     """
     parent_job_id = rq_job.meta.get("parent_job_id") if rq_job.meta else None
     if not parent_job_id:
@@ -384,8 +382,7 @@ def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> No
     the callback short-circuits without cancelling or marking anything.
     Without this guard an attempt 1 failure could mark an in-flight
     attempt 2 as FAILED and cancel all of attempt 2's sub-jobs — the
-    exact bug from PR #39 Round 2 review R2-1 that the reproduction
-    test below covers.
+    bug the reproduction test below covers.
     """
     parent_job_id = rq_job.meta.get("parent_job_id") if rq_job.meta else None
     if not parent_job_id:
