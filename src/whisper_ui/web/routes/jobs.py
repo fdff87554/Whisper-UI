@@ -226,8 +226,8 @@ async def bulk_job_action(
             raise HTTPException(status_code=404, detail="No matching jobs")
         try:
             zip_data = await asyncio.to_thread(create_batch_zip, jobs, filestore, format_name)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from None
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Unsupported export format") from None
         if zip_data is None:
             raise HTTPException(status_code=404, detail="No completed results in selection")
         filename = f"selection_{format_name}.zip"
@@ -570,8 +570,8 @@ async def batch_download(
 
     try:
         zip_data = await asyncio.to_thread(create_batch_zip, all_jobs, filestore, format_name)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Unsupported export format") from None
     if zip_data is None:
         raise HTTPException(status_code=404, detail="No completed results in batch")
 

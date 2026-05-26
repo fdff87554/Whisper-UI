@@ -913,6 +913,8 @@ class TestViewerRoutes:
         job = _create_completed_job(db, filestore)
         resp = client.get(f"/viewer/{job.id}/export/invalid_format")
         assert resp.status_code == 400
+        # The fixed error message must not echo the caller-supplied format.
+        assert "invalid_format" not in resp.text
 
     def test_export_non_ascii_filename(self, client, db, filestore):
         result = TranscriptResult(segments=[], language="zh", duration=60.0)

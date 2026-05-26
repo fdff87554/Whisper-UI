@@ -112,8 +112,9 @@ async def export_download(job_id: str, format_name: str, db: DbDep, filestore: F
 
     try:
         exporter = get_exporter(format_name)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
+    except ValueError:
+        # Fixed message: do not echo the caller-supplied format name back.
+        raise HTTPException(status_code=400, detail="Unsupported export format") from None
     data = exporter.export(result)
     filename = f"{Path(job.filename).stem}{exporter.file_extension}"
 
