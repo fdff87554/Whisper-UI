@@ -63,6 +63,31 @@ def _htmx_error(message: str) -> Response:
     return HTMLResponse(content=html)
 
 
+# Number of leading bytes inspected to reject obvious non-media uploads.
+_MAGIC_SNIFF_BYTES = 16
+# Binary signatures for file types that are never audio/video. This is a
+# denylist, not an allowlist: it rejects a payload disguised with a media
+# extension (e.g. a PDF renamed to .mp3) without risking false rejection of
+# the many legitimate media containers. ffmpeg remains the real gate
+# downstream — anything that slips past here still fails preprocessing.
+_DENY_UPLOAD_SIGNATURES = (
+    b"%PDF",  # PDF
+    b"MZ",  # Windows PE / DOS executable
+    b"\x7fELF",  # ELF executable
+    b"PK\x03\x04",  # ZIP / Office / jar
+    b"\x1f\x8b",  # gzip
+    b"\xd0\xcf\x11\xe0",  # legacy OLE (old Office)
+)
+
+
+def _is_disallowed_upload(head: bytes) -> bool:
+    """Return True for leading bytes that clearly belong to a non-media file."""
+    stripped = head.lstrip()
+    if stripped.startswith((b"<", b"#!")):  # HTML/XML/SVG markup or a script
+        return True
+    return head.startswith(_DENY_UPLOAD_SIGNATURES)
+
+
 async def _stream_to_file(upload: UploadFile, dest: Path, max_size: int) -> bool:
     """Stream upload chunks directly to disk. Return False if file exceeds max_size."""
     total = 0
@@ -181,6 +206,21 @@ async def upload_submit(
             batch_id=batch_id,
             owner_id=user.id,
         )
+
+        header = await uploaded_file.read(_MAGIC_SNIFF_BYTES)
+        await uploaded_file.seek(0)
+        if _is_disallowed_upload(header):
+            logger.warning(
+                "upload rejected (non-media content): user_id=%s filename=%r",
+                user.id,
+                display_name,
+            )
+            msg = ui_labels.UPLOAD_INVALID_FILE_CONTENT.format(name=display_name)
+            return _error_redirect_or_fragment(
+                request,
+                f"/upload?error=invalid_content&name={quote(display_name)}",
+                msg,
+            )
 
         dest = filestore.prepare_upload_path(job.id, display_name)
         within_limit = await _stream_to_file(uploaded_file, dest, max_size)

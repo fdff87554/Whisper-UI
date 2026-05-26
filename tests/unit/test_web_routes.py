@@ -956,6 +956,24 @@ class TestUploadPost:
         second = client.get("/jobs")
         assert 'id="flash-data"' not in second.text
 
+    def test_upload_rejects_pdf_disguised_as_audio(self, client):
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
+            resp = self._upload(
+                client,
+                files=[("files", ("evil.mp3", b"%PDF-1.7 not really audio", "audio/mpeg"))],
+            )
+        assert resp.status_code == 303
+        assert "error=invalid_content" in resp.headers["location"]
+
+    def test_upload_rejects_html_disguised_as_audio(self, client):
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
+            resp = self._upload(
+                client,
+                files=[("files", ("evil.mp4", b"<!DOCTYPE html><html>", "video/mp4"))],
+            )
+        assert resp.status_code == 303
+        assert "error=invalid_content" in resp.headers["location"]
+
     def test_upload_clamps_diarization_and_llm_when_unavailable(self, client, db, app):
         # Force neither hf_token nor ollama_base_url, so both opt-in flags must
         # be clamped to False at persistence even when posted true.
