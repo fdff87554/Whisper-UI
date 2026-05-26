@@ -29,21 +29,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _build_upload_toast(submitted: int, failed: int = 0, skipped: int = 0, deduped: int = 0) -> tuple[str, str]:
+def _build_upload_toast(
+    submitted: int, failed: int = 0, skipped: int = 0, deduped: int = 0, skipped_files: int = 0
+) -> tuple[str, str]:
     """Compose the post-upload toast message and category.
 
     Mirrors the label concatenation the client used to do from query params:
-    a success base line plus optional failed / skipped / deduped clauses. The
-    category is ``warning`` whenever anything was failed or skipped.
+    a success base line plus optional failed / skipped-url / skipped-file /
+    deduped clauses. The category is ``warning`` whenever anything was failed
+    or skipped.
     """
     message = ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", str(submitted))
     if failed:
         message += ui_labels.TOAST_UPLOAD_FAILED.replace("{count}", str(failed))
     if skipped:
         message += ui_labels.TOAST_URL_SKIPPED.replace("{count}", str(skipped))
+    if skipped_files:
+        message += ui_labels.TOAST_FILE_SKIPPED.replace("{count}", str(skipped_files))
     if deduped:
         message += ui_labels.TOAST_URL_DEDUPED.replace("{count}", str(deduped))
-    category = "warning" if (failed or skipped) else "success"
+    category = "warning" if (failed or skipped or skipped_files) else "success"
     return message, category
 
 
@@ -186,6 +191,11 @@ async def upload_submit(
     batch_id = uuid.uuid4().hex if len(valid_files) > 1 else None
     submitted_count = 0
     failed_count = 0
+    skipped_count = 0
+    # Captured from the first skipped file so that a batch where *every* file is
+    # invalid can surface a precise reason on the upload page instead of a
+    # "0 submitted" toast.
+    first_skip: tuple[str, str] | None = None
 
     logger.info(
         "upload batch starting: user_id=%s files=%d batch_id=%s",
@@ -197,6 +207,24 @@ async def upload_submit(
     max_size = settings.max_upload_size
     for uploaded_file in valid_files:
         display_name = PurePosixPath(uploaded_file.filename or "unknown").name
+
+        # Reject non-media content by skipping just this file, not the whole
+        # batch: earlier valid files in the loop have already been inserted and
+        # enqueued, so an early return here would leave a partial batch while
+        # telling the user the upload failed (prompting a duplicate re-upload).
+        header = await uploaded_file.read(_MAGIC_SNIFF_BYTES)
+        await uploaded_file.seek(0)
+        if _is_disallowed_upload(header):
+            logger.warning(
+                "upload skipped (non-media content): user_id=%s filename=%r",
+                user.id,
+                display_name,
+            )
+            skipped_count += 1
+            if first_skip is None:
+                msg = ui_labels.UPLOAD_INVALID_FILE_CONTENT.format(name=display_name)
+                first_skip = (f"/upload?error=invalid_content&name={quote(display_name)}", msg)
+            continue
 
         job = Job(
             filename=display_name,
@@ -212,38 +240,22 @@ async def upload_submit(
             owner_id=user.id,
         )
 
-        header = await uploaded_file.read(_MAGIC_SNIFF_BYTES)
-        await uploaded_file.seek(0)
-        if _is_disallowed_upload(header):
-            logger.warning(
-                "upload rejected (non-media content): user_id=%s filename=%r",
-                user.id,
-                display_name,
-            )
-            msg = ui_labels.UPLOAD_INVALID_FILE_CONTENT.format(name=display_name)
-            return _error_redirect_or_fragment(
-                request,
-                f"/upload?error=invalid_content&name={quote(display_name)}",
-                msg,
-            )
-
         dest = filestore.prepare_upload_path(job.id, display_name)
         within_limit = await _stream_to_file(uploaded_file, dest, max_size)
         if not within_limit:
             dest.unlink(missing_ok=True)
             limit_str = _format_size(max_size)
             logger.warning(
-                "upload rejected: user_id=%s filename=%r exceeds max_size=%d",
+                "upload skipped: user_id=%s filename=%r exceeds max_size=%d",
                 user.id,
                 display_name,
                 max_size,
             )
-            msg = ui_labels.UPLOAD_FILE_TOO_LARGE.format(name=display_name, limit=limit_str)
-            return _error_redirect_or_fragment(
-                request,
-                f"/upload?error=too_large&name={quote(display_name)}&limit={quote(limit_str)}",
-                msg,
-            )
+            skipped_count += 1
+            if first_skip is None:
+                msg = ui_labels.UPLOAD_FILE_TOO_LARGE.format(name=display_name, limit=limit_str)
+                first_skip = (f"/upload?error=too_large&name={quote(display_name)}&limit={quote(limit_str)}", msg)
+            continue
 
         job.filepath = str(dest)
         job.duration = await asyncio.to_thread(get_audio_duration_seconds, dest, job_id=job.id)
@@ -271,14 +283,22 @@ async def upload_submit(
             failed_count += 1
 
     logger.info(
-        "upload batch finished: user_id=%s submitted=%d failed=%d batch_id=%s",
+        "upload batch finished: user_id=%s submitted=%d failed=%d skipped=%d batch_id=%s",
         user.id,
         submitted_count,
         failed_count,
+        skipped_count,
         batch_id or "-",
     )
 
-    message, category = _build_upload_toast(submitted_count, failed=failed_count)
+    # Every file was skipped as invalid (nothing queued and nothing failed at
+    # enqueue): show the first skip reason on the upload page rather than a
+    # "0 submitted" toast on /jobs.
+    if submitted_count == 0 and failed_count == 0 and first_skip is not None:
+        url, msg = first_skip
+        return _error_redirect_or_fragment(request, url, msg)
+
+    message, category = _build_upload_toast(submitted_count, failed=failed_count, skipped_files=skipped_count)
     set_flash(request, message, category)
     if htmx:
         return Response(status_code=204, headers={"HX-Redirect": "/jobs"})

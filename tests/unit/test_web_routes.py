@@ -1007,6 +1007,30 @@ class TestUploadPost:
         assert resp.status_code == 303
         assert "error=invalid_content" in resp.headers["location"]
 
+    def test_upload_skips_invalid_file_but_submits_valid_ones(self, client, db, app):
+        """A non-media file in a batch is skipped, not fatal: the valid files
+        are still queued and the user is told how many were skipped (rather
+        than the whole batch failing and prompting a duplicate re-upload)."""
+        files = [
+            ("files", ("good.mp3", b"ID3 fake audio payload", "audio/mpeg")),
+            ("files", ("evil.mp3", b"%PDF-1.7 not really audio", "audio/mpeg")),
+        ]
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline") as mock_enqueue:
+            resp = self._upload(client, files=files)
+
+        # Valid file went through; redirect is the success path to /jobs.
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/jobs"
+        assert mock_enqueue.call_count == 1
+        jobs = db.list_jobs()
+        assert len(jobs) == 1 and jobs[0].filename == "good.mp3"
+        # The toast reports the skipped file.
+        page = client.get("/jobs")
+        expected = ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", "1") + ui_labels.TOAST_FILE_SKIPPED.replace(
+            "{count}", "1"
+        )
+        assert flash_messages(page.text) == [expected]
+
     def test_upload_clamps_diarization_and_llm_when_unavailable(self, client, db, app):
         # Force neither hf_token nor ollama_base_url, so both opt-in flags must
         # be clamped to False at persistence even when posted true.
@@ -1146,7 +1170,7 @@ class TestUploadPost:
         assert "diarize=False" in inserted
         assert "llm=False" in inserted
 
-    def test_upload_too_large_logs_rejection(self, client, app, caplog):
+    def test_upload_too_large_logs_skip(self, client, app, caplog):
         import logging as _logging
 
         app.state.settings = app.state.settings.model_copy(update={"max_upload_size": 5})
@@ -1157,7 +1181,7 @@ class TestUploadPost:
         ):
             self._upload(client, files=files)
 
-        assert any("upload rejected" in r.getMessage() for r in caplog.records)
+        assert any("upload skipped" in r.getMessage() for r in caplog.records)
 
     def test_upload_partial_enqueue_failure_reports_failed_count(self, client, app, db):
         # First file succeeds, second raises — simulate a transient Redis error.
