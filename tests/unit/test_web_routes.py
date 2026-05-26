@@ -284,6 +284,29 @@ class TestJobsRoutes:
         assert f'id="job-{job_a.id}"' in resp.text
         assert f'id="job-{job_b.id}"' in resp.text
 
+    def test_batch_collapse_uses_store_not_open_attribute(self, client, db):
+        """Regression: the batch collapse must be driven by the Alpine
+        batchCollapse store, not the server-rendered [open] attribute that
+        fought the user's checkbox toggle under polling (auto-collapse bug).
+        """
+        batch_id = "abcdef12" * 4
+        db.insert_job(Job(filename="a.mp3", status=JobStatus.PROCESSING, batch_id=batch_id))
+        db.insert_job(Job(filename="b.mp3", status=JobStatus.PROCESSING, batch_id=batch_id))
+
+        resp = client.get("/jobs/list")
+        assert resp.status_code == 200
+        group = resp.text.split(f'id="job-group-{batch_id}"', 1)[1].split("collapse-content", 1)[0]
+        # The div's opening tag must not carry the server-driven [open] attr,
+        # and the checkbox must not be a server-rendered `checked` boolean.
+        div_open_tag = group.split(">", 1)[0]
+        assert " open" not in div_open_tag
+        input_tag = group.split("<input", 1)[1].split(">", 1)[0]
+        assert " checked" not in input_tag  # only :checked (bound), not a boolean
+        # Expansion is now store-driven with a server-provided default.
+        assert "batchCollapse" in group
+        assert ":checked=" in group
+        assert "isOpen(groupKey" in group
+
     def test_jobs_page_with_job(self, client, db, filestore):
         _create_completed_job(db, filestore)
         resp = client.get("/jobs")

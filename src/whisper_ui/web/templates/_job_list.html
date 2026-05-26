@@ -31,8 +31,15 @@
        class="collapse collapse-arrow bg-base-200 border border-line"
        data-job-name="{{ group_jobs[0].filename if group_jobs else '' }}"
        data-job-search="{{ _batch_search }}"
-       {% if not bi.all_done %}open{% endif %}>
-    <input type="checkbox" data-morph-skip-checked {% if not bi.all_done %}checked{% endif %}>
+       x-data="{ groupKey: '{{ group_key }}' }">
+    {# Expand state lives in the batchCollapse store (see base.html), not in
+       the DOM: the checkbox is the DaisyUI open control (:has(:checked)) but
+       its checked value is bound to the store so a 3s poll / filter swap /
+       nav never resets it. defaultOpen = "batch still processing". #}
+    <input type="checkbox" data-morph-skip-checked
+           aria-label="{{ labels.JOBS_BATCH_TOGGLE_LABEL }}"
+           :checked="$store.batchCollapse.isOpen(groupKey, {{ 'false' if bi.all_done else 'true' }})"
+           @change="$store.batchCollapse.set(groupKey, $event.target.checked)">
     <div class="collapse-title">
       <div class="flex flex-wrap items-center gap-2 mb-1">
         <span class="font-medium">{{ labels.JOBS_BATCH_LABEL.format(count=bi.total) }}</span>
