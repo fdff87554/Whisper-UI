@@ -156,6 +156,14 @@ class TestUploadRoutes:
         assert resp.status_code == 200
         assert "tab: 'files'" in resp.text
 
+    def test_upload_page_renders_invalid_content_error(self, client):
+        """The invalid_content redirect must render its message, not an empty
+        alert (the template previously had no branch for this error code)."""
+        resp = client.get("/upload?error=invalid_content&name=evil.mp3")
+        assert resp.status_code == 200
+        assert "不是有效的音訊或影片" in resp.text
+        assert "evil.mp3" in resp.text
+
 
 class TestJobsRoutes:
     def test_jobs_page_empty(self, client):

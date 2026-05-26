@@ -17,6 +17,8 @@
   {{ labels.UPLOAD_BATCH_EXCEEDS_LIMIT.format(limit=MAX_BATCH_SIZE, count=request.query_params.get('count', '?')) }}
   {% elif error == 'too_large' %}
   {{ labels.UPLOAD_FILE_TOO_LARGE.format(name=request.query_params.get('name', '?'), limit=request.query_params.get('limit', '?')) }}
+  {% elif error == 'invalid_content' %}
+  {{ labels.UPLOAD_INVALID_FILE_CONTENT.format(name=request.query_params.get('name', '?')) }}
   {% elif error == 'invalid_language' %}
   {{ labels.UPLOAD_INVALID_LANGUAGE.format(value=request.query_params.get('value', '?')) }}
   {% elif error == 'invalid_model' %}
