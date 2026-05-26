@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     # proxy resets these headers — otherwise a hostile client can spoof
     # them to evade rate limits and CSRF.
     trust_proxy_headers: bool = False
+    # Allow open self-service registration once the first admin exists. The
+    # initial bootstrap account is always allowed (an admin must be created to
+    # manage the instance); when this is False every later /register attempt
+    # is refused so accounts can only be provisioned by an admin. Default True
+    # preserves the original open-signup behaviour.
+    allow_registration: bool = True
 
     # Upload
     max_upload_size: int = 2 * 1024 * 1024 * 1024  # 2 GB

@@ -261,6 +261,53 @@ def test_register_first_account_becomes_admin(app, db):
     assert app.state.bootstrap_done is True
 
 
+def test_register_page_redirects_to_login_when_signup_closed(app, db, test_admin):
+    """With an admin present and ALLOW_REGISTRATION off, the form is hidden."""
+    app.state.settings.allow_registration = False
+    client = _anon_client(app)
+
+    resp = client.get("/register")
+
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/login"
+
+
+def test_register_post_refused_when_signup_closed(app, db, test_admin):
+    """A hand-crafted POST cannot create an account once signup is closed."""
+    app.state.settings.allow_registration = False
+    client = _anon_client(app)
+
+    resp = client.post("/register", data={"username": "intruder", "password": "password123"})
+
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/login"
+    assert users_repo.get_user_by_username(db.conn, "intruder") is None
+
+
+def test_register_bootstrap_allowed_even_when_signup_closed(app, db):
+    """The very first admin must always be creatable, even with signup closed,
+    otherwise a fresh install with ALLOW_REGISTRATION=false locks itself out."""
+    app.state.settings.allow_registration = False
+    client = _anon_client(app)
+
+    resp = client.post("/register", data={"username": "founder", "password": "password123"})
+
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/"
+    created = users_repo.get_user_by_username(db.conn, "founder")
+    assert created is not None and created.is_admin is True
+
+
+def test_login_page_hides_register_link_when_signup_closed(app, db, test_admin):
+    app.state.settings.allow_registration = False
+    client = _anon_client(app)
+
+    resp = client.get("/login")
+
+    assert resp.status_code == 200
+    assert "/register" not in resp.text
+
+
 def test_register_second_account_is_not_admin(app, db, test_admin):
     client = _anon_client(app)
 

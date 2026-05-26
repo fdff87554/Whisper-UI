@@ -72,11 +72,13 @@
         </button>
       </form>
 
+      {% if allow_registration %}
       <div class="text-center mt-4">
         <a href="/register" class="link link-hover text-sm opacity-70">
           {{ labels.AUTH_REGISTER_LINK }}
         </a>
       </div>
+      {% endif %}
     </div>
   </div>
 </body>

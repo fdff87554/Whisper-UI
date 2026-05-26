@@ -89,6 +89,7 @@ async def login_page(
             "active_page": "",
             "next": _safe_next(next_url),
             "error_message": _login_error_message(error, settings.login_lockout_seconds),
+            "allow_registration": settings.allow_registration,
         },
     )
 
@@ -229,9 +230,13 @@ def _login_error_redirect(request: Request, next_url: str, error: str) -> Respon
 
 
 @router.get("/register", response_class=HTMLResponse)
-async def register_page(request: Request, db: DbDep, error: str = ""):
+async def register_page(request: Request, db: DbDep, settings: SettingsDep, error: str = ""):
     """Render the register form. Bootstrap mode is computed from the DB."""
     bootstrap = users_repo.count_active_admins(db.conn) == 0
+
+    if not bootstrap and not settings.allow_registration:
+        # Self-service signup is closed; only an admin can create accounts.
+        return RedirectResponse("/login", status_code=status.HTTP_302_FOUND)
 
     current = getattr(request.state, "user", None)
     if current is not None and not bootstrap:
@@ -263,6 +268,7 @@ def _register_error_message(error: str) -> str | None:
 async def register_submit(
     request: Request,
     db: DbDep,
+    settings: SettingsDep,
     username: Annotated[str, Form()],
     password: Annotated[str, Form()],
 ):
@@ -270,6 +276,7 @@ async def register_submit(
 
     Validation:
 
+    * self-service registration is open (or this is the bootstrap account)
     * username matches :data:`USERNAME_PATTERN`
     * password length >= :data:`MIN_PASSWORD_LENGTH`
     * username not already taken (case-insensitively, enforced by the
@@ -279,12 +286,16 @@ async def register_submit(
     account is forced to ``is_admin=True``. The query-string flag is
     cosmetic; the real determination is the DB state.
     """
+    bootstrap = users_repo.count_active_admins(db.conn) == 0
+
+    if not bootstrap and not settings.allow_registration:
+        # Closed signup: refuse even hand-crafted POSTs that skip the form.
+        return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
+
     if not USERNAME_PATTERN.fullmatch(username):
         return _redirect_after_auth(request, "/register?error=username_invalid")
     if len(password) < MIN_PASSWORD_LENGTH:
         return _redirect_after_auth(request, "/register?error=password_short")
-
-    bootstrap = users_repo.count_active_admins(db.conn) == 0
 
     try:
         user = users_repo.create_user(
