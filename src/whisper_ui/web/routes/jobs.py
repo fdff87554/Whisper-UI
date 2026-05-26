@@ -26,7 +26,7 @@ from whisper_ui.web.deps import (
     make_content_disposition,
     templates,
 )
-from whisper_ui.web.validation import validate_hex_id
+from whisper_ui.web.validation import clamp_num_speakers, validate_hex_id
 from whisper_ui.worker.pipeline_dispatcher import enqueue_pipeline
 from whisper_ui.worker.progress import RedisProgressReporter
 
@@ -374,7 +374,7 @@ async def re_transcribe_job(
         filename=src.filename,
         language=language,
         model_name=model_name,
-        num_speakers=num_speakers if num_speakers > 0 else None,
+        num_speakers=clamp_num_speakers(num_speakers) or None,
         # Clamp opt-in flags to deployment availability so the new version's
         # persisted flags are honest even if the source job (or a tampered
         # request) carries flags this deployment cannot run.

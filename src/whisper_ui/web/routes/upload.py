@@ -20,6 +20,7 @@ from whisper_ui.ui import labels as ui_labels
 from whisper_ui.web.deps import CurrentUserDep, DbDep, FileStoreDep, RedisDep, SettingsDep, templates
 from whisper_ui.web.flash import set_flash
 from whisper_ui.web.url_validation import PlaylistURLError, YouTubeURLError, validate_youtube_url
+from whisper_ui.web.validation import clamp_num_speakers
 from whisper_ui.worker.pipeline_dispatcher import enqueue_pipeline
 
 _READ_CHUNK_SIZE = 1024 * 1024  # 1 MB
@@ -171,7 +172,7 @@ async def upload_submit(
             filename=display_name,
             language=language,
             model_name=model_name,
-            num_speakers=num_speakers if num_speakers > 0 else None,
+            num_speakers=clamp_num_speakers(num_speakers) or None,
             # Clamp opt-in flags to what this deployment can actually run so the
             # persisted flag is honest and no no-op stage is enqueued.
             enable_diarization=enable_diarization and settings.diarization_available,
@@ -320,7 +321,7 @@ async def upload_url_submit(
             source_url=clean_url,
             language=language,
             model_name=model_name,
-            num_speakers=num_speakers if num_speakers > 0 else None,
+            num_speakers=clamp_num_speakers(num_speakers) or None,
             # Clamp opt-in flags to deployment availability (see file-upload branch).
             enable_diarization=enable_diarization and settings.diarization_available,
             convert_to_traditional=convert_to_traditional,
