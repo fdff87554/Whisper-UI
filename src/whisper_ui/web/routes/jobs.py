@@ -253,7 +253,6 @@ async def bulk_job_action(
                 job.result_path = None
                 job.duration = retry_duration
                 db.update_job(job)
-                redis.delete(f"job:{job.id}")
                 enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
                 succeeded += 1
             except Exception:
@@ -317,8 +316,6 @@ async def retry_job(
         job.result_path = None
         job.duration = retry_duration
         db.update_job(job)
-        redis.delete(f"job:{job.id}")
-
         enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
         logger.info(
             "job retried: job_id=%s user_id=%s filename=%r previous_error=%r",
@@ -494,7 +491,6 @@ async def retry_batch(
             job.result_path = None
             job.duration = retry_duration
             db.update_job(job)
-            redis.delete(f"job:{job.id}")
             enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
             retried += 1
         except Exception:
