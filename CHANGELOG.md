@@ -30,8 +30,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Security
 
 - Uploads are sniffed for non-media file signatures (e.g. a PDF or HTML page
-  renamed to `.mp3`) and rejected before being written to disk; ffmpeg remains
-  the downstream gate.
+  renamed to `.mp3`); such files are skipped (not written to disk), while the
+  valid files in the same batch are still queued and the skipped count is
+  surfaced. ffmpeg remains the downstream gate.
 - `num_speakers` is clamped to `[0, 20]` server-side on every submit path
   instead of trusting the form's `max` attribute.
 - The unknown-export-format error no longer echoes the caller-supplied format
