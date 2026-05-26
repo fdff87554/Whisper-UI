@@ -68,7 +68,7 @@ def _build_media_available_map(filestore, jobs: list[Job]) -> dict[str, bool]:
     return {job.id: filestore.get_source_media_path(job.id) is not None for job in jobs if job.source_url}
 
 
-def _build_list_context(db: JobDatabase, redis, filestore, status: str, page: int, owner_id: int | None) -> dict:
+def build_list_context(db: JobDatabase, redis, filestore, status: str, page: int, owner_id: int | None) -> dict:
     status_filter = status or None
     total_count = db.count_jobs(status=status_filter, owner_id=owner_id)
     total_pages = max(1, math.ceil(total_count / DEFAULT_JOBS_PER_PAGE))
@@ -112,7 +112,7 @@ async def jobs_page(
     if status not in _VALID_STATUS_FILTERS:
         status = ""
     owner_id = owner_filter(user)
-    ctx = _build_list_context(db, redis, filestore, status, page, owner_id)
+    ctx = build_list_context(db, redis, filestore, status, page, owner_id)
     ctx["active_page"] = "jobs"
     ctx["status_counts"] = db.get_status_counts(owner_id=owner_id)
     # The re-transcribe modal (full page only, not the /jobs/list fragment)
@@ -137,7 +137,7 @@ async def jobs_list_fragment(
     status: str = "",
     page: int = 0,
 ):
-    ctx = _build_list_context(db, redis, filestore, status, page, owner_filter(user))
+    ctx = build_list_context(db, redis, filestore, status, page, owner_filter(user))
     return templates.TemplateResponse(request=request, name="_job_list.html", context=ctx)
 
 
