@@ -56,6 +56,7 @@ def pick_stage_weights(job: Job, runtime: WorkerRuntime) -> StageWeights:
     return build_stage_weights(
         has_download=bool(job.source_url),
         has_llm=is_llm_active(job, runtime.settings),
+        has_diarization=job.enable_diarization,
     )
 
 
