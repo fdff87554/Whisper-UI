@@ -41,8 +41,19 @@ jobs:
         #
         # --quiet suppresses uv's progress lines so they cannot leak into
         # stdout and confuse pip-audit's requirements parser.
+        #
+        # --ignore-vuln MAL-2026-4750: this OSV/amazon-inspector advisory flags
+        # fastapi 0.136.3 for pulling the undocumented dependency `fastar` into
+        # its [standard] extra. Investigation: `fastar` is declared in FastAPI's
+        # own source (master and the 0.136.3 tag) and is bumped by Dependabot in
+        # that repo (release notes PR #15419), i.e. it is an intentional upstream
+        # dependency, not an injected/typosquatted artifact — the published wheel
+        # metadata matches source. The flag is a single-scanner "undocumented
+        # dependency / namespace-abuse" heuristic (no fixed version, no GHSA/CVE),
+        # assessed as a false positive. Scope is one advisory ID only; revisit and
+        # remove this ignore if a real GHSA/CVE for fastapi or fastar appears.
         if: matrix.python-version == '3.13'
-        run: uv export --no-emit-project --extra dev --format requirements-txt --quiet | uv tool run pip-audit -r /dev/stdin --strict
+        run: uv export --no-emit-project --extra dev --format requirements-txt --quiet | uv tool run pip-audit -r /dev/stdin --strict --ignore-vuln MAL-2026-4750
   integration-tests:
     runs-on: ubuntu-latest
     # Same dual-version coverage as lint-and-test. lupa (fakeredis [lua])
