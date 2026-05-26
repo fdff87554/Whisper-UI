@@ -18,7 +18,7 @@ the handler runs. Mutating handlers additionally guard against the
     at WARNING level for audit. A future self-service "change my
     password" page would supersede this.
 
-The global jobs page reuses :func:`jobs._build_list_context` with
+The global jobs page reuses :func:`jobs.build_list_context` with
 ``owner_id=None`` (admin view), so the same UI components render — only
 the data scope differs.
 """
@@ -40,14 +40,14 @@ from whisper_ui.storage.users_repo import LastAdminError
 from whisper_ui.ui import labels as ui_labels
 from whisper_ui.web.deps import AdminUserDep, DbDep, FileStoreDep, RedisDep, templates
 from whisper_ui.web.routes.auth_routes import MIN_PASSWORD_LENGTH, USERNAME_PATTERN
-from whisper_ui.web.routes.jobs import _build_list_context
+from whisper_ui.web.routes.jobs import build_list_context
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin")
 
 
 def _add_admin_list_context(ctx: dict, db: DbDep) -> None:
-    """Augment a ``_build_list_context`` dict for the admin jobs view.
+    """Augment a ``build_list_context`` dict for the admin jobs view.
 
     Adds the per-job owner-name lookup (for the card's owner badge), points
     the shared ``_job_list.html`` polling/pagination at the admin fragment,
@@ -234,7 +234,7 @@ async def admin_jobs_page(
     if status not in valid_statuses:
         status = ""
     # owner_id=None → no owner filter; admin sees everything.
-    ctx = _build_list_context(db, redis, filestore, status, page, owner_id=None)
+    ctx = build_list_context(db, redis, filestore, status, page, owner_id=None)
     ctx["active_page"] = "admin_jobs"
     ctx["status_counts"] = db.get_status_counts()
     ctx["DEFAULT_JOBS_PER_PAGE"] = DEFAULT_JOBS_PER_PAGE
@@ -258,6 +258,6 @@ async def admin_jobs_list_fragment(
     valid_statuses = {"", *JobStatus}
     if status not in valid_statuses:
         status = ""
-    ctx = _build_list_context(db, redis, filestore, status, page, owner_id=None)
+    ctx = build_list_context(db, redis, filestore, status, page, owner_id=None)
     _add_admin_list_context(ctx, db)
     return templates.TemplateResponse(request=request, name="_job_list.html", context=ctx)

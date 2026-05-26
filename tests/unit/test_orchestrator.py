@@ -4,9 +4,9 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from tests.helpers.orchestrator import PipelineOrchestrator
 from whisper_ui.core.exceptions import PipelineError
 from whisper_ui.core.models import Segment, TranscriptResult
-from whisper_ui.pipeline.orchestrator import PipelineOrchestrator
 
 if TYPE_CHECKING:
     from whisper_ui.pipeline.base import ProgressCallback

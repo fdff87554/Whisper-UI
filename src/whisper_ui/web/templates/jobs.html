@@ -65,9 +65,9 @@
         <div class="fieldset">
           <label class="fieldset-label gap-3">
             <input type="checkbox" class="toggle toggle-primary toggle-sm"
-                   x-model="diarization" {% if not settings.hf_token %}disabled{% endif %}>
+                   x-model="diarization" {% if not diarization_available %}disabled{% endif %}>
             <span>{{ labels.UPLOAD_ENABLE_DIARIZATION }}
-              {% if not settings.hf_token %}<span class="text-xs opacity-60">（{{ labels.UPLOAD_DIARIZATION_UNAVAILABLE }}）</span>{% endif %}
+              {% if not diarization_available %}<span class="text-xs opacity-60">（{{ labels.UPLOAD_DIARIZATION_UNAVAILABLE }}）</span>{% endif %}
             </span>
           </label>
           <div x-show="diarization" x-transition class="ml-12 mt-2">
@@ -88,9 +88,9 @@
         <div class="fieldset">
           <label class="fieldset-label gap-3">
             <input type="checkbox" class="toggle toggle-primary toggle-sm"
-                   x-model="llm" {% if not settings.ollama_base_url %}disabled{% endif %}>
+                   x-model="llm" {% if not llm_correction_available %}disabled{% endif %}>
             <span>{{ labels.UPLOAD_ENABLE_LLM_CORRECTION }}
-              {% if not settings.ollama_base_url %}<span class="text-xs opacity-60">（{{ labels.UPLOAD_LLM_CORRECTION_UNAVAILABLE }}）</span>{% endif %}
+              {% if not llm_correction_available %}<span class="text-xs opacity-60">（{{ labels.UPLOAD_LLM_CORRECTION_UNAVAILABLE }}）</span>{% endif %}
             </span>
           </label>
         </div>
@@ -111,8 +111,8 @@
 // Deployment availability mirrors the disabled state on the modal toggles,
 // so the pre-filled state never enables a feature this deployment cannot run
 // (the backend clamps too; this keeps the UI honest).
-const RT_HF_AVAILABLE = {{ 'true' if settings.hf_token else 'false' }};
-const RT_OLLAMA_AVAILABLE = {{ 'true' if settings.ollama_base_url else 'false' }};
+const RT_HF_AVAILABLE = {{ 'true' if diarization_available else 'false' }};
+const RT_OLLAMA_AVAILABLE = {{ 'true' if llm_correction_available else 'false' }};
 
 function retranscribeDialog() {
   return {

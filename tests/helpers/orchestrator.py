@@ -1,3 +1,11 @@
+"""Single-process pipeline orchestrator — test helper only.
+
+This predates the Redis/RQ DAG dispatcher (worker/pipeline_dispatcher.py)
+and is no longer used in production; it survives purely as a convenient way
+for tests to run a list of stages end-to-end in one process. Keeping it
+under tests/ keeps the shipped package free of an unused code path.
+"""
+
 from __future__ import annotations
 
 import logging

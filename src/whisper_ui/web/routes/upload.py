@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from markupsafe import escape
 
 from whisper_ui.core.constants import MAX_BATCH_SIZE
-from whisper_ui.core.languages import SUPPORTED_LANGUAGES, WHISPER_MODELS
+from whisper_ui.core.languages import DEFAULT_WHISPER_MODEL, SUPPORTED_LANGUAGES, WHISPER_MODELS
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.pipeline.audio_probe import get_audio_duration_seconds
 from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
@@ -20,6 +20,7 @@ from whisper_ui.ui import labels as ui_labels
 from whisper_ui.web.deps import CurrentUserDep, DbDep, FileStoreDep, RedisDep, SettingsDep, templates
 from whisper_ui.web.flash import set_flash
 from whisper_ui.web.url_validation import PlaylistURLError, YouTubeURLError, validate_youtube_url
+from whisper_ui.web.validation import clamp_num_speakers
 from whisper_ui.worker.pipeline_dispatcher import enqueue_pipeline
 
 _READ_CHUNK_SIZE = 1024 * 1024  # 1 MB
@@ -28,21 +29,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _build_upload_toast(submitted: int, failed: int = 0, skipped: int = 0, deduped: int = 0) -> tuple[str, str]:
+def _build_upload_toast(
+    submitted: int, failed: int = 0, skipped: int = 0, deduped: int = 0, skipped_files: int = 0
+) -> tuple[str, str]:
     """Compose the post-upload toast message and category.
 
     Mirrors the label concatenation the client used to do from query params:
-    a success base line plus optional failed / skipped / deduped clauses. The
-    category is ``warning`` whenever anything was failed or skipped.
+    a success base line plus optional failed / skipped-url / skipped-file /
+    deduped clauses. The category is ``warning`` whenever anything was failed
+    or skipped.
     """
     message = ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", str(submitted))
     if failed:
         message += ui_labels.TOAST_UPLOAD_FAILED.replace("{count}", str(failed))
     if skipped:
         message += ui_labels.TOAST_URL_SKIPPED.replace("{count}", str(skipped))
+    if skipped_files:
+        message += ui_labels.TOAST_FILE_SKIPPED.replace("{count}", str(skipped_files))
     if deduped:
         message += ui_labels.TOAST_URL_DEDUPED.replace("{count}", str(deduped))
-    category = "warning" if (failed or skipped) else "success"
+    category = "warning" if (failed or skipped or skipped_files) else "success"
     return message, category
 
 
@@ -60,6 +66,31 @@ def _htmx_error(message: str) -> Response:
     """Return an HTML fragment for htmx to swap into the feedback area."""
     html = f'<div class="alert alert-error" role="alert">{escape(message)}</div>'
     return HTMLResponse(content=html)
+
+
+# Number of leading bytes inspected to reject obvious non-media uploads.
+_MAGIC_SNIFF_BYTES = 16
+# Binary signatures for file types that are never audio/video. This is a
+# denylist, not an allowlist: it rejects a payload disguised with a media
+# extension (e.g. a PDF renamed to .mp3) without risking false rejection of
+# the many legitimate media containers. ffmpeg remains the real gate
+# downstream — anything that slips past here still fails preprocessing.
+_DENY_UPLOAD_SIGNATURES = (
+    b"%PDF",  # PDF
+    b"MZ",  # Windows PE / DOS executable
+    b"\x7fELF",  # ELF executable
+    b"PK\x03\x04",  # ZIP / Office / jar
+    b"\x1f\x8b",  # gzip
+    b"\xd0\xcf\x11\xe0",  # legacy OLE (old Office)
+)
+
+
+def _is_disallowed_upload(head: bytes) -> bool:
+    """Return True for leading bytes that clearly belong to a non-media file."""
+    stripped = head.lstrip()
+    if stripped.startswith((b"<", b"#!")):  # HTML/XML/SVG markup or a script
+        return True
+    return head.startswith(_DENY_UPLOAD_SIGNATURES)
 
 
 async def _stream_to_file(upload: UploadFile, dest: Path, max_size: int) -> bool:
@@ -95,7 +126,12 @@ async def upload_page(request: Request, settings: SettingsDep, user: CurrentUser
         name="upload.html",
         context={
             "active_page": "upload",
-            "settings": settings,
+            # Only the derived values the form needs — not the whole Settings
+            # object — so no sensitive field can leak into the rendered HTML.
+            "diarization_available": settings.diarization_available,
+            "llm_correction_available": settings.llm_correction_available,
+            "default_language": settings.language,
+            "default_model": settings.whisper_model,
             "supported_extensions": sorted(SUPPORTED_EXTENSIONS),
             "supported_languages": SUPPORTED_LANGUAGES,
             "whisper_models": WHISPER_MODELS,
@@ -121,7 +157,7 @@ async def upload_submit(
     user: CurrentUserDep,
     files: Annotated[list[UploadFile] | None, File()] = None,
     language: Annotated[str, Form()] = "zh",
-    model_name: Annotated[str, Form()] = "large-v3",
+    model_name: Annotated[str, Form()] = DEFAULT_WHISPER_MODEL,
     num_speakers: Annotated[int, Form()] = 0,
     enable_diarization: Annotated[bool, Form()] = False,
     convert_to_traditional: Annotated[bool, Form()] = False,
@@ -155,6 +191,11 @@ async def upload_submit(
     batch_id = uuid.uuid4().hex if len(valid_files) > 1 else None
     submitted_count = 0
     failed_count = 0
+    skipped_count = 0
+    # Captured from the first skipped file so that a batch where *every* file is
+    # invalid can surface a precise reason on the upload page instead of a
+    # "0 submitted" toast.
+    first_skip: tuple[str, str] | None = None
 
     logger.info(
         "upload batch starting: user_id=%s files=%d batch_id=%s",
@@ -167,11 +208,29 @@ async def upload_submit(
     for uploaded_file in valid_files:
         display_name = PurePosixPath(uploaded_file.filename or "unknown").name
 
+        # Reject non-media content by skipping just this file, not the whole
+        # batch: earlier valid files in the loop have already been inserted and
+        # enqueued, so an early return here would leave a partial batch while
+        # telling the user the upload failed (prompting a duplicate re-upload).
+        header = await uploaded_file.read(_MAGIC_SNIFF_BYTES)
+        await uploaded_file.seek(0)
+        if _is_disallowed_upload(header):
+            logger.warning(
+                "upload skipped (non-media content): user_id=%s filename=%r",
+                user.id,
+                display_name,
+            )
+            skipped_count += 1
+            if first_skip is None:
+                msg = ui_labels.UPLOAD_INVALID_FILE_CONTENT.format(name=display_name)
+                first_skip = (f"/upload?error=invalid_content&name={quote(display_name)}", msg)
+            continue
+
         job = Job(
             filename=display_name,
             language=language,
             model_name=model_name,
-            num_speakers=num_speakers if num_speakers > 0 else None,
+            num_speakers=clamp_num_speakers(num_speakers) or None,
             # Clamp opt-in flags to what this deployment can actually run so the
             # persisted flag is honest and no no-op stage is enqueued.
             enable_diarization=enable_diarization and settings.diarization_available,
@@ -187,17 +246,16 @@ async def upload_submit(
             dest.unlink(missing_ok=True)
             limit_str = _format_size(max_size)
             logger.warning(
-                "upload rejected: user_id=%s filename=%r exceeds max_size=%d",
+                "upload skipped: user_id=%s filename=%r exceeds max_size=%d",
                 user.id,
                 display_name,
                 max_size,
             )
-            msg = ui_labels.UPLOAD_FILE_TOO_LARGE.format(name=display_name, limit=limit_str)
-            return _error_redirect_or_fragment(
-                request,
-                f"/upload?error=too_large&name={quote(display_name)}&limit={quote(limit_str)}",
-                msg,
-            )
+            skipped_count += 1
+            if first_skip is None:
+                msg = ui_labels.UPLOAD_FILE_TOO_LARGE.format(name=display_name, limit=limit_str)
+                first_skip = (f"/upload?error=too_large&name={quote(display_name)}&limit={quote(limit_str)}", msg)
+            continue
 
         job.filepath = str(dest)
         job.duration = await asyncio.to_thread(get_audio_duration_seconds, dest, job_id=job.id)
@@ -225,14 +283,22 @@ async def upload_submit(
             failed_count += 1
 
     logger.info(
-        "upload batch finished: user_id=%s submitted=%d failed=%d batch_id=%s",
+        "upload batch finished: user_id=%s submitted=%d failed=%d skipped=%d batch_id=%s",
         user.id,
         submitted_count,
         failed_count,
+        skipped_count,
         batch_id or "-",
     )
 
-    message, category = _build_upload_toast(submitted_count, failed=failed_count)
+    # Every file was skipped as invalid (nothing queued and nothing failed at
+    # enqueue): show the first skip reason on the upload page rather than a
+    # "0 submitted" toast on /jobs.
+    if submitted_count == 0 and failed_count == 0 and first_skip is not None:
+        url, msg = first_skip
+        return _error_redirect_or_fragment(request, url, msg)
+
+    message, category = _build_upload_toast(submitted_count, failed=failed_count, skipped_files=skipped_count)
     set_flash(request, message, category)
     if htmx:
         return Response(status_code=204, headers={"HX-Redirect": "/jobs"})
@@ -249,7 +315,7 @@ async def upload_url_submit(
     user: CurrentUserDep,
     url: Annotated[str, Form()],
     language: Annotated[str, Form()] = "zh",
-    model_name: Annotated[str, Form()] = "large-v3",
+    model_name: Annotated[str, Form()] = DEFAULT_WHISPER_MODEL,
     num_speakers: Annotated[int, Form()] = 0,
     enable_diarization: Annotated[bool, Form()] = False,
     convert_to_traditional: Annotated[bool, Form()] = False,
@@ -320,7 +386,7 @@ async def upload_url_submit(
             source_url=clean_url,
             language=language,
             model_name=model_name,
-            num_speakers=num_speakers if num_speakers > 0 else None,
+            num_speakers=clamp_num_speakers(num_speakers) or None,
             # Clamp opt-in flags to deployment availability (see file-upload branch).
             enable_diarization=enable_diarization and settings.diarization_available,
             convert_to_traditional=convert_to_traditional,

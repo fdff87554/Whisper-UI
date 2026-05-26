@@ -121,6 +121,92 @@ def is_llm_active(job: Job, settings: Settings) -> bool:
     return bool(job.llm_correction_enabled) and settings.llm_correction_available
 
 
+class _ThrottledProgressReporter:
+    """Callable that throttles high-frequency progress callbacks before they
+    reach Redis + SQLite. See :func:`make_throttled_progress_reporter` for
+    the throttle policy; the logic is split across small methods here so the
+    monotonicity guard, the throttle decision, and the DB mirror each read on
+    their own.
+    """
+
+    def __init__(
+        self,
+        reporter: RedisProgressReporter,
+        db: JobDatabase,
+        job: Job,
+        *,
+        min_delta: float,
+        min_interval_sec: float,
+        monotonic: Callable[[], float],
+    ) -> None:
+        self._reporter = reporter
+        self._db = db
+        self._job = job
+        self._min_delta = min_delta
+        self._min_interval_sec = min_interval_sec
+        self._monotonic = monotonic
+        self._last_progress = -1.0
+        self._last_written_at = 0.0
+        self._last_message = ""
+        # The diarize heartbeat invokes this from a background thread while the
+        # main thread is blocked inside the C++ inference call, so in normal
+        # operation only one thread mutates the state at a time. The lock is
+        # cheap defence-in-depth: it keeps the read-decide-write sequence atomic
+        # even if some future stage spawns another thread that also reports.
+        self._lock = threading.Lock()
+
+    def __call__(self, progress: float, message: str) -> None:
+        with self._lock:
+            # Monotonicity guard: drop any regression unconditionally, even if
+            # the message changed. The only realistic source is a late diarize
+            # heartbeat racing the main thread's DIARIZE_DONE flush; letting it
+            # through would visibly rewind the bar from 100% back to ~94%.
+            # Worker retries always build a fresh instance, so legitimate
+            # rewinds never reach this point.
+            if self._last_progress >= 0 and progress < self._last_progress:
+                return
+
+            now = self._monotonic()
+            if self._should_throttle(progress, message, now):
+                return
+            if not self._mirror(progress, message):
+                return
+
+            self._last_progress = progress
+            self._last_written_at = now
+            self._last_message = message
+
+    def _should_throttle(self, progress: float, message: str, now: float) -> bool:
+        # Always flush the first call, a message change (stage transition / state
+        # flip), and completion, so no user-visible milestone is swallowed.
+        force = self._last_progress < 0 or message != self._last_message or progress >= 1.0
+        if force:
+            return False
+        delta = progress - self._last_progress
+        return delta < self._min_delta and (now - self._last_written_at) < self._min_interval_sec
+
+    def _mirror(self, progress: float, message: str) -> bool:
+        """Write to Redis and mirror to SQLite. Return False if the write was
+        rejected as stale (so the caller leaves throttle state untouched)."""
+        # reporter.report returns False exactly when its Lua script found the
+        # caller's generation strictly older than the stored one (the parent
+        # job was retried under a newer attempt). We must NOT touch the Job
+        # object or its SQLite row then: db.update_job does a full-column
+        # UPDATE from the in-memory snapshot, so a stale Job would overwrite
+        # the current attempt's status / result_path / error.
+        if not self._reporter.report(progress, message):
+            logger.debug(
+                "progress write for %s dropped server-side (stale generation); "
+                "skipping DB mirror to avoid overwriting the current attempt",
+                self._job.id,
+            )
+            return False
+        self._job.progress = progress
+        self._job.progress_message = message
+        self._db.update_job(self._job)
+        return True
+
+
 def make_throttled_progress_reporter(
     reporter: RedisProgressReporter,
     db: JobDatabase,
@@ -130,8 +216,8 @@ def make_throttled_progress_reporter(
     min_interval_sec: float = PROGRESS_WRITE_MIN_INTERVAL_SEC,
     monotonic: Callable[[], float] = time.monotonic,
 ) -> Callable[[float, str], None]:
-    """Wrap progress callbacks so high-frequency sub-stage updates do not
-    thrash SQLite and Redis.
+    """Build a progress callback that keeps high-frequency sub-stage updates
+    from thrashing SQLite and Redis.
 
     The throttle drops a report when both of these hold:
     - progress moved less than ``min_delta`` from the last written value,
@@ -141,66 +227,14 @@ def make_throttled_progress_reporter(
     flip), on the very first call, and whenever progress reaches 1.0, so
     no user-visible milestone is ever swallowed.
     """
-    last_progress = -1.0
-    last_written_at = 0.0
-    last_message = ""
-    # The diarize heartbeat invokes ``report`` from a background thread while
-    # the main thread is blocked inside the C++ inference call, so in normal
-    # operation only one thread mutates the closure state at a time. The lock
-    # is cheap defence-in-depth: it guarantees the read-decide-write sequence
-    # below is atomic even if some future stage spawns a worker thread that
-    # also calls on_progress.
-    lock = threading.Lock()
-
-    def report(progress: float, message: str) -> None:
-        nonlocal last_progress, last_written_at, last_message
-
-        with lock:
-            # Monotonicity guard: drop any in-closure regression unconditionally,
-            # even if the message changed. The only realistic source of one is a
-            # late diarize heartbeat racing the main thread's DIARIZE_DONE flush;
-            # letting it through would visibly rewind the bar from 100% back to
-            # ~94%. Worker retries always spin up a fresh closure, so legitimate
-            # rewinds never reach this point.
-            if last_progress >= 0 and progress < last_progress:
-                return
-
-            now = monotonic()
-            force = last_progress < 0 or message != last_message or progress >= 1.0
-            if not force:
-                delta = progress - last_progress
-                if delta < min_delta and (now - last_written_at) < min_interval_sec:
-                    return
-
-            # The reporter returns False exactly when its Lua script
-            # determined the caller's generation is strictly older than
-            # the stored one (i.e. the parent job has been retried under
-            # a newer attempt). In that case we must NOT touch the Job
-            # object or the SQLite row: db.update_job performs a
-            # full-column UPDATE from the in-memory snapshot, so a stale
-            # Job captured by this closure would overwrite the current
-            # attempt's status / result_path / error fields. Silently
-            # drop the DB mirror and leave the closure's monotonic /
-            # throttle state untouched so a subsequent (equally stale)
-            # call takes the same fast path instead of slipping through.
-            accepted = reporter.report(progress, message)
-            if not accepted:
-                logger.debug(
-                    "progress write for %s dropped server-side (stale generation); "
-                    "skipping DB mirror to avoid overwriting the current attempt",
-                    job.id,
-                )
-                return
-
-            job.progress = progress
-            job.progress_message = message
-            db.update_job(job)
-
-            last_progress = progress
-            last_written_at = now
-            last_message = message
-
-    return report
+    return _ThrottledProgressReporter(
+        reporter,
+        db,
+        job,
+        min_delta=min_delta,
+        min_interval_sec=min_interval_sec,
+        monotonic=monotonic,
+    )
 
 
 _RQ_TIMEOUT_MESSAGE_PATTERN = re.compile(r"\((\d+)\s*seconds?\)")

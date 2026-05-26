@@ -90,3 +90,8 @@ WHISPER_MODELS: list[str] = [
     "large-v3",
     "large-v3-turbo",
 ]
+
+# Single source of truth for the default model. Settings, the Job dataclass,
+# the TranscribeStage, and every upload/retry form default reference this so
+# changing the shipped default is a one-line edit.
+DEFAULT_WHISPER_MODEL = "large-v3"

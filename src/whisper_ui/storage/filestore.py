@@ -88,9 +88,9 @@ class FileStore:
         rely on this strict 'either both gone or both kept' contract: if a
         filesystem error leaves files behind, the route MUST NOT delete the
         DB row, otherwise the UI / audit log shows the job as deleted while
-        the storage is still occupied — the regression PR #53 review F2
-        flagged. Best-effort cleanup (which suits the retention sweep)
-        belongs in :meth:`delete_upload_files`, not here.
+        the storage is still occupied. Best-effort cleanup (which suits
+        the retention sweep) belongs in :meth:`delete_upload_files`, not
+        here.
         """
         removed: list[str] = []
         for base, label in ((self._upload_dir, "upload"), (self._output_dir, "output")):

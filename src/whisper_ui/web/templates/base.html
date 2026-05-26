@@ -46,6 +46,22 @@
   document.addEventListener('alpine:init', () => {
     Alpine.store('nav', { activePage: '{{ active_page }}' });
 
+    // Batch-group expand/collapse state, keyed by group_key. Held here (not
+    // in the DOM) so it is the single source of truth: an idiomorph poll,
+    // a filter swap, or an hx-boost navigation never resets what the user
+    // expanded. isOpen falls back to the server-provided default only until
+    // the user first toggles the group, after which the store wins (so a
+    // batch finishing does not auto-collapse a group the user opened).
+    Alpine.store('batchCollapse', {
+      open: {},
+      isOpen(groupKey, defaultOpen) {
+        return groupKey in this.open ? this.open[groupKey] : defaultOpen;
+      },
+      set(groupKey, value) {
+        this.open[groupKey] = value;
+      },
+    });
+
     Alpine.store('toasts', {
       items: [],
       _id: 0,

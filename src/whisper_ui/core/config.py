@@ -6,6 +6,8 @@ from pathlib import Path
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from whisper_ui.core.languages import DEFAULT_WHISPER_MODEL
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -31,7 +33,7 @@ class Settings(BaseSettings):
     output_dir: Path = Field(default=_PROJECT_ROOT / "data" / "outputs")
 
     # Whisper
-    whisper_model: str = "large-v3"
+    whisper_model: str = DEFAULT_WHISPER_MODEL
     compute_type: str = "int8_float16"
     device: str = "auto"
     batch_size: int = 4
@@ -72,6 +74,12 @@ class Settings(BaseSettings):
     # proxy resets these headers — otherwise a hostile client can spoof
     # them to evade rate limits and CSRF.
     trust_proxy_headers: bool = False
+    # Allow open self-service registration once the first admin exists. The
+    # initial bootstrap account is always allowed (an admin must be created to
+    # manage the instance); when this is False every later /register attempt
+    # is refused so accounts can only be provisioned by an admin. Default True
+    # preserves the original open-signup behaviour.
+    allow_registration: bool = True
 
     # Upload
     max_upload_size: int = 2 * 1024 * 1024 * 1024  # 2 GB

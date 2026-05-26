@@ -84,10 +84,9 @@ logger = logging.getLogger(__name__)
 # Redis keys for tracking sub-jobs and the generation counter. The
 # subjobs set is scoped per-generation so a stale callback from a
 # superseded attempt cannot accidentally enumerate the new attempt's
-# sub-jobs. See Commit 18 / PR #39 Round 2 review for the full rationale:
-# an earlier version of this module stored all sub-jobs under a single
-# parent-scoped key and cleared it on retry, which made attempt 2's ids
-# visible to attempt 1's late finalize callback.
+# sub-jobs. An earlier design stored all sub-jobs under a single
+# parent-scoped key and cleared it on retry, which made a new attempt's
+# ids visible to the previous attempt's late finalize callback.
 def _subjobs_key(parent_job_id: str, generation: int) -> str:
     return f"whisper:pipeline:{parent_job_id}:subjobs:{generation}"
 
@@ -175,14 +174,15 @@ def enqueue_pipeline(
     # its write the next time it calls update_if_generation_matches.
     generation = _bump_generation(redis, job.id)
 
-    # Seed the progress hash with the new generation immediately so a stale
-    # writer that arrives after the retry route deleted ``job:{id}`` (wiping
-    # the hash-embedded generation field) sees the fresh generation=N via
-    # both the central counter (checked in Lua KEYS[2]) AND the hash field.
-    # This is the hash-level belt on top of the central-counter suspenders
-    # added in Commit 21, and also gives the UI a clean ``progress=0,
-    # status=queued`` read right after retry instead of an empty hash.
+    # Own the progress-hash lifecycle here so the seed is self-contained: a
+    # retry must not leave the previous attempt's ``error``/``result_path``
+    # fields behind, and callers should not have to remember to clear the
+    # hash first. Delete then re-seed with the new generation so a stale
+    # writer sees the fresh generation=N via both the central counter
+    # (checked in Lua KEYS[2]) AND the hash field, and the UI gets a clean
+    # ``progress=0, status=queued`` read right after retry.
     progress_key = f"job:{job.id}"
+    redis.delete(progress_key)
     redis.hset(
         progress_key,
         mapping={
@@ -200,7 +200,7 @@ def enqueue_pipeline(
     # its own finalize callback (or expire naturally via PIPELINE_STATE_TTL_SECONDS),
     # and attempt 2's callback only ever looks at its own generation's set.
     # This is what keeps a stale attempt 1 callback from cancelling attempt
-    # 2's live sub-jobs — the mechanism that broke in Round 2 review.
+    # 2's live sub-jobs.
 
     timeout = calculate_job_timeout(job.duration, settings)
     success_cb = Callback("whisper_ui.worker.pipeline_dispatcher.finalize_success")
@@ -301,8 +301,7 @@ def finalize_success(rq_job, connection, _result) -> None:
     since this sub-job was enqueued (e.g. the user retried mid-pipeline),
     the callback short-circuits without touching any state. Without this
     guard, a stale attempt-1 success callback could mark an in-progress
-    attempt 2 as COMPLETED with attempt 1's transcript file — see PR #39
-    Round 2 review R2-1.
+    attempt 2 as COMPLETED with attempt 1's transcript file.
     """
     parent_job_id = rq_job.meta.get("parent_job_id") if rq_job.meta else None
     if not parent_job_id:
@@ -328,6 +327,13 @@ def finalize_success(rq_job, connection, _result) -> None:
         job = runtime.db.get_job(parent_job_id)
         if job is None:
             logger.error("finalize_success could not find parent job %s", parent_job_id)
+            return
+
+        if job.status == JobStatus.COMPLETED:
+            logger.debug(
+                "finalize_success: job %s already COMPLETED, skipping duplicate finalize",
+                parent_job_id,
+            )
             return
 
         ctx_store = PipelineContextStore(runtime.redis, parent_job_id)
@@ -376,8 +382,7 @@ def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> No
     the callback short-circuits without cancelling or marking anything.
     Without this guard an attempt 1 failure could mark an in-flight
     attempt 2 as FAILED and cancel all of attempt 2's sub-jobs — the
-    exact bug from PR #39 Round 2 review R2-1 that the reproduction
-    test below covers.
+    bug the reproduction test below covers.
     """
     parent_job_id = rq_job.meta.get("parent_job_id") if rq_job.meta else None
     if not parent_job_id:

@@ -9,6 +9,7 @@ from rq.timeouts import BaseTimeoutException
 
 from whisper_ui.core.device import release_gpu_memory
 from whisper_ui.core.exceptions import TranscriptionError
+from whisper_ui.core.languages import DEFAULT_WHISPER_MODEL
 from whisper_ui.core.messages import TRANSCRIBE_DONE, TRANSCRIBE_LOADING, TRANSCRIBE_RUNNING
 
 if TYPE_CHECKING:
@@ -24,7 +25,9 @@ _TRANSCRIBE_CALLBACK_END = 0.95
 
 
 class TranscribeStage:
-    def __init__(self, model_name: str = "large-v3", compute_type: str = "int8_float16", device: str = "cuda") -> None:
+    def __init__(
+        self, model_name: str = DEFAULT_WHISPER_MODEL, compute_type: str = "int8_float16", device: str = "cuda"
+    ) -> None:
         self._model_name = model_name
         self._compute_type = compute_type
         self._device = device

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from whisper_ui.pipeline.orchestrator import PipelineOrchestrator
+from tests.helpers.orchestrator import PipelineOrchestrator
 from whisper_ui.pipeline.preprocess import PreprocessStage
 
 
-class TestPreprocessIntegration:
+class TestPreprocess:
     def test_rejects_unsupported_format(self, tmp_path):
         stage = PreprocessStage()
         fake_file = tmp_path / "test.xyz"
@@ -35,7 +35,7 @@ class TestPreprocessIntegration:
         mock_run.assert_called_once()
 
 
-class TestOrchestratorIntegration:
+class TestOrchestrator:
     def test_multiple_stages_chain_context(self):
         from whisper_ui.core.models import Segment, TranscriptResult
 

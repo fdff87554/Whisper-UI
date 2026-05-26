@@ -17,6 +17,8 @@
   {{ labels.UPLOAD_BATCH_EXCEEDS_LIMIT.format(limit=MAX_BATCH_SIZE, count=request.query_params.get('count', '?')) }}
   {% elif error == 'too_large' %}
   {{ labels.UPLOAD_FILE_TOO_LARGE.format(name=request.query_params.get('name', '?'), limit=request.query_params.get('limit', '?')) }}
+  {% elif error == 'invalid_content' %}
+  {{ labels.UPLOAD_INVALID_FILE_CONTENT.format(name=request.query_params.get('name', '?')) }}
   {% elif error == 'invalid_language' %}
   {{ labels.UPLOAD_INVALID_LANGUAGE.format(value=request.query_params.get('value', '?')) }}
   {% elif error == 'invalid_model' %}
@@ -208,7 +210,7 @@
         <legend class="fieldset-legend text-sm">{{ labels.UPLOAD_LANGUAGE }}</legend>
         <select name="language" class="select w-full">
           {% for code in supported_languages %}
-          <option value="{{ code }}" {% if code == settings.language %}selected{% endif %}>
+          <option value="{{ code }}" {% if code == default_language %}selected{% endif %}>
             {{ LANGUAGE_LABELS.get(code, code) }}
           </option>
           {% endfor %}
@@ -218,7 +220,7 @@
         <legend class="fieldset-legend text-sm">{{ labels.UPLOAD_MODEL }}</legend>
         <select name="model_name" class="select w-full">
           {% for model in whisper_models %}
-          <option value="{{ model }}" {% if model == settings.whisper_model %}selected{% endif %}>{{ model }}</option>
+          <option value="{{ model }}" {% if model == default_model %}selected{% endif %}>{{ model }}</option>
           {% endfor %}
         </select>
       </fieldset>
@@ -247,11 +249,11 @@
           <input type="checkbox" name="enable_diarization" value="true"
                  class="toggle toggle-primary toggle-sm"
                  x-model="diarization"
-                 {% if not settings.hf_token %}disabled{% endif %}>
+                 {% if not diarization_available %}disabled{% endif %}>
           <div class="flex-1">
             <span class="inline-flex items-center gap-1">
               {{ labels.UPLOAD_ENABLE_DIARIZATION }}
-              {% if not settings.hf_token %}
+              {% if not diarization_available %}
               <span class="tooltip tooltip-right" data-tip="{{ labels.UPLOAD_DIARIZATION_UNAVAILABLE }}">
                 <span class="text-xs opacity-60 cursor-help" tabindex="0" aria-label="{{ labels.UPLOAD_INFOTIP_LABEL }}">ⓘ</span>
               </span>
@@ -288,12 +290,12 @@
           <input type="checkbox" name="llm_correction_enabled" value="true"
                  class="toggle toggle-primary toggle-sm"
                  x-model="llmCorrection"
-                 {% if not settings.ollama_base_url %}disabled{% endif %}>
+                 {% if not llm_correction_available %}disabled{% endif %}>
           <div class="flex-1">
             <span class="inline-flex items-center gap-1">
               {{ labels.UPLOAD_ENABLE_LLM_CORRECTION }}
               <span class="tooltip tooltip-right"
-                    data-tip="{% if settings.ollama_base_url %}{{ labels.UPLOAD_LLM_CORRECTION_HELP }}{% else %}{{ labels.UPLOAD_LLM_CORRECTION_UNAVAILABLE }}{% endif %}">
+                    data-tip="{% if llm_correction_available %}{{ labels.UPLOAD_LLM_CORRECTION_HELP }}{% else %}{{ labels.UPLOAD_LLM_CORRECTION_UNAVAILABLE }}{% endif %}">
                 <span class="text-xs opacity-60 cursor-help" tabindex="0" aria-label="{{ labels.UPLOAD_INFOTIP_LABEL }}">ⓘ</span>
               </span>
             </span>
@@ -335,7 +337,7 @@ function uploadForm() {
     selectedFiles: [],
     urlText: '',
     advancedOpen: false,
-    diarization: {{ 'true' if settings.hf_token else 'false' }},
+    diarization: {{ 'true' if diarization_available else 'false' }},
     convertTraditional: true,
     llmCorrection: false,
     activePreset: null,

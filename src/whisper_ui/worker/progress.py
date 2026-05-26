@@ -50,8 +50,7 @@ _NO_GENERATION = -1
 #    A fresh attempt is taking over the progress hash. Unconditionally
 #    overwrite progress / message / status and stamp the new generation.
 #    This is the path that unblocks "attempt 2 wants to start from 0.05
-#    after attempt 1 was pinned at 0.85" — the Round 2 R2-2 scenario
-#    the reproducer in the plan exercises end-to-end.
+#    after attempt 1 was pinned at 0.85".
 #
 # 3. ``caller_gen == stored_gen`` → max-write within the attempt. Same
 #    semantics as the Phase 2 script: progress only advances, message
@@ -89,7 +88,7 @@ end
 -- the retry route deletes the progress hash the embedded field vanishes.
 -- Without this central-counter check, a stale gen=1 writer arriving
 -- after the delete would walk into the "(not stored_gen)" reset branch
--- and be accepted — the exact Round-4 review race window.
+-- and be accepted — the race window this guard closes.
 local central_gen_key = KEYS[2]
 local central_gen_raw = redis.call('GET', central_gen_key)
 if central_gen_raw then
@@ -138,7 +137,8 @@ return 1
 # enclosing script) if the caller's generation is strictly behind either
 # the central counter or the hash-embedded generation. Inlined into both
 # terminal scripts via f-string interpolation so the two callers cannot
-# drift on the gating logic — PR #39 Round 4 shipped that drift once.
+# drift on the gating logic (a past divergence between them let a stale
+# write slip through).
 # Keep semantics in sync with worker/pipeline_callbacks.py
 # ``is_stale_callback`` and worker/context_store.py
 # ``_GENERATION_GATED_HSET_LUA``.
@@ -242,9 +242,9 @@ class RedisProgressReporter:
         # Central generation counter — the authoritative source for which
         # attempt currently owns the pipeline. Lua scripts read this via
         # KEYS[2] as a belt-and-suspenders check on top of the hash-level
-        # generation field. Closing the Round-4 window where the retry
-        # route deletes the hash (wiping the embedded generation) but the
-        # central counter has already been bumped.
+        # generation field. This closes the window where the retry route
+        # deletes the hash (wiping the embedded generation) but the central
+        # counter has already been bumped.
         self._generation_key = f"whisper:pipeline:{job_id}:generation"
         self._processing_ttl = processing_ttl
         self._generation = generation

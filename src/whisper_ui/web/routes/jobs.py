@@ -11,7 +11,7 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 
 from whisper_ui.core.constants import DEFAULT_JOBS_PER_PAGE
-from whisper_ui.core.languages import SUPPORTED_LANGUAGES, WHISPER_MODELS
+from whisper_ui.core.languages import DEFAULT_WHISPER_MODEL, SUPPORTED_LANGUAGES, WHISPER_MODELS
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.pipeline.audio_probe import get_audio_duration_seconds
 from whisper_ui.ui import labels as ui_labels
@@ -26,7 +26,7 @@ from whisper_ui.web.deps import (
     make_content_disposition,
     templates,
 )
-from whisper_ui.web.validation import validate_hex_id
+from whisper_ui.web.validation import clamp_num_speakers, validate_hex_id
 from whisper_ui.worker.pipeline_dispatcher import enqueue_pipeline
 from whisper_ui.worker.progress import RedisProgressReporter
 
@@ -68,7 +68,7 @@ def _build_media_available_map(filestore, jobs: list[Job]) -> dict[str, bool]:
     return {job.id: filestore.get_source_media_path(job.id) is not None for job in jobs if job.source_url}
 
 
-def _build_list_context(db: JobDatabase, redis, filestore, status: str, page: int, owner_id: int | None) -> dict:
+def build_list_context(db: JobDatabase, redis, filestore, status: str, page: int, owner_id: int | None) -> dict:
     status_filter = status or None
     total_count = db.count_jobs(status=status_filter, owner_id=owner_id)
     total_pages = max(1, math.ceil(total_count / DEFAULT_JOBS_PER_PAGE))
@@ -112,14 +112,18 @@ async def jobs_page(
     if status not in _VALID_STATUS_FILTERS:
         status = ""
     owner_id = owner_filter(user)
-    ctx = _build_list_context(db, redis, filestore, status, page, owner_id)
+    ctx = build_list_context(db, redis, filestore, status, page, owner_id)
     ctx["active_page"] = "jobs"
     ctx["status_counts"] = db.get_status_counts(owner_id=owner_id)
     # The re-transcribe modal (full page only, not the /jobs/list fragment)
     # reuses the upload form's option choices.
     ctx["supported_languages"] = SUPPORTED_LANGUAGES
     ctx["whisper_models"] = WHISPER_MODELS
-    ctx["settings"] = settings
+    # Pass only the derived availability flags the template needs, not the
+    # whole Settings object, so a future sensitive field can never leak into
+    # the rendered HTML by accident.
+    ctx["diarization_available"] = settings.diarization_available
+    ctx["llm_correction_available"] = settings.llm_correction_available
     return templates.TemplateResponse(request=request, name="jobs.html", context=ctx)
 
 
@@ -133,7 +137,7 @@ async def jobs_list_fragment(
     status: str = "",
     page: int = 0,
 ):
-    ctx = _build_list_context(db, redis, filestore, status, page, owner_filter(user))
+    ctx = build_list_context(db, redis, filestore, status, page, owner_filter(user))
     return templates.TemplateResponse(request=request, name="_job_list.html", context=ctx)
 
 
@@ -222,8 +226,8 @@ async def bulk_job_action(
             raise HTTPException(status_code=404, detail="No matching jobs")
         try:
             zip_data = await asyncio.to_thread(create_batch_zip, jobs, filestore, format_name)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from None
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Unsupported export format") from None
         if zip_data is None:
             raise HTTPException(status_code=404, detail="No completed results in selection")
         filename = f"selection_{format_name}.zip"
@@ -253,7 +257,6 @@ async def bulk_job_action(
                 job.result_path = None
                 job.duration = retry_duration
                 db.update_job(job)
-                redis.delete(f"job:{job.id}")
                 enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
                 succeeded += 1
             except Exception:
@@ -317,8 +320,6 @@ async def retry_job(
         job.result_path = None
         job.duration = retry_duration
         db.update_job(job)
-        redis.delete(f"job:{job.id}")
-
         enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
         logger.info(
             "job retried: job_id=%s user_id=%s filename=%r previous_error=%r",
@@ -345,7 +346,7 @@ async def re_transcribe_job(
     filestore: FileStoreDep,
     user: CurrentUserDep,
     language: Annotated[str, Form()] = "zh",
-    model_name: Annotated[str, Form()] = "large-v3",
+    model_name: Annotated[str, Form()] = DEFAULT_WHISPER_MODEL,
     num_speakers: Annotated[int, Form()] = 0,
     enable_diarization: Annotated[bool, Form()] = False,
     convert_to_traditional: Annotated[bool, Form()] = False,
@@ -377,7 +378,7 @@ async def re_transcribe_job(
         filename=src.filename,
         language=language,
         model_name=model_name,
-        num_speakers=num_speakers if num_speakers > 0 else None,
+        num_speakers=clamp_num_speakers(num_speakers) or None,
         # Clamp opt-in flags to deployment availability so the new version's
         # persisted flags are honest even if the source job (or a tampered
         # request) carries flags this deployment cannot run.
@@ -447,7 +448,7 @@ async def delete_job(job_id: str, db: DbDep, filestore: FileStoreDep, redis: Red
     except OSError as exc:
         # Keep the DB row + Redis state + audit log silent so retrying the
         # delete is a no-op-then-real-delete instead of "DB row gone but
-        # files still on disk". See PR #53 review F2.
+        # files still on disk".
         logger.error(
             "job delete aborted: filestore reclaim failed for job_id=%s user_id=%s: %s",
             job.id,
@@ -494,7 +495,6 @@ async def retry_batch(
             job.result_path = None
             job.duration = retry_duration
             db.update_job(job)
-            redis.delete(f"job:{job.id}")
             enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
             retried += 1
         except Exception:
@@ -530,7 +530,7 @@ async def delete_batch(batch_id: str, db: DbDep, filestore: FileStoreDep, redis:
         except OSError as exc:
             # Per-job atomicity: keep the failing job's DB row + Redis
             # state so the user can retry just that one. Other jobs in
-            # the batch still get cleaned. See PR #53 review F2.
+            # the batch still get cleaned.
             logger.error(
                 "batch delete skipped one job: job_id=%s batch_id=%s user_id=%s: %s",
                 job.id,
@@ -570,8 +570,8 @@ async def batch_download(
 
     try:
         zip_data = await asyncio.to_thread(create_batch_zip, all_jobs, filestore, format_name)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Unsupported export format") from None
     if zip_data is None:
         raise HTTPException(status_code=404, detail="No completed results in batch")
 

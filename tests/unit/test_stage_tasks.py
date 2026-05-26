@@ -57,6 +57,20 @@ def test_pick_stage_weights_matches_job_shape(source_url, llm_enabled, has_downl
     assert pick_stage_weights(job, runtime) == expected
 
 
+def test_pick_stage_weights_drops_diarize_band_when_diarization_disabled():
+    """A job with diarization off must not reserve a diarize band, otherwise
+    the progress bar leaves a ~25% gap that never fills (the dispatcher skips
+    the diarize sub-job for these jobs)."""
+    job = Job(enable_diarization=False)
+    runtime = _make_runtime(fakeredis.FakeRedis())
+    weights = pick_stage_weights(job, runtime)
+    assert "diarize" not in weights
+    assert weights == build_stage_weights(has_download=False, has_llm=False, has_diarization=False)
+    # Remaining stages renormalise to span the full [0, 1] bar.
+    assert weights["assign_speakers"][1] < weights["postprocess"][1]
+    assert weights["postprocess"][1] == 1.0
+
+
 def test_pick_stage_weights_ignores_llm_when_ollama_url_is_blank():
     """Even if the user opted in, an empty Ollama URL must fall back to the
     non-LLM bands so the dispatcher does not allocate an LLM progress band

@@ -249,6 +249,34 @@ def test_enqueue_pipeline_seeds_initial_context(tmp_path):
     assert "source_url" not in ctx
 
 
+def test_enqueue_pipeline_clears_stale_progress_hash_on_retry(tmp_path):
+    """Re-enqueuing a job must not leave the previous attempt's error/result
+    fields in the progress hash; the seed owns the hash lifecycle so callers
+    do not have to delete it first."""
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(
+        id="job-retry",
+        filename="m.mp3",
+        filepath=str(tmp_path / "m.mp3"),
+        status=JobStatus.QUEUED,
+    )
+    # Simulate a failed first attempt that left error/result fields behind.
+    redis.hset(f"job:{job.id}", mapping={"status": "failed", "error": "boom", "result_path": "/old"})
+
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+
+    stored = {
+        k.decode() if isinstance(k, bytes) else k: v.decode() if isinstance(v, bytes) else v
+        for k, v in redis.hgetall(f"job:{job.id}").items()
+    }
+    assert stored["status"] == "queued"
+    assert stored["progress"] == "0"
+    assert "error" not in stored
+    assert "result_path" not in stored
+
+
 def test_enqueue_pipeline_logs_dag_summary_with_stage_metadata(tmp_path, caplog):
     """Operators must be able to read one line and know which stages were
     enqueued, the model + language settings, and the configured timeout —
@@ -394,6 +422,43 @@ def test_finalize_success_marks_job_completed(monkeypatch, tmp_path):
     assert stored["result_path"] == str(tmp_path / "result.json")
     assert not preprocessed.exists(), "preprocessed WAV should be cleaned up"
     assert PipelineContextStore(redis, job.id).load() == {}
+
+
+def test_finalize_success_skips_already_completed_job(monkeypatch, tmp_path):
+    """A second finalize_success for an already-COMPLETED job is a no-op, so
+    it never re-saves a result or touches terminal state (mirrors the
+    already-FAILED guard in finalize_failure)."""
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    job = Job(
+        id="job-already-done",
+        filename="m.mp3",
+        filepath=str(tmp_path / "m.mp3"),
+        status=JobStatus.COMPLETED,
+    )
+
+    runtime = MagicMock()
+    runtime.redis = redis
+    runtime.db.get_job.return_value = job
+    runtime.settings.redis_processing_expiry = 7200
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _fake_builder(job_id, *, generation=None):
+        runtime.reporter = MagicMock()
+        yield runtime
+
+    monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
+
+    fake_rq_job = MagicMock()
+    fake_rq_job.meta = {"parent_job_id": job.id}
+
+    pd.finalize_success(fake_rq_job, redis, None)
+
+    runtime.filestore.save_result.assert_not_called()
+    runtime.db.update_job.assert_not_called()
 
 
 def test_finalize_failure_marks_job_failed_and_cancels_siblings(monkeypatch, tmp_path):

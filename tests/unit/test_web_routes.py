@@ -156,6 +156,14 @@ class TestUploadRoutes:
         assert resp.status_code == 200
         assert "tab: 'files'" in resp.text
 
+    def test_upload_page_renders_invalid_content_error(self, client):
+        """The invalid_content redirect must render its message, not an empty
+        alert (the template previously had no branch for this error code)."""
+        resp = client.get("/upload?error=invalid_content&name=evil.mp3")
+        assert resp.status_code == 200
+        assert "不是有效的音訊或影片" in resp.text
+        assert "evil.mp3" in resp.text
+
 
 class TestJobsRoutes:
     def test_jobs_page_empty(self, client):
@@ -283,6 +291,29 @@ class TestJobsRoutes:
         assert f'id="job-group-{batch_id}"' in resp.text
         assert f'id="job-{job_a.id}"' in resp.text
         assert f'id="job-{job_b.id}"' in resp.text
+
+    def test_batch_collapse_uses_store_not_open_attribute(self, client, db):
+        """Regression: the batch collapse must be driven by the Alpine
+        batchCollapse store, not the server-rendered [open] attribute that
+        fought the user's checkbox toggle under polling (auto-collapse bug).
+        """
+        batch_id = "abcdef12" * 4
+        db.insert_job(Job(filename="a.mp3", status=JobStatus.PROCESSING, batch_id=batch_id))
+        db.insert_job(Job(filename="b.mp3", status=JobStatus.PROCESSING, batch_id=batch_id))
+
+        resp = client.get("/jobs/list")
+        assert resp.status_code == 200
+        group = resp.text.split(f'id="job-group-{batch_id}"', 1)[1].split("collapse-content", 1)[0]
+        # The div's opening tag must not carry the server-driven [open] attr,
+        # and the checkbox must not be a server-rendered `checked` boolean.
+        div_open_tag = group.split(">", 1)[0]
+        assert " open" not in div_open_tag
+        input_tag = group.split("<input", 1)[1].split(">", 1)[0]
+        assert " checked" not in input_tag  # only :checked (bound), not a boolean
+        # Expansion is now store-driven with a server-provided default.
+        assert "batchCollapse" in group
+        assert ":checked=" in group
+        assert "isOpen(groupKey" in group
 
     def test_jobs_page_with_job(self, client, db, filestore):
         _create_completed_job(db, filestore)
@@ -913,6 +944,8 @@ class TestViewerRoutes:
         job = _create_completed_job(db, filestore)
         resp = client.get(f"/viewer/{job.id}/export/invalid_format")
         assert resp.status_code == 400
+        # The fixed error message must not echo the caller-supplied format.
+        assert "invalid_format" not in resp.text
 
     def test_export_non_ascii_filename(self, client, db, filestore):
         result = TranscriptResult(segments=[], language="zh", duration=60.0)
@@ -955,6 +988,48 @@ class TestUploadPost:
         # Flash is one-shot: a reload no longer re-shows the toast.
         second = client.get("/jobs")
         assert 'id="flash-data"' not in second.text
+
+    def test_upload_rejects_pdf_disguised_as_audio(self, client):
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
+            resp = self._upload(
+                client,
+                files=[("files", ("evil.mp3", b"%PDF-1.7 not really audio", "audio/mpeg"))],
+            )
+        assert resp.status_code == 303
+        assert "error=invalid_content" in resp.headers["location"]
+
+    def test_upload_rejects_html_disguised_as_audio(self, client):
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
+            resp = self._upload(
+                client,
+                files=[("files", ("evil.mp4", b"<!DOCTYPE html><html>", "video/mp4"))],
+            )
+        assert resp.status_code == 303
+        assert "error=invalid_content" in resp.headers["location"]
+
+    def test_upload_skips_invalid_file_but_submits_valid_ones(self, client, db, app):
+        """A non-media file in a batch is skipped, not fatal: the valid files
+        are still queued and the user is told how many were skipped (rather
+        than the whole batch failing and prompting a duplicate re-upload)."""
+        files = [
+            ("files", ("good.mp3", b"ID3 fake audio payload", "audio/mpeg")),
+            ("files", ("evil.mp3", b"%PDF-1.7 not really audio", "audio/mpeg")),
+        ]
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline") as mock_enqueue:
+            resp = self._upload(client, files=files)
+
+        # Valid file went through; redirect is the success path to /jobs.
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/jobs"
+        assert mock_enqueue.call_count == 1
+        jobs = db.list_jobs()
+        assert len(jobs) == 1 and jobs[0].filename == "good.mp3"
+        # The toast reports the skipped file.
+        page = client.get("/jobs")
+        expected = ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", "1") + ui_labels.TOAST_FILE_SKIPPED.replace(
+            "{count}", "1"
+        )
+        assert flash_messages(page.text) == [expected]
 
     def test_upload_clamps_diarization_and_llm_when_unavailable(self, client, db, app):
         # Force neither hf_token nor ollama_base_url, so both opt-in flags must
@@ -1095,7 +1170,7 @@ class TestUploadPost:
         assert "diarize=False" in inserted
         assert "llm=False" in inserted
 
-    def test_upload_too_large_logs_rejection(self, client, app, caplog):
+    def test_upload_too_large_logs_skip(self, client, app, caplog):
         import logging as _logging
 
         app.state.settings = app.state.settings.model_copy(update={"max_upload_size": 5})
@@ -1106,7 +1181,7 @@ class TestUploadPost:
         ):
             self._upload(client, files=files)
 
-        assert any("upload rejected" in r.getMessage() for r in caplog.records)
+        assert any("upload skipped" in r.getMessage() for r in caplog.records)
 
     def test_upload_partial_enqueue_failure_reports_failed_count(self, client, app, db):
         # First file succeeds, second raises — simulate a transient Redis error.

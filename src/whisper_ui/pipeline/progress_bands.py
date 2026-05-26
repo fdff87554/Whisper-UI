@@ -1,4 +1,4 @@
-"""Stage progress weight bands used by the pipeline orchestrator and worker tasks.
+"""Stage progress weight bands used by the worker pipeline tasks.
 
 Each band is a ``(start, end)`` tuple that maps a stage's local
 ``[0, 1]`` progress into the global progress bar. The bands are
@@ -37,14 +37,18 @@ _STAGE_RELATIVE_WEIGHTS = {
 _POSTPROCESS_WEIGHT_WITH_LLM = 2
 
 
-def build_stage_weights(*, has_download: bool, has_llm: bool) -> StageWeights:
+def build_stage_weights(*, has_download: bool, has_llm: bool, has_diarization: bool = True) -> StageWeights:
     """Derive the per-stage ``(start, end)`` bands for a pipeline shape.
 
     ``has_download`` prepends the download stage; ``has_llm`` shrinks
-    postprocess and appends the llm_correction stage. The returned dict
-    is keyed by stage name (matching ``PipelineStage.name``) so the
-    orchestrator can look up each band by name without caring about
-    pipeline shape.
+    postprocess and appends the llm_correction stage; ``has_diarization``
+    includes the diarize band (parallel with transcribe/align). When
+    diarization is disabled the dispatcher does not enqueue the diarize
+    sub-job, so omitting its band keeps the remaining stages normalised
+    over the work that actually runs — otherwise the bar would reserve a
+    25% slice that never fills. The returned dict is keyed by stage name
+    (matching ``PipelineStage.name``) so the orchestrator can look up each
+    band by name without caring about pipeline shape.
     """
     stages: list[tuple[str, int]] = []
     if has_download:
@@ -54,10 +58,11 @@ def build_stage_weights(*, has_download: bool, has_llm: bool) -> StageWeights:
             ("preprocess", _STAGE_RELATIVE_WEIGHTS["preprocess"]),
             ("transcribe", _STAGE_RELATIVE_WEIGHTS["transcribe"]),
             ("align", _STAGE_RELATIVE_WEIGHTS["align"]),
-            ("diarize", _STAGE_RELATIVE_WEIGHTS["diarize"]),
-            ("assign_speakers", _STAGE_RELATIVE_WEIGHTS["assign_speakers"]),
         ]
     )
+    if has_diarization:
+        stages.append(("diarize", _STAGE_RELATIVE_WEIGHTS["diarize"]))
+    stages.append(("assign_speakers", _STAGE_RELATIVE_WEIGHTS["assign_speakers"]))
     postprocess_w = _POSTPROCESS_WEIGHT_WITH_LLM if has_llm else _STAGE_RELATIVE_WEIGHTS["postprocess"]
     stages.append(("postprocess", postprocess_w))
     if has_llm:
@@ -75,8 +80,7 @@ def build_stage_weights(*, has_download: bool, has_llm: bool) -> StageWeights:
 
 
 # Default band layout (no optional stages). Exposed so callers that have
-# no pipeline shape on hand — chiefly the legacy single-process
-# orchestrator default — still get a sensible mapping.
+# no pipeline shape on hand still get a sensible mapping.
 DEFAULT_STAGE_WEIGHTS: StageWeights = build_stage_weights(has_download=False, has_llm=False)
 
 
