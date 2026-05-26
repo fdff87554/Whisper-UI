@@ -7,6 +7,46 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- Batch task groups no longer auto-collapse (or refuse to collapse) while the
+  job list polls. Expand/collapse state moved out of the DOM into an Alpine
+  store keyed by batch, so a 3s poll, a status-filter switch, or page
+  navigation no longer fights the user's toggle, and a finishing batch no
+  longer snaps shut a group the user opened.
+- Progress bar no longer reserves an unfillable ~25% "diarize" band for jobs
+  that run with speaker diarization disabled.
+- A duplicate `finalize_success` callback for an already-completed job is now a
+  no-op (symmetric with the existing already-failed guard).
+- Re-enqueuing a job fully resets its Redis progress hash, so a previous
+  attempt's error/result fields can no longer linger after a retry.
+
+### Added
+
+- `ALLOW_REGISTRATION` setting (default `true`): when `false`, self-service
+  `/register` is closed after the bootstrap admin exists so only an admin can
+  create accounts.
+
+### Security
+
+- Uploads are sniffed for non-media file signatures (e.g. a PDF or HTML page
+  renamed to `.mp3`) and rejected before being written to disk; ffmpeg remains
+  the downstream gate.
+- `num_speakers` is clamped to `[0, 20]` server-side on every submit path
+  instead of trusting the form's `max` attribute.
+- The unknown-export-format error no longer echoes the caller-supplied format
+  name back in the response.
+- The upload and jobs views receive only the derived availability flags they
+  render, not the entire `Settings` object.
+
+### Changed
+
+- Internal cleanup with no behaviour change: the default Whisper model is now a
+  single `DEFAULT_WHISPER_MODEL` constant, the throttled progress reporter is a
+  small class instead of an 80-line closure, the shared job-list context
+  builder is a public helper, and the single-process `PipelineOrchestrator`
+  moved to test helpers (it had no production callers).
+
 ## [2.5.0] - 2026-05-25
 
 ### Added
