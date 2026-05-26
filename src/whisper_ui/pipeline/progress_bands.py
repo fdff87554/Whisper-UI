@@ -1,4 +1,4 @@
-"""Stage progress weight bands used by the pipeline orchestrator and worker tasks.
+"""Stage progress weight bands used by the worker pipeline tasks.
 
 Each band is a ``(start, end)`` tuple that maps a stage's local
 ``[0, 1]`` progress into the global progress bar. The bands are
@@ -80,8 +80,7 @@ def build_stage_weights(*, has_download: bool, has_llm: bool, has_diarization: b
 
 
 # Default band layout (no optional stages). Exposed so callers that have
-# no pipeline shape on hand — chiefly the legacy single-process
-# orchestrator default — still get a sensible mapping.
+# no pipeline shape on hand still get a sensible mapping.
 DEFAULT_STAGE_WEIGHTS: StageWeights = build_stage_weights(has_download=False, has_llm=False)
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from whisper_ui.pipeline.orchestrator import PipelineOrchestrator
+from tests.helpers.orchestrator import PipelineOrchestrator
 from whisper_ui.pipeline.preprocess import PreprocessStage
 
 

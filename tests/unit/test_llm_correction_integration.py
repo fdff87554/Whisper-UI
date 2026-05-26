@@ -10,9 +10,9 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
+from tests.helpers.orchestrator import PipelineOrchestrator
 from whisper_ui.core.models import Segment, TranscriptResult
 from whisper_ui.pipeline.llm_correction import LLMCorrectionStage
-from whisper_ui.pipeline.orchestrator import PipelineOrchestrator
 from whisper_ui.pipeline.progress_bands import build_stage_weights
 
 if TYPE_CHECKING:
