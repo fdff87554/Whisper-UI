@@ -6,6 +6,8 @@ from pathlib import Path
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from whisper_ui.core.languages import DEFAULT_WHISPER_MODEL
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -31,7 +33,7 @@ class Settings(BaseSettings):
     output_dir: Path = Field(default=_PROJECT_ROOT / "data" / "outputs")
 
     # Whisper
-    whisper_model: str = "large-v3"
+    whisper_model: str = DEFAULT_WHISPER_MODEL
     compute_type: str = "int8_float16"
     device: str = "auto"
     batch_size: int = 4

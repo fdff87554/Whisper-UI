@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
+from whisper_ui.core.languages import DEFAULT_WHISPER_MODEL
+
 
 class JobStatus(StrEnum):
     PENDING = "pending"
@@ -63,7 +65,7 @@ class Job:
     progress: float = 0.0
     progress_message: str = ""
     language: str = "zh"
-    model_name: str = "large-v3"
+    model_name: str = DEFAULT_WHISPER_MODEL
     num_speakers: int | None = None
     enable_diarization: bool = True
     convert_to_traditional: bool = True

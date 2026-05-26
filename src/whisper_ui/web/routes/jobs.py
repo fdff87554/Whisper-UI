@@ -11,7 +11,7 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 
 from whisper_ui.core.constants import DEFAULT_JOBS_PER_PAGE
-from whisper_ui.core.languages import SUPPORTED_LANGUAGES, WHISPER_MODELS
+from whisper_ui.core.languages import DEFAULT_WHISPER_MODEL, SUPPORTED_LANGUAGES, WHISPER_MODELS
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.pipeline.audio_probe import get_audio_duration_seconds
 from whisper_ui.ui import labels as ui_labels
@@ -346,7 +346,7 @@ async def re_transcribe_job(
     filestore: FileStoreDep,
     user: CurrentUserDep,
     language: Annotated[str, Form()] = "zh",
-    model_name: Annotated[str, Form()] = "large-v3",
+    model_name: Annotated[str, Form()] = DEFAULT_WHISPER_MODEL,
     num_speakers: Annotated[int, Form()] = 0,
     enable_diarization: Annotated[bool, Form()] = False,
     convert_to_traditional: Annotated[bool, Form()] = False,

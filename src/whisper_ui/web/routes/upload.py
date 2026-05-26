@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from markupsafe import escape
 
 from whisper_ui.core.constants import MAX_BATCH_SIZE
-from whisper_ui.core.languages import SUPPORTED_LANGUAGES, WHISPER_MODELS
+from whisper_ui.core.languages import DEFAULT_WHISPER_MODEL, SUPPORTED_LANGUAGES, WHISPER_MODELS
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.pipeline.audio_probe import get_audio_duration_seconds
 from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
@@ -152,7 +152,7 @@ async def upload_submit(
     user: CurrentUserDep,
     files: Annotated[list[UploadFile] | None, File()] = None,
     language: Annotated[str, Form()] = "zh",
-    model_name: Annotated[str, Form()] = "large-v3",
+    model_name: Annotated[str, Form()] = DEFAULT_WHISPER_MODEL,
     num_speakers: Annotated[int, Form()] = 0,
     enable_diarization: Annotated[bool, Form()] = False,
     convert_to_traditional: Annotated[bool, Form()] = False,
@@ -295,7 +295,7 @@ async def upload_url_submit(
     user: CurrentUserDep,
     url: Annotated[str, Form()],
     language: Annotated[str, Form()] = "zh",
-    model_name: Annotated[str, Form()] = "large-v3",
+    model_name: Annotated[str, Form()] = DEFAULT_WHISPER_MODEL,
     num_speakers: Annotated[int, Form()] = 0,
     enable_diarization: Annotated[bool, Form()] = False,
     convert_to_traditional: Annotated[bool, Form()] = False,
