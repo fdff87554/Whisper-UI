@@ -119,7 +119,11 @@ async def jobs_page(
     # reuses the upload form's option choices.
     ctx["supported_languages"] = SUPPORTED_LANGUAGES
     ctx["whisper_models"] = WHISPER_MODELS
-    ctx["settings"] = settings
+    # Pass only the derived availability flags the template needs, not the
+    # whole Settings object, so a future sensitive field can never leak into
+    # the rendered HTML by accident.
+    ctx["diarization_available"] = settings.diarization_available
+    ctx["llm_correction_available"] = settings.llm_correction_available
     return templates.TemplateResponse(request=request, name="jobs.html", context=ctx)
 
 

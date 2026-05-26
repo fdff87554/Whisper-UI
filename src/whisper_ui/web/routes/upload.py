@@ -121,7 +121,12 @@ async def upload_page(request: Request, settings: SettingsDep, user: CurrentUser
         name="upload.html",
         context={
             "active_page": "upload",
-            "settings": settings,
+            # Only the derived values the form needs — not the whole Settings
+            # object — so no sensitive field can leak into the rendered HTML.
+            "diarization_available": settings.diarization_available,
+            "llm_correction_available": settings.llm_correction_available,
+            "default_language": settings.language,
+            "default_model": settings.whisper_model,
             "supported_extensions": sorted(SUPPORTED_EXTENSIONS),
             "supported_languages": SUPPORTED_LANGUAGES,
             "whisper_models": WHISPER_MODELS,
