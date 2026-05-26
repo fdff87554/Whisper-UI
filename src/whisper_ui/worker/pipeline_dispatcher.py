@@ -330,6 +330,13 @@ def finalize_success(rq_job, connection, _result) -> None:
             logger.error("finalize_success could not find parent job %s", parent_job_id)
             return
 
+        if job.status == JobStatus.COMPLETED:
+            logger.debug(
+                "finalize_success: job %s already COMPLETED, skipping duplicate finalize",
+                parent_job_id,
+            )
+            return
+
         ctx_store = PipelineContextStore(runtime.redis, parent_job_id)
         context = ctx_store.load()
         reporter = runtime.reporter
