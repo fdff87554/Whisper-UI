@@ -102,10 +102,13 @@ if TYPE_CHECKING:
 _GENERATION_GATED_HSET_LUA = """
 local ctx_key = KEYS[1]
 local gen_key = KEYS[2]
-local expected = ARGV[1]
+local expected = tonumber(ARGV[1])
 local ttl = tonumber(ARGV[2])
-local current = redis.call('GET', gen_key)
-if current and current ~= expected then
+-- Numeric comparison (matching worker/progress.py) so the gate never
+-- depends on Redis returning the counter in the same string form Python
+-- sent it. A write is dropped unless the caller IS the current generation.
+local current = tonumber(redis.call('GET', gen_key))
+if current and expected and current ~= expected then
   return 0
 end
 local pairs_count = #ARGV - 2
