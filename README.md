@@ -105,16 +105,16 @@ docker compose --profile gpu build
 
 All settings are configured via environment variables (`.env` file):
 
-| Variable             | Default                             | Description                                  |
-| -------------------- | ----------------------------------- | -------------------------------------------- |
-| `WHISPER_MODEL`      | `large-v3`                          | Whisper model variant (see model list below) |
-| `COMPUTE_TYPE`       | `int8_float16` (GPU) / `int8` (CPU) | CTranslate2 compute type                     |
-| `DEVICE`             | `cuda` (GPU) / `cpu` (CPU)          | Inference device                             |
-| `BATCH_SIZE`         | `4`                                 | Transcription batch size                     |
-| `LANGUAGE`           | `zh`                                | Default language code                        |
-| `HF_TOKEN`           | (empty)                             | HuggingFace token for speaker diarization    |
-| `PIP_INDEX_URL`      | (empty)                             | Custom PyPI mirror for Docker builds         |
-| `WHISPER_UI_VERSION` | `latest`                            | Docker image version tag to pull             |
+| Variable             | Default                             | Description                                                       |
+| -------------------- | ----------------------------------- | ----------------------------------------------------------------- |
+| `WHISPER_MODEL`      | `large-v3`                          | Whisper model variant (see model list below)                      |
+| `COMPUTE_TYPE`       | `int8_float16` (GPU) / `int8` (CPU) | CTranslate2 compute type                                          |
+| `DEVICE`             | `auto`                              | Inference device; compose profiles set `cuda` (GPU) / `cpu` (CPU) |
+| `BATCH_SIZE`         | `4`                                 | Transcription batch size                                          |
+| `LANGUAGE`           | `zh`                                | Default language code                                             |
+| `HF_TOKEN`           | (empty)                             | HuggingFace token for speaker diarization                         |
+| `PIP_INDEX_URL`      | (empty)                             | Custom PyPI mirror for Docker builds                              |
+| `WHISPER_UI_VERSION` | `latest`                            | Docker image version tag to pull                                  |
 
 **Whisper models:** `tiny`, `tiny.en`, `base`, `base.en`, `small`, `small.en`, `medium`, `medium.en`, `large-v1`, `large-v2`, `large-v3`, `large-v3-turbo`
 
@@ -136,7 +136,8 @@ Every subsequent visit goes through `/login` or self-service `/register`.
 | Variable                    | Default | Description                                                                                                                                                                                                                                                       |
 | --------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SESSION_SECRET`            | (empty) | Cookie signing key. Generate once with `openssl rand -hex 32` and keep it stable. Empty value falls back to a per-process random secret (dev only).                                                                                                               |
-| `SESSION_HTTPS_ONLY`        | `false` | Set to `true` when behind a TLS-terminating reverse proxy so the cookie is `Secure`.                                                                                                                                                                              |
+| `SESSION_HTTPS_ONLY`        | `false` | Set to `true` for any production deployment so the session cookie carries the `Secure` flag (otherwise it is sent in clear text on the proxy↔client hop).                                                                                                         |
+| `ALLOW_REGISTRATION`        | `true`  | When `false`, self-service `/register` is closed after the bootstrap admin exists, so only an admin can create accounts. The first admin is always creatable.                                                                                                     |
 | `MAX_LOGIN_ATTEMPTS`        | `5`     | After this many failed logins per username, the next attempt is blocked for `LOGIN_LOCKOUT_SECONDS` regardless of password correctness.                                                                                                                           |
 | `MAX_LOGIN_ATTEMPTS_PER_IP` | `20`    | Separate, higher per-IP threshold. The default is comfortable for a small office sharing one NAT egress IP; raise it for larger NATs, or enable `TRUST_PROXY_HEADERS` so each user is rate-limited by their real address.                                         |
 | `LOGIN_LOCKOUT_SECONDS`     | `900`   | Window length for both per-user and per-IP counters.                                                                                                                                                                                                              |

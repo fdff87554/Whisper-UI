@@ -32,8 +32,9 @@ pre-commit install
 4. Run tests:
 
    ```bash
-   uv run pytest                  # unit tests (integration excluded by default)
+   uv run pytest                  # unit tests (integration + visual excluded by default)
    uv run pytest -m integration   # integration tests (require ffmpeg on PATH)
+   uv run pytest -m visual        # visual tests (require: playwright install chromium)
    ```
 
 5. Submit a pull request with a clear description of:
