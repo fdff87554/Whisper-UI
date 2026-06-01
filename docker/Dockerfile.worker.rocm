@@ -1,0 +1,92 @@
+# AMD / ROCm worker image.
+#
+# Transcription runs on whisper.cpp's HIP (ggml) backend because CTranslate2
+# (whisperx / faster-whisper) has no ROCm backend. Alignment (wav2vec2) and
+# speaker diarization (pyannote) run on PyTorch-ROCm. Both halves need a real
+# ROCm runtime present, so this image is based on an official ROCm image
+# rather than python-slim (the repo.radeon.com torch wheels are not
+# self-contained — they dlopen libroctx64 / librocblas from /opt/rocm).
+#
+# Stage 1 compiles whisper-cli with -DGGML_HIP=ON for the target gfx arch;
+# stage 2 is the runtime worker. The ROCm base tag and GPU target are build
+# args so the image tracks the host's ROCm version / GPU.
+
+ARG ROCM_BASE_IMAGE=rocm/dev-ubuntu-24.04:7.2.1-complete
+ARG AMDGPU_TARGETS=gfx1151
+ARG WHISPER_CPP_REF=v1.8.0
+
+# --- Stage 1: build whisper.cpp (HIP) ---
+FROM ${ROCM_BASE_IMAGE} AS whispercpp-build
+ARG AMDGPU_TARGETS
+ARG WHISPER_CPP_REF
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git cmake ninja-build ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+RUN git clone --depth 1 --branch "${WHISPER_CPP_REF}" https://github.com/ggml-org/whisper.cpp.git /src/whisper.cpp
+WORKDIR /src/whisper.cpp
+RUN cmake -S . -B build -G Ninja \
+    -DGGML_HIP=ON \
+    -DGPU_TARGETS="${AMDGPU_TARGETS}" \
+    -DAMDGPU_TARGETS="${AMDGPU_TARGETS}" \
+    -DCMAKE_C_COMPILER=/opt/rocm/bin/amdclang \
+    -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
+    -DCMAKE_PREFIX_PATH=/opt/rocm \
+    -DCMAKE_BUILD_TYPE=Release && \
+    cmake --build build -j"$(nproc)"
+# Gather the CLI and every produced shared lib (libwhisper, libggml*, the HIP
+# backend) into one dir, preserving SONAME symlinks, for a clean COPY.
+RUN mkdir -p /artifacts/lib && \
+    cp build/bin/whisper-cli /artifacts/ && \
+    find build -name "*.so*" -exec cp -P {} /artifacts/lib/ \;
+
+# --- Stage 2: runtime worker ---
+FROM ${ROCM_BASE_IMAGE} AS runtime
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ffmpeg nodejs python3 python3-pip python-is-python3 && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY pyproject.toml ./
+COPY src/ ./src/
+COPY docker/entrypoint-worker.sh ./entrypoint-worker.sh
+RUN chmod +x ./entrypoint-worker.sh
+
+ARG PIP_INDEX_URL=
+ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+# AMD's manylinux wheel index. torch 2.10.0+rocm7.2.0 matches the cuda
+# worker's torch 2.10.0 and the ROCm 7.2 runtime in the base image; it pins
+# triton==3.6.0+rocm7.2.0 (hosted here, not on PyPI), hence --find-links.
+ARG ROCM_WHEEL_INDEX=https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2
+RUN pip install --no-cache-dir --break-system-packages --find-links "${ROCM_WHEEL_INDEX}/" \
+    "${ROCM_WHEEL_INDEX}/torch-2.10.0%2Brocm7.2.0.lw.gitb6ee5fde-cp312-cp312-linux_x86_64.whl" \
+    "${ROCM_WHEEL_INDEX}/torchaudio-2.10.0%2Brocm7.2.0.git5047768f-cp312-cp312-linux_x86_64.whl" \
+    "${ROCM_WHEEL_INDEX}/triton-3.6.0%2Brocm7.2.0.gitba5c1517-cp312-cp312-linux_x86_64.whl" && \
+    pip install --no-cache-dir --break-system-packages --no-deps "whisperx>=3.8,<3.9" && \
+    pip install --no-cache-dir --break-system-packages ".[worker,worker-llm]"
+
+# whisper.cpp HIP binary + its shared libs from the build stage.
+COPY --from=whispercpp-build /artifacts/whisper-cli /usr/local/bin/whisper-cli
+COPY --from=whispercpp-build /artifacts/lib/ /usr/local/lib/whispercpp/
+RUN echo "/usr/local/lib/whispercpp" > /etc/ld.so.conf.d/whispercpp.conf && ldconfig
+
+RUN useradd --uid 1000 --create-home appuser 2>/dev/null || true \
+    && mkdir -p /app/data/db /app/data/uploads /app/data/outputs /cache/huggingface \
+    && chown -R 1000 /app/data /cache/huggingface
+USER 1000
+
+ENV HF_HOME=/cache/huggingface
+ENV PYTHONUNBUFFERED=1
+# Defaults baked in so the rocm worker uses the whisper.cpp backend even if an
+# operator forgets to set them in compose. compose still overrides them.
+ENV DEVICE=rocm
+ENV TRANSCRIBE_BACKEND=whispercpp
+
+HEALTHCHECK --interval=60s --timeout=10s --retries=3 \
+    CMD python -c "from redis import Redis; import os; r=Redis.from_url(os.environ.get('REDIS_URL','redis://redis:6379/0')); r.ping()" || exit 1
+
+ENTRYPOINT ["./entrypoint-worker.sh"]

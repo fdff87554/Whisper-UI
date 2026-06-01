@@ -5,8 +5,11 @@ echo "=== Whisper UI Worker ==="
 
 # Log GPU availability (device detection handled in Python)
 if command -v nvidia-smi &>/dev/null && nvidia-smi &>/dev/null; then
-	echo "GPU detected:"
+	echo "NVIDIA GPU detected:"
 	nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+elif command -v rocm-smi &>/dev/null && rocm-smi &>/dev/null; then
+	echo "AMD GPU detected:"
+	rocm-smi --showproductname 2>/dev/null | grep -Ei "Card Series|GFX Version" || true
 else
 	echo "No GPU detected."
 fi
