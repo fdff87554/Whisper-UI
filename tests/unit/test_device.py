@@ -3,7 +3,15 @@ from __future__ import annotations
 import logging
 from unittest.mock import MagicMock, patch
 
-from whisper_ui.core.device import detect_device, release_gpu_memory, validate_compute_type
+from whisper_ui.core.device import (
+    _cuda_available,
+    _rocm_available,
+    configure_torch_for_rocm,
+    detect_device,
+    release_gpu_memory,
+    torch_device_for,
+    validate_compute_type,
+)
 
 
 class TestDetectDevice:
@@ -37,6 +45,84 @@ class TestDetectDevice:
             result = detect_device("mps")
         assert result == "cpu"
         assert "Unsupported device" in caplog.text
+
+    def test_auto_with_rocm(self):
+        with (
+            patch("whisper_ui.core.device._cuda_available", return_value=False),
+            patch("whisper_ui.core.device._rocm_available", return_value=True),
+        ):
+            assert detect_device("auto") == "rocm"
+
+    def test_auto_prefers_cuda_over_rocm(self):
+        with (
+            patch("whisper_ui.core.device._cuda_available", return_value=True),
+            patch("whisper_ui.core.device._rocm_available", return_value=True),
+        ):
+            assert detect_device("auto") == "cuda"
+
+    def test_explicit_rocm_available(self):
+        with patch("whisper_ui.core.device._rocm_available", return_value=True):
+            assert detect_device("rocm") == "rocm"
+
+    def test_explicit_rocm_unavailable(self, caplog):
+        with (
+            patch("whisper_ui.core.device._rocm_available", return_value=False),
+            caplog.at_level(logging.WARNING),
+        ):
+            result = detect_device("rocm")
+        assert result == "cpu"
+        assert "ROCm requested but not available" in caplog.text
+
+
+class TestTorchDeviceFor:
+    def test_cuda_maps_to_cuda(self):
+        assert torch_device_for("cuda") == "cuda"
+
+    def test_rocm_maps_to_cuda(self):
+        assert torch_device_for("rocm") == "cuda"
+
+    def test_cpu_maps_to_cpu(self):
+        assert torch_device_for("cpu") == "cpu"
+
+    def test_unknown_maps_to_cpu(self):
+        assert torch_device_for("mps") == "cpu"
+
+
+class TestConfigureTorchForRocm:
+    def test_disables_cudnn_backend(self):
+        mock_torch = MagicMock()
+        with patch.dict("sys.modules", {"torch": mock_torch}):
+            configure_torch_for_rocm()
+        assert mock_torch.backends.cudnn.enabled is False
+
+    def test_no_torch(self):
+        with patch.dict("sys.modules", {"torch": None}):
+            # Should not raise when torch is unavailable.
+            configure_torch_for_rocm()
+
+
+class TestAvailabilityProbes:
+    @staticmethod
+    def _torch(*, available: bool, hip: str | None) -> MagicMock:
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = available
+        mock_torch.version.hip = hip
+        return mock_torch
+
+    def test_real_cuda_is_cuda_not_rocm(self):
+        with patch.dict("sys.modules", {"torch": self._torch(available=True, hip=None)}):
+            assert _cuda_available() is True
+            assert _rocm_available() is False
+
+    def test_hip_build_is_rocm_not_cuda(self):
+        with patch.dict("sys.modules", {"torch": self._torch(available=True, hip="7.2.0")}):
+            assert _cuda_available() is False
+            assert _rocm_available() is True
+
+    def test_neither_when_gpu_unavailable(self):
+        with patch.dict("sys.modules", {"torch": self._torch(available=False, hip=None)}):
+            assert _cuda_available() is False
+            assert _rocm_available() is False
 
 
 class TestValidateComputeType:

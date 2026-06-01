@@ -223,6 +223,71 @@ services:
       options:
         max-size: "20m"
         max-file: "5"
+  # AMD / ROCm worker. Transcription runs on whisper.cpp (HIP); alignment and
+  # diarization run on PyTorch-ROCm. Enable with:
+  #   docker compose --profile rocm up -d
+  # AMD GPUs are passed through via /dev/kfd + /dev/dri and the host's
+  # video/render group GIDs — set VIDEO_GID / RENDER_GID to match
+  # `getent group video render` on your host (defaults suit a Strix Halo box).
+  worker-rocm:
+    profiles: [rocm]
+    image: ghcr.io/fdff87554/whisper-ui-worker-rocm:${WHISPER_UI_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker.rocm
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+        AMDGPU_TARGETS: ${AMDGPU_TARGETS:-gfx1151}
+    environment:
+      - WORKER_QUEUES=${WORKER_ROCM_QUEUES:-whisper:gpu whisper:io whisper:cpu default}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
+      - DATABASE_PATH=/app/data/db/whisper_ui.db
+      - UPLOAD_DIR=/app/data/uploads
+      - OUTPUT_DIR=/app/data/outputs
+      - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
+      - DEVICE=rocm
+      # CTranslate2 has no ROCm backend; transcribe via whisper.cpp (HIP).
+      - TRANSCRIBE_BACKEND=whispercpp
+      - WHISPERCPP_THREADS=${WHISPERCPP_THREADS:-0}
+      - LANGUAGE=${LANGUAGE:-zh}
+      - HF_TOKEN=${HF_TOKEN:-}
+      - YOUTUBE_MAX_DURATION=${YOUTUBE_MAX_DURATION:-14400}
+      # Queue / job timeouts — see README "Queue / Timeout tuning".
+      - JOB_TIMEOUT_DEFAULT=${JOB_TIMEOUT_DEFAULT:-7200}
+      - JOB_TIMEOUT_FLOOR=${JOB_TIMEOUT_FLOOR:-1800}
+      - JOB_TIMEOUT_AUDIO_MULTIPLIER=${JOB_TIMEOUT_AUDIO_MULTIPLIER:-3.0}
+      - JOB_TIMEOUT_MAX=${JOB_TIMEOUT_MAX:-28800}
+      - STALE_JOB_BUFFER=${STALE_JOB_BUFFER:-1800}
+      - REDIS_PROCESSING_EXPIRY=${REDIS_PROCESSING_EXPIRY:-30600}
+      - DIARIZE_HEARTBEAT_INTERVAL=${DIARIZE_HEARTBEAT_INTERVAL:-30}
+      # Optional LLM text correction (Ollama).
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e2b}
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
+      - OLLAMA_REQUEST_TIMEOUT=${OLLAMA_REQUEST_TIMEOUT:-120}
+      - LLM_CHUNK_SIZE=${LLM_CHUNK_SIZE:-8}
+      - LLM_CHUNK_CONTEXT=${LLM_CHUNK_CONTEXT:-2}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.1}
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - "${VIDEO_GID:-44}"
+      - "${RENDER_GID:-993}"
+    volumes:
+      - app-data:/app/data
+      - model-cache:/cache/huggingface
+    depends_on:
+      redis:
+        condition: service_healthy
+      volume-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
   # Optional IO-dedicated worker for multi-worker topologies. Use it when
   # you want the GPU worker(s) to stay focused on whisper:gpu while a
   # lightweight CPU container handles download / preprocess / llm_correction.

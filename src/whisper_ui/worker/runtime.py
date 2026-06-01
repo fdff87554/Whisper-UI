@@ -71,6 +71,12 @@ def build_worker_runtime(job_id: str, *, generation: int | None = None) -> Itera
     skips generation gating and falls back to plain max-write semantics.
     """
     settings = get_settings()
+    if settings.device == "rocm":
+        # gfx1151 MIOpen lacks kernels for some ops (pyannote InstanceNorm);
+        # fall back to native HIP kernels for every GPU task in this worker.
+        from whisper_ui.core.device import configure_torch_for_rocm
+
+        configure_torch_for_rocm()
     redis = Redis.from_url(settings.redis_url)
     reporter = RedisProgressReporter(
         redis,

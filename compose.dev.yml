@@ -31,3 +31,7 @@ services:
     volumes:
       - ./src:/app/src
       - ./data:/app/data
+  worker-rocm:
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data

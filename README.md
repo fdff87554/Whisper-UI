@@ -44,6 +44,12 @@ and Docker deployment (GPU / CPU).
 - NVIDIA GPU with 8GB+ VRAM
 - [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 
+**For AMD GPU deployment (ROCm):**
+
+- AMD GPU with ROCm support (tested on Radeon 8060S / gfx1151, ROCm 7.2)
+- ROCm on the host: the worker image bundles the ROCm 7.2 runtime, but the
+  host must provide the `amdgpu` kernel driver and expose `/dev/kfd` + `/dev/dri`
+
 **Optional (for speaker diarization):**
 
 - HuggingFace token ([get one here](https://huggingface.co/settings/tokens))
@@ -70,6 +76,28 @@ cp .env.example .env
 docker compose --profile cpu up -d
 ```
 
+### AMD GPU Deployment (ROCm)
+
+Transcription runs on whisper.cpp (HIP); alignment and speaker diarization run
+on PyTorch-ROCm. CTranslate2 / faster-whisper has no ROCm backend, so the
+`whisperx` transcription path cannot drive an AMD GPU — the `rocm` profile uses
+whisper.cpp instead and selects it automatically (`TRANSCRIBE_BACKEND=whispercpp`).
+
+```bash
+cp .env.example .env
+# Set HF_TOKEN if you need speaker diarization.
+# Match the device-passthrough groups to your host: getent group video render
+#   VIDEO_GID / RENDER_GID  (defaults 44 / 993 suit a Strix Halo box)
+# For a non-gfx1151 GPU, build whisper.cpp for it: AMDGPU_TARGETS=gfx1100
+
+docker compose --profile rocm up -d
+```
+
+The first run compiles whisper.cpp for the target GPU arch and downloads the
+GGML model (`ggml-large-v3.bin`), so allow extra time. On gfx1151 the worker
+disables the MIOpen backend (falls back to native HIP kernels) to avoid a known
+`miopenStatusUnknownError` in pyannote's segmentation model.
+
 Open <http://localhost:8080> in your browser.
 
 > **Production note:** the bundled Redis starts without authentication
@@ -83,11 +111,16 @@ Open <http://localhost:8080> in your browser.
 Pre-built Docker images are published to GHCR on each release.
 `docker compose up` pulls them automatically; if unavailable, it falls back to a local build.
 
-| Image                                     | Description           |
-| ----------------------------------------- | --------------------- |
-| `ghcr.io/fdff87554/whisper-ui-frontend`   | FastAPI web interface |
-| `ghcr.io/fdff87554/whisper-ui-worker`     | GPU worker (CUDA)     |
-| `ghcr.io/fdff87554/whisper-ui-worker-cpu` | CPU worker            |
+| Image                                      | Description           |
+| ------------------------------------------ | --------------------- |
+| `ghcr.io/fdff87554/whisper-ui-frontend`    | FastAPI web interface |
+| `ghcr.io/fdff87554/whisper-ui-worker`      | GPU worker (CUDA)     |
+| `ghcr.io/fdff87554/whisper-ui-worker-cpu`  | CPU worker            |
+| `ghcr.io/fdff87554/whisper-ui-worker-rocm` | AMD GPU worker (ROCm) |
+
+> The ROCm worker image (~38 GB) is published only on **release tags**, not on
+> every `main` push. Until a release exists, `docker compose --profile rocm up`
+> falls back to building it locally.
 
 **Pin a specific version** by setting `WHISPER_UI_VERSION` in your `.env` file:
 
@@ -105,16 +138,17 @@ docker compose --profile gpu build
 
 All settings are configured via environment variables (`.env` file):
 
-| Variable             | Default                             | Description                                                       |
-| -------------------- | ----------------------------------- | ----------------------------------------------------------------- |
-| `WHISPER_MODEL`      | `large-v3`                          | Whisper model variant (see model list below)                      |
-| `COMPUTE_TYPE`       | `int8_float16` (GPU) / `int8` (CPU) | CTranslate2 compute type                                          |
-| `DEVICE`             | `auto`                              | Inference device; compose profiles set `cuda` (GPU) / `cpu` (CPU) |
-| `BATCH_SIZE`         | `4`                                 | Transcription batch size                                          |
-| `LANGUAGE`           | `zh`                                | Default language code                                             |
-| `HF_TOKEN`           | (empty)                             | HuggingFace token for speaker diarization                         |
-| `PIP_INDEX_URL`      | (empty)                             | Custom PyPI mirror for Docker builds                              |
-| `WHISPER_UI_VERSION` | `latest`                            | Docker image version tag to pull                                  |
+| Variable             | Default                             | Description                                                                                   |
+| -------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------- |
+| `WHISPER_MODEL`      | `large-v3`                          | Whisper model variant (see model list below)                                                  |
+| `COMPUTE_TYPE`       | `int8_float16` (GPU) / `int8` (CPU) | CTranslate2 compute type                                                                      |
+| `DEVICE`             | `auto`                              | Inference device; compose profiles set `cuda` (GPU) / `rocm` (AMD) / `cpu` (CPU)              |
+| `TRANSCRIBE_BACKEND` | `whisperx`                          | `whisperx` (CTranslate2, CUDA/CPU) or `whispercpp` (whisper.cpp HIP; set by the rocm profile) |
+| `BATCH_SIZE`         | `4`                                 | Transcription batch size (whisperx backend only)                                              |
+| `LANGUAGE`           | `zh`                                | Default language code                                                                         |
+| `HF_TOKEN`           | (empty)                             | HuggingFace token for speaker diarization                                                     |
+| `PIP_INDEX_URL`      | (empty)                             | Custom PyPI mirror for Docker builds                                                          |
+| `WHISPER_UI_VERSION` | `latest`                            | Docker image version tag to pull                                                              |
 
 **Whisper models:** `tiny`, `tiny.en`, `base`, `base.en`, `small`, `small.en`, `medium`, `medium.en`, `large-v1`, `large-v2`, `large-v3`, `large-v3-turbo`
 
