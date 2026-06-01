@@ -38,6 +38,17 @@ class Settings(BaseSettings):
     device: str = "auto"
     batch_size: int = 4
 
+    # Transcription backend:
+    #   "whisperx"  -> faster-whisper / CTranslate2 (CUDA + CPU; the default).
+    #   "whispercpp" -> whisper.cpp HIP CLI, used by the rocm worker because
+    #                   CTranslate2 has no ROCm backend. align/diarize still
+    #                   run on torch-ROCm regardless of this setting.
+    transcribe_backend: str = "whisperx"
+    # whisper.cpp CLI settings (only consulted when transcribe_backend ==
+    # "whispercpp"). The GGML model is fetched lazily as ggml-<whisper_model>.bin.
+    whispercpp_binary: str = "whisper-cli"
+    whispercpp_threads: int = 0  # 0 -> whisper.cpp's own default
+
     # Language
     language: str = "zh"
 
@@ -132,6 +143,15 @@ class Settings(BaseSettings):
     llm_chunk_size: int = 8
     llm_chunk_context: int = 2
     llm_temperature: float = 0.1
+
+    @field_validator("transcribe_backend")
+    @classmethod
+    def _validate_transcribe_backend(cls, v: str) -> str:
+        """Reject unknown transcription backends at startup (fail fast)."""
+        allowed = {"whisperx", "whispercpp"}
+        if v not in allowed:
+            raise ValueError(f"transcribe_backend must be one of {sorted(allowed)}, got {v!r}")
+        return v
 
     @field_validator("ollama_base_url", mode="before")
     @classmethod

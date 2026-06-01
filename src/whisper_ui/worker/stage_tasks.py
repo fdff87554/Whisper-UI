@@ -35,6 +35,7 @@ from whisper_ui.pipeline.progress_bands import (
     build_stage_weights,
 )
 from whisper_ui.pipeline.transcribe import TranscribeStage
+from whisper_ui.pipeline.whispercpp_transcribe import WhisperCppTranscribeStage
 from whisper_ui.worker.context_store import PipelineContextStore
 from whisper_ui.worker.runtime import (
     WorkerRuntime,
@@ -66,6 +67,28 @@ def _load_job(runtime: WorkerRuntime, parent_job_id: str) -> Job:
     if job is None:
         raise PipelineError(f"Job {parent_job_id} not found while running stage task")
     return job
+
+
+def _build_transcribe_stage(job: Job, runtime: WorkerRuntime, torch_device: str) -> PipelineStage:
+    """Select the transcription engine for this worker.
+
+    AMD/ROCm workers set ``transcribe_backend=whispercpp`` because CTranslate2
+    (whisperx / faster-whisper) has no ROCm backend; every other worker keeps
+    the whisperx path. Both backends emit the same ``transcription_result`` /
+    ``whisperx_audio`` context keys, so align/diarize stay backend-agnostic.
+    """
+    if runtime.settings.transcribe_backend == "whispercpp":
+        return WhisperCppTranscribeStage(
+            model_name=job.model_name,
+            binary=runtime.settings.whispercpp_binary,
+            threads=runtime.settings.whispercpp_threads,
+            device=runtime.settings.device,
+        )
+    return TranscribeStage(
+        model_name=job.model_name,
+        compute_type=runtime.settings.compute_type,
+        device=torch_device,
+    )
 
 
 def _mark_processing_if_queued(runtime: WorkerRuntime, job: Job) -> None:
@@ -360,11 +383,7 @@ def run_transcribe_align(parent_job_id: str) -> str:
         # On ROCm the logical device label is "rocm"; PyTorch/whisperx address
         # the AMD GPU through the "cuda" namespace, so translate before use.
         torch_device = torch_device_for(runtime.settings.device)
-        transcribe = TranscribeStage(
-            model_name=job.model_name,
-            compute_type=runtime.settings.compute_type,
-            device=torch_device,
-        )
+        transcribe = _build_transcribe_stage(job, runtime, torch_device)
         align = AlignStage(device=torch_device)
 
         transcribe_progress = _banded_progress(throttled, weights.get("transcribe", (0.0, 1.0)))
