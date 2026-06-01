@@ -49,7 +49,7 @@ dev = [
   # extra pulls in ``lupa`` so the RedisProgressReporter's EVAL-based
   # atomic max-write script (see whisper_ui/worker/progress.py) can be
   # exercised under fakeredis without a real Redis server.
-  "fakeredis[lua]>=2.35.1,<3",
+  "fakeredis[lua]>=2.36.0,<3",
   # Visual/contrast regression tests (tests/visual, `pytest -m visual`).
   # Renders the compiled stylesheet in a headless Chromium and reads computed
   # colors to guard theme contrast (issue #61). Browser binary is installed
