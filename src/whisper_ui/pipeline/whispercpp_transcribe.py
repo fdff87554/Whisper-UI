@@ -81,8 +81,14 @@ class WhisperCppTranscribeStage:
 
             # AlignStage consumes ``whisperx_audio`` (the decoded 16 kHz array);
             # load it the same way the whisperx path does so the contract is
-            # byte-for-byte identical regardless of transcription backend.
-            import whisperx
+            # byte-for-byte identical regardless of transcription backend. The
+            # import is localized so a genuinely missing whisperx is reported
+            # accurately, while unrelated ImportErrors (e.g. huggingface_hub
+            # raised during model resolution above) are not misattributed to it.
+            try:
+                import whisperx
+            except ImportError as err:
+                raise TranscriptionError("whisperx is not installed (needed to load audio for alignment).") from err
 
             context["transcription_result"] = transcription
             context["whisperx_audio"] = whisperx.load_audio(audio_path)
@@ -101,8 +107,6 @@ class WhisperCppTranscribeStage:
             raise TranscriptionError(
                 f"whisper.cpp binary '{self._binary}' not found. It must be built into the rocm worker image."
             ) from err
-        except ImportError as err:
-            raise TranscriptionError("whisperx is not installed (needed to load audio for alignment).") from err
         except Exception as e:
             raise TranscriptionError(f"Transcription failed: {e}") from e
 
@@ -146,9 +150,13 @@ class WhisperCppTranscribeStage:
             if self._threads and self._threads > 0:
                 cmd += ["-t", str(self._threads)]
 
-            proc = subprocess.run(cmd, capture_output=True, text=True)
+            # encoding/errors (not text=True) so non-ASCII output — e.g. zh
+            # transcripts or file names — cannot raise UnicodeDecodeError.
+            proc = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace")
             if proc.returncode != 0:
-                raise TranscriptionError(f"whisper-cli failed (exit {proc.returncode}): {proc.stderr.strip()[:500]}")
+                # Some builds emit diagnostics on stdout; fall back to it.
+                detail = proc.stderr.strip() or proc.stdout.strip()
+                raise TranscriptionError(f"whisper-cli failed (exit {proc.returncode}): {detail[:500]}")
 
             json_path = Path(f"{out_prefix}.json")
             if not json_path.exists():
@@ -163,14 +171,20 @@ class WhisperCppTranscribeStage:
         segments with millisecond ``offsets`` and ``text``; AlignStage expects
         ``{"language", "segments": [{"start", "end", "text"}]}`` with seconds.
         """
-        language = (data.get("result") or {}).get("language") or "unknown"
+        if not isinstance(data, dict):
+            return {"language": "unknown", "segments": []}
+        result = data.get("result")
+        language = (result.get("language") if isinstance(result, dict) else None) or "unknown"
         segments: list[dict[str, Any]] = []
         for seg in data.get("transcription") or []:
-            offsets = seg.get("offsets") or {}
+            if not isinstance(seg, dict):
+                continue
+            offsets = seg.get("offsets") if isinstance(seg.get("offsets"), dict) else {}
+            # ``or 0`` guards an explicit ``null`` offset (None / 1000.0 -> TypeError).
             segments.append(
                 {
-                    "start": offsets.get("from", 0) / 1000.0,
-                    "end": offsets.get("to", 0) / 1000.0,
+                    "start": (offsets.get("from") or 0) / 1000.0,
+                    "end": (offsets.get("to") or 0) / 1000.0,
                     "text": (seg.get("text") or "").strip(),
                 }
             )

@@ -147,11 +147,16 @@ class Settings(BaseSettings):
     @field_validator("transcribe_backend")
     @classmethod
     def _validate_transcribe_backend(cls, v: str) -> str:
-        """Reject unknown transcription backends at startup (fail fast)."""
+        """Normalize to lowercase and reject unknown backends (fail fast).
+
+        Returning the lowercased value keeps downstream ``== "whispercpp"``
+        comparisons robust against case in the .env (e.g. ``WHISPERCPP``).
+        """
+        v_lower = v.lower()
         allowed = {"whisperx", "whispercpp"}
-        if v not in allowed:
+        if v_lower not in allowed:
             raise ValueError(f"transcribe_backend must be one of {sorted(allowed)}, got {v!r}")
-        return v
+        return v_lower
 
     @field_validator("ollama_base_url", mode="before")
     @classmethod

@@ -5,7 +5,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
+from whisper_ui.core.config import Settings
 from whisper_ui.core.exceptions import TranscriptionError
 from whisper_ui.pipeline.transcribe import TranscribeStage
 from whisper_ui.pipeline.whispercpp_transcribe import WhisperCppTranscribeStage
@@ -17,10 +19,10 @@ _MODULE = "whisper_ui.pipeline.whispercpp_transcribe"
 def _fake_cli_writer(payload: dict):
     """Return a subprocess.run stand-in that writes ``payload`` to <-of>.json."""
 
-    def _run(cmd, capture_output, text):
+    def _run(cmd, *args, **kwargs):  # resilient to subprocess.run kwargs (encoding/errors/etc.)
         out_prefix = cmd[cmd.index("-of") + 1]
         Path(f"{out_prefix}.json").write_text(json.dumps(payload), encoding="utf-8")
-        return MagicMock(returncode=0, stderr="")
+        return MagicMock(returncode=0, stderr="", stdout="")
 
     return _run
 
@@ -38,6 +40,15 @@ class TestAdapter:
 
     def test_handles_missing_fields(self):
         assert WhisperCppTranscribeStage._to_whisperx_result({}) == {"language": "unknown", "segments": []}
+
+    def test_null_offsets_do_not_crash(self):
+        # An explicit JSON null offset must not raise (None / 1000.0 -> TypeError).
+        data = {"transcription": [{"offsets": {"from": None, "to": None}, "text": "x"}]}
+        out = WhisperCppTranscribeStage._to_whisperx_result(data)
+        assert out == {"language": "unknown", "segments": [{"start": 0.0, "end": 0.0, "text": "x"}]}
+
+    def test_non_dict_payload_is_safe(self):
+        assert WhisperCppTranscribeStage._to_whisperx_result([1, 2, 3]) == {"language": "unknown", "segments": []}
 
 
 class TestExecute:
@@ -147,3 +158,13 @@ class TestBackendSelection:
         job.model_name = "large-v3"
         stage = _build_transcribe_stage(job, self._runtime("whisperx"), "cuda")
         assert isinstance(stage, TranscribeStage)
+
+
+class TestTranscribeBackendConfig:
+    # _env_file=None isolates the validator test from a developer's local .env.
+    def test_normalizes_case(self):
+        assert Settings(transcribe_backend="WhisperCPP", _env_file=None).transcribe_backend == "whispercpp"
+
+    def test_rejects_unknown_backend(self):
+        with pytest.raises(ValidationError):
+            Settings(transcribe_backend="bogus", _env_file=None)
