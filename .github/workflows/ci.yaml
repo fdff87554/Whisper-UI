@@ -98,6 +98,18 @@ jobs:
           push: false
           cache-from: type=gha,scope=${{ matrix.dockerfile }}
           cache-to: type=gha,mode=max,scope=${{ matrix.dockerfile }}
+  # The ROCm worker image (~38 GB ROCm-complete base) is too large to fully
+  # build on a stock PR runner, so instead of build-push-action we run
+  # BuildKit's --check (Dockerfile lint / best-practice + base metadata only,
+  # a few seconds) to catch regressions cheaply. The real build runs in Docker
+  # Publish on release tags.
+  rocm-dockerfile-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v4
+      - name: Dockerfile check (no build)
+        run: docker buildx build --check --file docker/Dockerfile.worker.rocm .
   # Browser-rendered theme/contrast checks (tests/visual). Single Python slot —
   # rendering is interpreter-independent. Needs the compiled stylesheet (built
   # here, since style.css is gitignored) and a headless Chromium.
