@@ -23,6 +23,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- AMD GPU (ROCm) support via a new `rocm` compose profile and
+  `docker/Dockerfile.worker.rocm`. Transcription runs on the whisper.cpp HIP
+  backend — CTranslate2 (whisperx / faster-whisper) has no ROCm backend —
+  selected by a new `TRANSCRIBE_BACKEND=whispercpp` setting, while alignment
+  and speaker diarization run on PyTorch-ROCm. A `rocm` device label maps to
+  torch's `cuda` namespace, and the worker disables the MIOpen backend on
+  gfx1151 (native HIP kernels) to avoid a `miopenStatusUnknownError` in
+  pyannote. Tested on a Radeon 8060S (Strix Halo, gfx1151), ROCm 7.2.
 - `ALLOW_REGISTRATION` setting (default `true`): when `false`, self-service
   `/register` is closed after the bootstrap admin exists so only an admin can
   create accounts.
