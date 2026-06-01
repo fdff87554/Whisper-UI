@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 from rq.timeouts import BaseTimeoutException
 
+from whisper_ui.core.device import torch_device_for
 from whisper_ui.core.exceptions import PipelineError
 from whisper_ui.core.models import JobStatus
 from whisper_ui.pipeline.align import AlignStage
@@ -356,12 +357,15 @@ def run_transcribe_align(parent_job_id: str) -> str:
         throttled = make_throttled_progress_reporter(runtime.reporter, runtime.db, job)
         weights = pick_stage_weights(job, runtime)
 
+        # On ROCm the logical device label is "rocm"; PyTorch/whisperx address
+        # the AMD GPU through the "cuda" namespace, so translate before use.
+        torch_device = torch_device_for(runtime.settings.device)
         transcribe = TranscribeStage(
             model_name=job.model_name,
             compute_type=runtime.settings.compute_type,
-            device=runtime.settings.device,
+            device=torch_device,
         )
-        align = AlignStage(device=runtime.settings.device)
+        align = AlignStage(device=torch_device)
 
         transcribe_progress = _banded_progress(throttled, weights.get("transcribe", (0.0, 1.0)))
         align_progress = _banded_progress(throttled, weights.get("align", (0.0, 1.0)))
@@ -395,7 +399,7 @@ def run_diarize(parent_job_id: str) -> str:
         stage_name="diarize",
         build_stage=lambda job, runtime: DiarizeStage(
             hf_token=runtime.settings.hf_token,
-            device=runtime.settings.device,
+            device=torch_device_for(runtime.settings.device),
             enabled=job.enable_diarization,
             heartbeat_interval=runtime.settings.diarize_heartbeat_interval,
         ),
