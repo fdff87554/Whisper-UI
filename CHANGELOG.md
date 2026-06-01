@@ -7,6 +7,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-06-01
+
 ### Fixed
 
 - Batch task groups no longer auto-collapse (or refuse to collapse) while the
