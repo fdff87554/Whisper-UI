@@ -30,7 +30,7 @@ services:
       # Optional LLM text correction (Ollama). Empty string disables the
       # feature globally and greys out the upload-form toggle.
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e2b}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e4b}
       # Optional upload retention. 0 (default) keeps every upload until the
       # job is explicitly deleted. >0 has the web app hourly reclaim the
       # upload directory of COMPLETED jobs older than that many days.
@@ -142,7 +142,7 @@ services:
       - DIARIZE_HEARTBEAT_INTERVAL=${DIARIZE_HEARTBEAT_INTERVAL:-30}
       # Optional LLM text correction (Ollama).
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e2b}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e4b}
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
       - OLLAMA_REQUEST_TIMEOUT=${OLLAMA_REQUEST_TIMEOUT:-120}
       - LLM_CHUNK_SIZE=${LLM_CHUNK_SIZE:-8}
@@ -203,7 +203,7 @@ services:
       - DIARIZE_HEARTBEAT_INTERVAL=${DIARIZE_HEARTBEAT_INTERVAL:-30}
       # Optional LLM text correction (Ollama).
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e2b}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e4b}
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
       - OLLAMA_REQUEST_TIMEOUT=${OLLAMA_REQUEST_TIMEOUT:-120}
       - LLM_CHUNK_SIZE=${LLM_CHUNK_SIZE:-8}
@@ -262,7 +262,7 @@ services:
       - DIARIZE_HEARTBEAT_INTERVAL=${DIARIZE_HEARTBEAT_INTERVAL:-30}
       # Optional LLM text correction (Ollama).
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e2b}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e4b}
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
       - OLLAMA_REQUEST_TIMEOUT=${OLLAMA_REQUEST_TIMEOUT:-120}
       - LLM_CHUNK_SIZE=${LLM_CHUNK_SIZE:-8}
@@ -326,7 +326,7 @@ services:
       - REDIS_PROCESSING_EXPIRY=${REDIS_PROCESSING_EXPIRY:-30600}
       # LLM correction runs here when enabled — no GPU required.
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e2b}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e4b}
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
       - OLLAMA_REQUEST_TIMEOUT=${OLLAMA_REQUEST_TIMEOUT:-120}
       - LLM_CHUNK_SIZE=${LLM_CHUNK_SIZE:-8}
@@ -384,7 +384,7 @@ services:
     entrypoint: /bin/sh
     command:
       - -c
-      - 'OLLAMA_HOST=http://ollama:11434 ollama pull ${OLLAMA_MODEL:-gemma4:e2b}'
+      - 'OLLAMA_HOST=http://ollama:11434 ollama pull ${OLLAMA_MODEL:-gemma4:e4b}'
     depends_on:
       ollama:
         condition: service_healthy

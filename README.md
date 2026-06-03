@@ -321,13 +321,13 @@ timestamps / speaker labels. The feature is:
 ```bash
 # .env
 OLLAMA_BASE_URL=http://ollama:11434
-OLLAMA_MODEL=gemma4:e2b
+OLLAMA_MODEL=gemma4:e4b
 
 docker compose --profile gpu --profile llm up -d
 ```
 
 The `ollama-pull` init sidecar will wait until Ollama is healthy and then
-pull `OLLAMA_MODEL` on first start (~7 GB download for `gemma4:e2b`).
+pull `OLLAMA_MODEL` on first start (~9.6 GB download for `gemma4:e4b`).
 Check its exit status with `docker compose ps ollama-pull`; the model is
 cached in the `ollama-data` volume so restarts are instant.
 
@@ -336,11 +336,11 @@ cached in the `ollama-data` volume so restarts are instant.
 ```bash
 # .env
 OLLAMA_BASE_URL=http://192.168.1.20:11434
-OLLAMA_MODEL=gemma4:e2b
+OLLAMA_MODEL=gemma4:e4b
 
 docker compose --profile gpu up -d
 # Make sure the model is pulled on the external server yourself:
-#   ollama pull gemma4:e2b
+#   ollama pull gemma4:e4b
 ```
 
 **Dual-GPU hosts:** the `gpu` profile pins the Whisper worker to
@@ -367,7 +367,7 @@ Override either variable in `.env` if your topology differs.
 | Variable                 | Default      | Description                                                                            |
 | ------------------------ | ------------ | -------------------------------------------------------------------------------------- |
 | `OLLAMA_BASE_URL`        | (empty)      | Empty disables the feature globally. Set to reach a bundled or external Ollama server. |
-| `OLLAMA_MODEL`           | `gemma4:e2b` | Any Ollama-compatible chat model. Larger = better accuracy but more VRAM.              |
+| `OLLAMA_MODEL`           | `gemma4:e4b` | Any Ollama-compatible chat model. Larger = better accuracy but more VRAM.              |
 | `OLLAMA_KEEP_ALIVE`      | `30m`        | How long Ollama keeps the model loaded in VRAM between requests.                       |
 | `OLLAMA_REQUEST_TIMEOUT` | `120`        | Per-request timeout in seconds.                                                        |
 | `LLM_CHUNK_SIZE`         | `8`          | Segments corrected per Ollama request. Larger reduces HTTP overhead.                   |
