@@ -3895,7 +3895,7 @@ wheels = [
 
 [[package]]
 name = "whisper-ui"
-version = "2.6.0"
+version = "2.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },

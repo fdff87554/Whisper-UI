@@ -7,12 +7,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-06-03
+
 ### Changed
 
 - Default LLM correction model (`OLLAMA_MODEL`) is now `gemma4:e4b` instead of
   `gemma4:e2b`, trading a larger VRAM/disk footprint (~9.6 GB pull) for better
   correction accuracy. Set `OLLAMA_MODEL=gemma4:e2b` to keep the previous
   default.
+- Upgraded the `redis` client to 8.0 (from 6.4) and `rq` to 2.9.0. redis-py 8.0
+  defaults to the RESP3 protocol; the bundled `redis:7-alpine` server supports
+  it and the worker/web Redis code paths were validated against a real server.
+- Upgraded `ctranslate2` (the faster-whisper backend) to 4.7.2.
 
 ## [2.6.0] - 2026-06-01
 
