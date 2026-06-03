@@ -13,7 +13,7 @@ and Docker deployment (GPU / CPU).
 - Upload audio/video files for transcription
 - Batch upload with automatic filtering of unsupported files
 - Speaker diarization with pyannote speaker-diarization-3.1 (optional)
-- Optional LLM text correction via Ollama (small Gemma model, per-job toggle)
+- Optional LLM text correction via Ollama (a Gemma model, per-job toggle)
 - Real-time progress tracking via Redis
 - Export to SRT, VTT, TXT, JSON, DOCX
 - Batch download of results as ZIP
@@ -362,12 +362,17 @@ Override either variable in `.env` if your topology differs.
 >   held by another container), set `WORKER_GPU_DEVICE_ID` in your `.env`
 >   to restore the intended placement.
 
+**Model size vs VRAM:** the default `gemma4:e4b` is ~9.6 GB and wants a 10 GB+
+GPU to stay resident. On an 8 GB or shared GPU (e.g. running Whisper on the same
+card), use `gemma4:e2b` (~7.2 GB), point `OLLAMA_BASE_URL` at an external Ollama
+server, or split Whisper and Ollama onto separate GPUs as above.
+
 **Tuning (all optional):**
 
 | Variable                 | Default      | Description                                                                            |
 | ------------------------ | ------------ | -------------------------------------------------------------------------------------- |
 | `OLLAMA_BASE_URL`        | (empty)      | Empty disables the feature globally. Set to reach a bundled or external Ollama server. |
-| `OLLAMA_MODEL`           | `gemma4:e4b` | Any Ollama-compatible chat model. Larger = better accuracy but more VRAM.              |
+| `OLLAMA_MODEL`           | `gemma4:e4b` | Any Ollama-compatible chat model. Bigger = better accuracy, more VRAM (see note).      |
 | `OLLAMA_KEEP_ALIVE`      | `30m`        | How long Ollama keeps the model loaded in VRAM between requests.                       |
 | `OLLAMA_REQUEST_TIMEOUT` | `120`        | Per-request timeout in seconds.                                                        |
 | `LLM_CHUNK_SIZE`         | `8`          | Segments corrected per Ollama request. Larger reduces HTTP overhead.                   |
