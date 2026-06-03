@@ -135,7 +135,7 @@ class Settings(BaseSettings):
     # to enable: "http://ollama:11434" for the bundled `llm` compose profile,
     # or any external Ollama server.
     ollama_base_url: str = ""
-    ollama_model: str = "gemma4:e2b"
+    ollama_model: str = "gemma4:e4b"
     # keep_alive format follows Ollama's duration string (e.g. "30m", "1h",
     # "-1" = forever). Longer values amortize model load cost across chunks.
     ollama_keep_alive: str = "30m"

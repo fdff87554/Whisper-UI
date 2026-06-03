@@ -33,6 +33,7 @@ def test_default_settings(tmp_path, monkeypatch):
     assert s.device == "auto"
     assert s.language == "zh"
     assert s.batch_size == 4
+    assert s.ollama_model == "gemma4:e4b"
 
 
 def test_timeout_defaults_are_consistent(tmp_path):

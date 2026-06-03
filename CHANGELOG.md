@@ -7,6 +7,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- Default LLM correction model (`OLLAMA_MODEL`) is now `gemma4:e4b` instead of
+  `gemma4:e2b`, trading a larger VRAM/disk footprint (~9.6 GB pull) for better
+  correction accuracy. Set `OLLAMA_MODEL=gemma4:e2b` to keep the previous
+  default.
+
 ## [2.6.0] - 2026-06-01
 
 ### Fixed
