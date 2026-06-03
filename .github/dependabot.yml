@@ -13,6 +13,15 @@ updates:
           - "pytest*"
           - "fakeredis*"
           - "ruff*"
+    ignore:
+      # fakeredis 2.36.0 refactored CLIENT INFO so in-process connections stop
+      # exposing 'addr'; RQ's _set_ip_address reads client['addr'] without
+      # catching KeyError, breaking the SimpleWorker burst tests. Hold until
+      # upstream restores the field (or RQ guards the lookup), then drop this
+      # entry and the <2.36.0 cap in pyproject.toml.
+      - dependency-name: "fakeredis"
+        versions:
+          - ">=2.36.0"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
