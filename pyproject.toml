@@ -19,6 +19,8 @@ frontend = [
   # SessionMiddleware needs itsdangerous to sign session cookies. It is
   # not a transitive dependency of fastapi[standard], so list it here.
   "itsdangerous>=2.0,<3",
+  # /metrics endpoint (Prometheus exposition).
+  "prometheus-client>=0.21,<1",
 ]
 worker = [
   # whisperx is installed separately in Dockerfile (--no-deps) to avoid its

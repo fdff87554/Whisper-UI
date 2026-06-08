@@ -18,8 +18,9 @@ in practice:
   is paired with ``SameSite=Lax`` session cookies; htmx requests in the
   same browser context send a same-origin ``Origin`` header automatically.
 * **Public path whitelist** — ``/login``, ``/register``, ``/logout``,
-  ``/health``, ``/favicon.ico`` and anything under ``/static/`` skip the
-  auth gate so the login form and assets are reachable while signed out.
+  ``/health``, ``/metrics``, ``/favicon.ico`` and anything under ``/static/``
+  skip the auth gate so the login form, health check, Prometheus scrape and
+  assets are reachable while signed out.
 
 Dependencies (:data:`CurrentUserDep`, :data:`AdminUserDep`) read what the
 middleware put on ``request.state``; they do not re-query the DB.
@@ -51,7 +52,7 @@ logger = logging.getLogger(__name__)
 # ``/login/extra`` would still be gated — there's no nested route below
 # any of these so exact match is precise enough and avoids accidental
 # bypass via path traversal.
-PUBLIC_PATHS = frozenset({"/login", "/register", "/logout", "/health", "/favicon.ico"})
+PUBLIC_PATHS = frozenset({"/login", "/register", "/logout", "/health", "/metrics", "/favicon.ico"})
 
 # Path prefixes that never require authentication. ``/static/`` covers
 # CSS, vendored JS, and any future static assets.

@@ -89,6 +89,16 @@ class TestHealthEndpoint:
         assert resp.json() == {"status": "ok"}
 
 
+class TestMetricsEndpoint:
+    def test_metrics_returns_prometheus_exposition(self, client):
+        # app fixture uses a MagicMock redis, so the RQ gauges degrade out; the
+        # SQLite job metric must still render and the scrape must be 200.
+        resp = client.get("/metrics")
+        assert resp.status_code == 200
+        assert "text/plain" in resp.headers["content-type"]
+        assert "whisper_jobs_total" in resp.text
+
+
 class TestDashboardRoutes:
     def test_root_serves_dashboard(self, client):
         resp = client.get("/")

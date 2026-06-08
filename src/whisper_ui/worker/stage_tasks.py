@@ -216,6 +216,13 @@ def _log_stage_start(stage_name: str, parent_job_id: str) -> int:
         parent_job_id,
         generation if generation is not None else "-",
         timeout_seconds if timeout_seconds is not None else "-",
+        extra={
+            "event": "stage_start",
+            "stage": stage_name,
+            "job_id": parent_job_id,
+            "generation": generation,
+            "timeout_s": timeout_seconds,
+        },
     )
     return time.perf_counter_ns()
 
@@ -234,6 +241,12 @@ def _log_stage_finish(stage_name: str, parent_job_id: str, start_ns: int) -> Non
         stage_name,
         parent_job_id,
         elapsed_ms,
+        extra={
+            "event": "stage_finish",
+            "stage": stage_name,
+            "job_id": parent_job_id,
+            "elapsed_ms": elapsed_ms,
+        },
     )
 
 

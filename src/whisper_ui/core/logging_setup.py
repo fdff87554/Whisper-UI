@@ -1,8 +1,12 @@
 """Centralised logging configuration for the frontend and worker processes.
 
 Reads ``LOG_LEVEL`` from the environment (one of ``DEBUG``, ``INFO``,
-``WARNING``, ``ERROR``, ``CRITICAL``; default ``INFO``). ``LOG_JSON`` is
-reserved for a future structured-output mode and currently has no effect.
+``WARNING``, ``ERROR``, ``CRITICAL``; default ``INFO``). ``LOG_JSON``
+(truthy: ``1``/``true``/``yes``/``on``) switches the stderr handler to a
+single-line JSON formatter — ts/level/logger/request_id/user_id/message plus
+any structured ``extra={}`` fields (e.g. worker stage logs carry
+stage/job_id/elapsed_ms) — for log aggregation (Loki/jq). Default stays the
+human-readable text format.
 
 The :class:`RequestContextFilter` pulls ``request_id`` and ``user_id`` from
 context vars set by :mod:`whisper_ui.web.middleware.request_id`, so every
@@ -17,6 +21,7 @@ entrypoint call it once at process startup.
 
 from __future__ import annotations
 
+import json
 import logging
 import logging.config
 import os
@@ -108,6 +113,57 @@ def _resolve_level(raw: str | None) -> str:
     return candidate if candidate in _VALID_LEVELS else "INFO"
 
 
+_LOG_JSON_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def _resolve_json(raw: str | None) -> bool:
+    return raw is not None and raw.strip().lower() in _LOG_JSON_TRUTHY
+
+
+# Standard LogRecord attributes plus the request-context fields rendered
+# explicitly. Anything NOT in here that a call site passed via ``extra={}``
+# is copied into the JSON object as a structured field.
+_RESERVED_LOGRECORD_ATTRS = frozenset(
+    {
+        "name", "msg", "args", "levelname", "levelno", "pathname", "filename",
+        "module", "exc_info", "exc_text", "stack_info", "lineno", "funcName",
+        "created", "msecs", "relativeCreated", "thread", "threadName",
+        "processName", "process", "taskName", "message", "asctime",
+        "request_id", "user_id",
+    }
+)  # fmt: skip
+
+
+class JsonFormatter(logging.Formatter):
+    """Render each LogRecord as one JSON line (selected when ``LOG_JSON`` is set).
+
+    Emits ts/level/logger/request_id/user_id/message, the rendered exception
+    under ``exc`` when present, and any structured ``extra={}`` fields passed at
+    the call site — so worker stage logs (stage/job_id/elapsed_ms) are queryable
+    by jq/Loki without per-call-site formatting. ``default=str`` keeps a
+    non-serialisable extra from breaking the line; ``ensure_ascii=False`` keeps
+    non-ASCII (e.g. Chinese) readable.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, object] = {
+            "ts": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "logger": record.name,
+            "request_id": getattr(record, "request_id", _DEFAULT_REQUEST_ID),
+            "user_id": getattr(record, "user_id", _DEFAULT_USER_ID),
+            "message": record.getMessage(),
+        }
+        for key, value in record.__dict__.items():
+            if key not in _RESERVED_LOGRECORD_ATTRS and not key.startswith("_"):
+                payload[key] = value
+        if record.exc_info:
+            payload["exc"] = self.formatException(record.exc_info)
+        if record.stack_info:
+            payload["stack"] = self.formatStack(record.stack_info)
+        return json.dumps(payload, ensure_ascii=False, default=str)
+
+
 def setup_logging() -> None:
     """Apply the project-wide ``dictConfig``; safe to call multiple times.
 
@@ -118,6 +174,7 @@ def setup_logging() -> None:
     structured access log emitted from :mod:`whisper_ui.web.middleware.request_id`.
     """
     level = _resolve_level(os.getenv("LOG_LEVEL"))
+    formatter = "json" if _resolve_json(os.getenv("LOG_JSON")) else "default"
 
     config: dict = {
         "version": 1,
@@ -132,12 +189,16 @@ def setup_logging() -> None:
                 "format": ("%(asctime)s %(levelname)s %(name)s [req=%(request_id)s user=%(user_id)s] %(message)s"),
                 "datefmt": "%Y-%m-%dT%H:%M:%S%z",
             },
+            "json": {
+                "()": JsonFormatter,
+                "datefmt": "%Y-%m-%dT%H:%M:%S%z",
+            },
         },
         "handlers": {
             "stderr": {
                 "class": "logging.StreamHandler",
                 "stream": "ext://sys.stderr",
-                "formatter": "default",
+                "formatter": formatter,
                 "filters": ["request_context"],
             },
         },
