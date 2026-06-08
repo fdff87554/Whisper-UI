@@ -83,7 +83,9 @@ UPLOAD_INVALID_LANGUAGE = "不支援的語言：{value}"
 UPLOAD_INVALID_MODEL = "不支援的模型：{value}"
 UPLOAD_TAB_URL = "網址下載"
 UPLOAD_URL_PLACEHOLDER = "每行一個 YouTube 或 Google Drive 分享連結..."
-UPLOAD_URL_DESCRIPTION = "輸入一個或多個 YouTube 影片網址或 Google Drive 分享連結（每行一個），系統將自動下載並進行轉錄。"
+UPLOAD_URL_DESCRIPTION = (
+    "輸入一個或多個 YouTube 影片網址或 Google Drive 分享連結（每行一個），系統將自動下載並進行轉錄。"
+)
 UPLOAD_INVALID_URL = "無效的網址格式，請提供 YouTube 或 Google Drive 連結。"
 UPLOAD_URL_PLAYLIST_NOT_SUPPORTED = "不支援播放清單網址，請提供單一影片網址。"
 UPLOAD_URL_DISCLAIMER = "請確認您有權下載該影片內容，並遵守相關服務條款。Google Drive 檔案需設定為「任何人都可檢視」。"

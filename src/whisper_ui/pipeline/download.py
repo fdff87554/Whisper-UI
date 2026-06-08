@@ -92,8 +92,7 @@ class DownloadStage:
             result = gdown.download(gdrive_url, output_path, quiet=True, fuzzy=False)
             if result is None:
                 raise DownloadError(
-                    "Failed to download from Google Drive. "
-                    "Make sure the file is shared as 'Anyone with the link'."
+                    "Failed to download from Google Drive. Make sure the file is shared as 'Anyone with the link'."
                 )
         except DownloadError:
             raise

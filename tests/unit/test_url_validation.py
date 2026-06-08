@@ -106,9 +106,7 @@ class TestValidGoogleDriveURLs:
         assert result.startswith("https://drive.google.com/uc?")
 
     def test_strips_whitespace(self):
-        result = validate_google_drive_url(
-            "  https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/view  "
-        )
+        result = validate_google_drive_url("  https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/view  ")
         assert "id=1AbCdEfGhIjKlMnOpQrStUvWxYz" in result
 
     def test_returns_canonical_download_url(self):
