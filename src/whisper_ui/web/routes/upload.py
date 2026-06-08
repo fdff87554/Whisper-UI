@@ -19,7 +19,14 @@ from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
 from whisper_ui.ui import labels as ui_labels
 from whisper_ui.web.deps import CurrentUserDep, DbDep, FileStoreDep, RedisDep, SettingsDep, templates
 from whisper_ui.web.flash import set_flash
-from whisper_ui.web.url_validation import PlaylistURLError, YouTubeURLError, validate_youtube_url
+from whisper_ui.web.url_validation import (
+    GoogleDriveURLError,
+    PlaylistURLError,
+    YouTubeURLError,
+    is_google_drive_url,
+    validate_google_drive_url,
+    validate_youtube_url,
+)
 from whisper_ui.web.validation import clamp_num_speakers
 from whisper_ui.worker.pipeline_dispatcher import enqueue_pipeline
 
@@ -348,12 +355,15 @@ async def upload_url_submit(
     has_playlist_error = False
     for line_num, raw_url in lines:
         try:
-            clean_url = validate_youtube_url(raw_url)
+            if is_google_drive_url(raw_url):
+                clean_url = validate_google_drive_url(raw_url)
+            else:
+                clean_url = validate_youtube_url(raw_url)
             valid_urls.append(clean_url)
         except PlaylistURLError:
             invalid_line_nums.append(line_num)
             has_playlist_error = True
-        except YouTubeURLError:
+        except (YouTubeURLError, GoogleDriveURLError):
             invalid_line_nums.append(line_num)
 
     if not valid_urls:

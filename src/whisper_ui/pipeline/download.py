@@ -3,12 +3,19 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import parse_qs, urlparse
 
 from rq.timeouts import BaseTimeoutException
 
 from whisper_ui.core.constants import YT_DLP_SOCKET_TIMEOUT
 from whisper_ui.core.exceptions import DownloadError
-from whisper_ui.core.messages import DOWNLOAD_DONE, DOWNLOAD_EXTRACTING_INFO, DOWNLOAD_IN_PROGRESS
+from whisper_ui.core.messages import (
+    DOWNLOAD_DONE,
+    DOWNLOAD_EXTRACTING_INFO,
+    DOWNLOAD_GDRIVE_IN_PROGRESS,
+    DOWNLOAD_IN_PROGRESS,
+)
+from whisper_ui.web.url_validation import extract_gdrive_file_id, is_google_drive_url
 
 if TYPE_CHECKING:
     from whisper_ui.pipeline.base import ProgressCallback
@@ -29,6 +36,74 @@ class DownloadStage:
         if not source_url:
             return context
 
+        if is_google_drive_url(source_url):
+            return self._download_google_drive(source_url, context, on_progress)
+        return self._download_youtube(source_url, context, on_progress)
+
+    def _download_google_drive(
+        self,
+        source_url: str,
+        context: dict[str, Any],
+        on_progress: ProgressCallback | None,
+    ) -> dict[str, Any]:
+        try:
+            import gdown
+        except ImportError as err:
+            raise DownloadError("gdown is not installed.") from err
+
+        download_dir = Path(context["download_dir"])
+        download_dir.mkdir(parents=True, exist_ok=True)
+
+        if on_progress:
+            on_progress(0.0, DOWNLOAD_EXTRACTING_INFO)
+
+        parsed = urlparse(source_url)
+        file_id = extract_gdrive_file_id(parsed.path, parse_qs(parsed.query))
+        if not file_id:
+            raise DownloadError("Could not extract Google Drive file ID from URL.")
+
+        gdrive_url = f"https://drive.google.com/uc?id={file_id}"
+        output_path = str(download_dir)
+
+        try:
+            if on_progress:
+                on_progress(0.1, DOWNLOAD_GDRIVE_IN_PROGRESS)
+
+            result = gdown.download(gdrive_url, output_path, quiet=True, fuzzy=False)
+            if result is None:
+                raise DownloadError(
+                    "Failed to download from Google Drive. Make sure the file is shared as 'Anyone with the link'."
+                )
+        except DownloadError:
+            raise
+        except BaseTimeoutException:
+            raise
+        except Exception as e:
+            raise DownloadError(f"Failed to download from Google Drive: {e}") from e
+
+        downloaded = Path(result)
+        if not downloaded.is_file() or downloaded.stat().st_size == 0:
+            raise DownloadError("Download completed but the file was empty or not found.")
+
+        from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
+
+        if downloaded.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            downloaded.unlink(missing_ok=True)
+            raise DownloadError(f"Downloaded file '{downloaded.name}' is not a supported audio or video format.")
+
+        if on_progress:
+            on_progress(1.0, DOWNLOAD_DONE)
+
+        context["input_path"] = str(downloaded)
+        context["video_title"] = downloaded.stem
+        return context
+
+    def _download_youtube(
+        self,
+        source_url: str,
+        context: dict[str, Any],
+        on_progress: ProgressCallback | None,
+    ) -> dict[str, Any]:
         try:
             import yt_dlp
         except ImportError as err:
