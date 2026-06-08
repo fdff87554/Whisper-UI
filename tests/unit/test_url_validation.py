@@ -138,6 +138,9 @@ class TestIsGoogleDriveURL:
     def test_google_drive_url(self):
         assert is_google_drive_url("https://drive.google.com/file/d/abc123/view") is True
 
+    def test_google_drive_url_without_scheme(self):
+        assert is_google_drive_url("drive.google.com/file/d/abc123/view") is True
+
     def test_youtube_url(self):
         assert is_google_drive_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ") is False
 

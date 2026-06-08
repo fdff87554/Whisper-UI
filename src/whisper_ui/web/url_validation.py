@@ -26,6 +26,14 @@ _GDRIVE_HOSTS = {"drive.google.com", "docs.google.com"}
 _GDRIVE_FILE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{10,}$")
 
 
+def _parse_with_scheme(url: str):
+    """Parse a URL, prepending https:// if no scheme is present."""
+    parsed = urlparse(url)
+    if not parsed.scheme:
+        parsed = urlparse(f"https://{url}")
+    return parsed
+
+
 def validate_youtube_url(url: str) -> str:
     """Validate and clean a YouTube URL, returning a canonical URL with only the video ID.
 
@@ -35,10 +43,7 @@ def validate_youtube_url(url: str) -> str:
     if not url:
         raise YouTubeURLError("URL is empty.")
 
-    parsed = urlparse(url)
-
-    if not parsed.scheme:
-        parsed = urlparse(f"https://{url}")
+    parsed = _parse_with_scheme(url)
 
     if parsed.scheme not in ("http", "https"):
         raise YouTubeURLError("Invalid URL scheme.")
@@ -101,10 +106,7 @@ def validate_google_drive_url(url: str) -> str:
     if not url:
         raise GoogleDriveURLError("URL is empty.")
 
-    parsed = urlparse(url)
-
-    if not parsed.scheme:
-        parsed = urlparse(f"https://{url}")
+    parsed = _parse_with_scheme(url)
 
     if parsed.scheme not in ("http", "https"):
         raise GoogleDriveURLError("Invalid URL scheme.")
@@ -113,7 +115,7 @@ def validate_google_drive_url(url: str) -> str:
     if host not in _GDRIVE_HOSTS:
         raise GoogleDriveURLError("Not a Google Drive URL.")
 
-    file_id = _extract_gdrive_file_id(parsed.path, parse_qs(parsed.query))
+    file_id = extract_gdrive_file_id(parsed.path, parse_qs(parsed.query))
     if not file_id or not _GDRIVE_FILE_ID_RE.match(file_id):
         raise GoogleDriveURLError("Could not extract a valid file ID.")
 
@@ -121,7 +123,8 @@ def validate_google_drive_url(url: str) -> str:
     return urlunparse(("https", "drive.google.com", "/uc", "", clean_qs, ""))
 
 
-def _extract_gdrive_file_id(path: str, qs: dict[str, list[str]]) -> str | None:
+def extract_gdrive_file_id(path: str, qs: dict[str, list[str]]) -> str | None:
+    """Extract Google Drive file ID from URL path and query string."""
     # /file/d/{FILE_ID}/...
     if "/d/" in path:
         parts = path.split("/d/")
@@ -141,7 +144,7 @@ def _extract_gdrive_file_id(path: str, qs: dict[str, list[str]]) -> str | None:
 def is_google_drive_url(url: str) -> bool:
     """Quick check whether a URL looks like a Google Drive link."""
     try:
-        parsed = urlparse(url.strip())
+        parsed = _parse_with_scheme(url.strip())
         host = parsed.hostname or ""
         return host in _GDRIVE_HOSTS
     except Exception:

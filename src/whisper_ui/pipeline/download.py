@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlparse
@@ -16,32 +15,12 @@ from whisper_ui.core.messages import (
     DOWNLOAD_GDRIVE_IN_PROGRESS,
     DOWNLOAD_IN_PROGRESS,
 )
+from whisper_ui.web.url_validation import extract_gdrive_file_id, is_google_drive_url
 
 if TYPE_CHECKING:
     from whisper_ui.pipeline.base import ProgressCallback
 
 logger = logging.getLogger(__name__)
-
-_GDRIVE_HOSTS = frozenset({"drive.google.com", "docs.google.com"})
-
-
-def _is_google_drive_url(url: str) -> bool:
-    try:
-        host = urlparse(url).hostname or ""
-        return host in _GDRIVE_HOSTS
-    except Exception:
-        return False
-
-
-def _extract_gdrive_file_id(url: str) -> str | None:
-    """Extract the Google Drive file ID from a canonical or sharing URL."""
-    parsed = urlparse(url)
-    qs = parse_qs(parsed.query)
-    id_list = qs.get("id")
-    if id_list:
-        return id_list[0]
-    match = re.search(r"/d/([a-zA-Z0-9_-]{10,})", parsed.path)
-    return match.group(1) if match else None
 
 
 class DownloadStage:
@@ -57,7 +36,7 @@ class DownloadStage:
         if not source_url:
             return context
 
-        if _is_google_drive_url(source_url):
+        if is_google_drive_url(source_url):
             return self._download_google_drive(source_url, context, on_progress)
         return self._download_youtube(source_url, context, on_progress)
 
@@ -78,7 +57,8 @@ class DownloadStage:
         if on_progress:
             on_progress(0.0, DOWNLOAD_EXTRACTING_INFO)
 
-        file_id = _extract_gdrive_file_id(source_url)
+        parsed = urlparse(source_url)
+        file_id = extract_gdrive_file_id(parsed.path, parse_qs(parsed.query))
         if not file_id:
             raise DownloadError("Could not extract Google Drive file ID from URL.")
 
