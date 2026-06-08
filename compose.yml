@@ -10,6 +10,10 @@ services:
       - "8080:8000"
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
+      # Logging knobs reach the container only if listed here — compose has no
+      # env_file, so a .env value alone would never apply. See README.
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_JSON=${LOG_JSON:-false}
       - DATABASE_PATH=/app/data/db/whisper_ui.db
       - UPLOAD_DIR=/app/data/uploads
       - OUTPUT_DIR=/app/data/outputs
@@ -46,6 +50,10 @@ services:
       - MAX_LOGIN_ATTEMPTS_PER_IP=${MAX_LOGIN_ATTEMPTS_PER_IP:-20}
       - LOGIN_LOCKOUT_SECONDS=${LOGIN_LOCKOUT_SECONDS:-900}
       - TRUST_PROXY_HEADERS=${TRUST_PROXY_HEADERS:-false}
+      # Registration gate + per-file upload cap (frontend-only; same
+      # pass-through reason as the logging knobs above).
+      - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-true}
+      - MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE:-2147483648}
     volumes:
       - app-data:/app/data
     depends_on:
@@ -122,6 +130,10 @@ services:
       # a dedicated worker-io handles download / preprocess / llm_correction.
       - WORKER_QUEUES=${WORKER_GPU_QUEUES:-whisper:gpu whisper:io whisper:cpu default}
       - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
+      # Logging knobs reach the container only if listed here — compose has no
+      # env_file, so a .env value alone would never apply. See README.
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_JSON=${LOG_JSON:-false}
       - DATABASE_PATH=/app/data/db/whisper_ui.db
       - UPLOAD_DIR=/app/data/uploads
       - OUTPUT_DIR=/app/data/outputs
@@ -183,6 +195,10 @@ services:
       # `WORKER_CPU_QUEUES=whisper:cpu default` to specialise.
       - WORKER_QUEUES=${WORKER_CPU_QUEUES:-whisper:gpu whisper:io whisper:cpu default}
       - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
+      # Logging knobs reach the container only if listed here — compose has no
+      # env_file, so a .env value alone would never apply. See README.
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_JSON=${LOG_JSON:-false}
       - DATABASE_PATH=/app/data/db/whisper_ui.db
       - UPLOAD_DIR=/app/data/uploads
       - OUTPUT_DIR=/app/data/outputs
@@ -241,6 +257,10 @@ services:
     environment:
       - WORKER_QUEUES=${WORKER_ROCM_QUEUES:-whisper:gpu whisper:io whisper:cpu default}
       - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
+      # Logging knobs reach the container only if listed here — compose has no
+      # env_file, so a .env value alone would never apply. See README.
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_JSON=${LOG_JSON:-false}
       - DATABASE_PATH=/app/data/db/whisper_ui.db
       - UPLOAD_DIR=/app/data/uploads
       - OUTPUT_DIR=/app/data/outputs
@@ -312,6 +332,10 @@ services:
     environment:
       - WORKER_QUEUES=${WORKER_IO_QUEUES:-whisper:io whisper:cpu default}
       - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
+      # Logging knobs reach the container only if listed here — compose has no
+      # env_file, so a .env value alone would never apply. See README.
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_JSON=${LOG_JSON:-false}
       - DATABASE_PATH=/app/data/db/whisper_ui.db
       - UPLOAD_DIR=/app/data/uploads
       - OUTPUT_DIR=/app/data/outputs
@@ -433,6 +457,11 @@ services:
   gpu-exporter:
     profiles: [monitoring]
     image: rocm/device-metrics-exporter:latest
+    # /sys (read-only) is required by device-metrics-exporter for inband-RAS
+    # metrics per AMD's docker docs. The :5000 port stays internal — Prometheus
+    # scrapes gpu-exporter:5000 over the compose network, not the host.
+    volumes:
+      - /sys:/sys:ro
     devices:
       - /dev/kfd
       - /dev/dri

@@ -18,8 +18,9 @@ in practice:
   is paired with ``SameSite=Lax`` session cookies; htmx requests in the
   same browser context send a same-origin ``Origin`` header automatically.
 * **Public path whitelist** — ``/login``, ``/register``, ``/logout``,
-  ``/health``, ``/favicon.ico`` and anything under ``/static/`` skip the
-  auth gate so the login form and assets are reachable while signed out.
+  ``/health``, ``/metrics``, ``/favicon.ico`` and anything under ``/static/``
+  skip the auth gate so the login form, health check, Prometheus scrape and
+  assets are reachable while signed out.
 
 Dependencies (:data:`CurrentUserDep`, :data:`AdminUserDep`) read what the
 middleware put on ``request.state``; they do not re-query the DB.
