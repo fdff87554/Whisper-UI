@@ -1214,3 +1214,82 @@ def test_is_llm_correction_subjob_identifies_via_func_name_without_meta(tmp_path
     assert pd._is_llm_correction_subjob(transcribe_sub) is False
     # A bare mock (no string func_name) is never mis-identified as llm.
     assert pd._is_llm_correction_subjob(MagicMock()) is False
+
+
+def test_is_pipeline_dead_false_when_a_subjob_is_still_queued(tmp_path):
+    """A job whose pipeline still has a queued/deferred sub-job is ALIVE — the
+    liveness gate must not let the stale reaper fail it. This is the 211 fix:
+    jobs merely waiting behind a slow worker were being mass-failed.
+    """
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    job = Job(id="job-live", filename="m.mp3", filepath=str(tmp_path / "m.mp3"), status=JobStatus.PROCESSING)
+    enqueue_pipeline(job, redis=redis, settings=_build_settings(ollama=""), filestore=_build_filestore(tmp_path))
+
+    # Fresh out of enqueue: preprocess is QUEUED and the rest DEFERRED.
+    assert pd.is_pipeline_dead(redis, job.id) is False
+
+
+def test_is_pipeline_dead_true_when_all_subjobs_terminal(tmp_path):
+    """When every sub-job is cancelled/finished (nothing queued/started), the
+    pipeline is genuinely dead and eligible for stale recovery."""
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    job = Job(id="job-dead", filename="m.mp3", filepath=str(tmp_path / "m.mp3"), status=JobStatus.PROCESSING)
+    enqueue_pipeline(job, redis=redis, settings=_build_settings(ollama=""), filestore=_build_filestore(tmp_path))
+
+    for sub in _load_subjobs(redis, job.id):
+        sub.cancel()
+
+    assert pd.is_pipeline_dead(redis, job.id) is True
+
+
+def test_is_pipeline_dead_true_when_generation_missing(tmp_path):
+    """No generation counter (never enqueued / expired) → nothing to keep the
+    pipeline alive → treated as dead."""
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    assert pd.is_pipeline_dead(redis, "never-enqueued") is True
+
+
+def test_recover_stale_pipeline_jobs_spares_live_and_fails_dead(tmp_path):
+    """End-to-end: a dead pipeline (all sub-jobs cancelled) is failed, while an
+    equally-old job still waiting in the queue is spared."""
+    from whisper_ui.storage.database import JobDatabase
+    from whisper_ui.ui.labels import JOBS_STALE_ERROR
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    db = JobDatabase(tmp_path / "stale.db")
+    try:
+        dead = Job(id="dead", filename="d.mp3", filepath=str(tmp_path / "d.mp3"), status=JobStatus.PROCESSING)
+        live = Job(id="live", filename="l.mp3", filepath=str(tmp_path / "l.mp3"), status=JobStatus.PROCESSING)
+        db.insert_job(dead)
+        db.insert_job(live)
+        enqueue_pipeline(dead, redis=redis, settings=settings, filestore=filestore)
+        enqueue_pipeline(live, redis=redis, settings=settings, filestore=filestore)
+
+        # dead pipeline: cancel every sub-job. live pipeline: leave it waiting.
+        for sub in _load_subjobs(redis, dead.id):
+            sub.cancel()
+
+        # Backdate both jobs so they clear the stale-recovery threshold.
+        db._conn.execute(
+            "UPDATE jobs SET updated_at = '2000-01-01T00:00:00+00:00' WHERE status = ?",
+            (JobStatus.PROCESSING.value,),
+        )
+        db._conn.commit()
+
+        recovered = pd.recover_stale_pipeline_jobs(db, redis, timeout_seconds=60, error_message=JOBS_STALE_ERROR)
+
+        assert recovered == 1
+        assert db.get_job(dead.id).status == JobStatus.FAILED
+        assert db.get_job(dead.id).error == JOBS_STALE_ERROR
+        assert db.get_job(live.id).status == JobStatus.PROCESSING, "a job still waiting in queue must be spared"
+    finally:
+        db.close()

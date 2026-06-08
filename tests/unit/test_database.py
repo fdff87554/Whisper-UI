@@ -602,6 +602,62 @@ def test_recover_stale_jobs_ignores_non_processing(db: JobDatabase):
     assert fetched.status == JobStatus.QUEUED
 
 
+def test_list_stale_processing_job_ids_returns_old_processing_only(db: JobDatabase):
+    stale = Job(filename="stale.mp3", filepath="/tmp/stale.mp3")
+    stale.status = JobStatus.PROCESSING
+    db.insert_job(stale)
+    fresh = Job(filename="fresh.mp3", filepath="/tmp/fresh.mp3")
+    fresh.status = JobStatus.PROCESSING
+    db.insert_job(fresh)
+    queued = Job(filename="queued.mp3", filepath="/tmp/queued.mp3")
+    queued.status = JobStatus.QUEUED
+    db.insert_job(queued)
+
+    # Backdate the stale PROCESSING job and the (irrelevant) QUEUED job; only
+    # the old PROCESSING one is a stale-recovery candidate.
+    db._conn.execute(
+        "UPDATE jobs SET updated_at = '2000-01-01T00:00:00+00:00' WHERE id IN (?, ?)",
+        (stale.id, queued.id),
+    )
+    db._conn.commit()
+
+    assert db.list_stale_processing_job_ids(timeout_seconds=60) == [stale.id]
+
+
+def test_recover_stale_jobs_only_ids_restricts_to_subset(db: JobDatabase):
+    """``only_ids`` lets the liveness-aware reaper fail just the genuinely-dead
+    subset, leaving other equally-old PROCESSING jobs untouched."""
+    dead = Job(filename="dead.mp3", filepath="/tmp/dead.mp3")
+    dead.status = JobStatus.PROCESSING
+    db.insert_job(dead)
+    alive = Job(filename="alive.mp3", filepath="/tmp/alive.mp3")
+    alive.status = JobStatus.PROCESSING
+    db.insert_job(alive)
+    db._conn.execute(
+        "UPDATE jobs SET updated_at = '2000-01-01T00:00:00+00:00' WHERE status = ?",
+        (JobStatus.PROCESSING.value,),
+    )
+    db._conn.commit()
+
+    recovered = db.recover_stale_jobs(timeout_seconds=60, error_message="dead pipeline", only_ids=[dead.id])
+
+    assert recovered == 1
+    assert db.get_job(dead.id).status == JobStatus.FAILED
+    # The equally-old but live job is spared because it is not in only_ids.
+    assert db.get_job(alive.id).status == JobStatus.PROCESSING
+
+
+def test_recover_stale_jobs_only_ids_empty_is_noop(db: JobDatabase):
+    stale = Job(filename="s.mp3", filepath="/tmp/s.mp3")
+    stale.status = JobStatus.PROCESSING
+    db.insert_job(stale)
+    db._conn.execute("UPDATE jobs SET updated_at = '2000-01-01T00:00:00+00:00' WHERE id = ?", (stale.id,))
+    db._conn.commit()
+
+    assert db.recover_stale_jobs(timeout_seconds=60, error_message="x", only_ids=[]) == 0
+    assert db.get_job(stale.id).status == JobStatus.PROCESSING
+
+
 def test_recover_stale_jobs_concurrent_workers_dont_double_recover(tmp_path: Path):
     """Two workers calling recover_stale_jobs at the same instant must not
     double-recover the same job. SQLite WAL serializes writers; once the

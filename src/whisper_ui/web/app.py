@@ -95,6 +95,7 @@ async def lifespan(app: FastAPI):
     from whisper_ui.storage.database import JobDatabase
     from whisper_ui.storage.filestore import FileStore
     from whisper_ui.ui.labels import JOBS_STALE_ERROR
+    from whisper_ui.worker.pipeline_dispatcher import recover_stale_pipeline_jobs
 
     settings = get_settings()
     app.state.settings = settings
@@ -110,7 +111,9 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(STALE_JOB_CHECK_INTERVAL)
             try:
-                recovered = app.state.db.recover_stale_jobs(settings.stale_job_timeout, JOBS_STALE_ERROR)
+                recovered = recover_stale_pipeline_jobs(
+                    app.state.db, app.state.redis, settings.stale_job_timeout, JOBS_STALE_ERROR
+                )
                 if recovered > 0:
                     logger.warning("Recovered %d stale job(s)", recovered)
             except Exception:
