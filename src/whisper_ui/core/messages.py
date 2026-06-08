@@ -43,6 +43,7 @@ LLM_CORRECTION_SKIPPED = "已跳過 LLM 文字校驗。"
 LLM_CORRECTION_DEGRADED = "LLM 文字校驗部分失敗，已保留原文的段落："
 
 PIPELINE_COMPLETE = "完成"
+RESULT_PERSIST_FAILED = "結果儲存失敗"
 
 # -- Export --
 EXPORT_DOCX_HEADING = "轉錄結果"
