@@ -74,7 +74,11 @@ services:
         max-file: "5"
   redis:
     image: redis:7-alpine
-    command: redis-server --appendonly yes ${REDIS_PASSWORD:+--requirepass "${REDIS_PASSWORD}"}
+    # maxmemory-policy is hardcoded to noeviction on purpose: this Redis holds
+    # only work-queue / DAG state (RQ registries, generation counters, sub-job
+    # sets, pipeline context) — none of it is safe to evict, so an eviction
+    # policy would silently corrupt the pipeline. Only the cap VALUE is tunable.
+    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-0} --maxmemory-policy noeviction ${REDIS_PASSWORD:+--requirepass "${REDIS_PASSWORD}"}
     volumes:
       - redis-data:/data
     healthcheck:

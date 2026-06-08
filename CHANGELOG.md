@@ -7,6 +7,40 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-06-08
+
+### Added
+
+- Minimal observability: opt-in structured JSON logs via `LOG_JSON` (worker
+  stage logs carry `stage` / `job_id` / `elapsed_ms`), an unauthenticated
+  Prometheus `/metrics` endpoint (queue depth, job status, RQ workers), and a
+  `monitoring` compose profile (Prometheus + Redis exporter + AMD GPU
+  exporter). Grafana dashboards and per-stage histograms are deliberate
+  follow-ups. (#96)
+- Defensive Redis memory cap via `REDIS_MAXMEMORY` (default `0` = unlimited
+  preserves current behaviour). The eviction policy is hardcoded to
+  `noeviction` and is not configurable — RQ generation counters, sub-job sets,
+  and pipeline context must never be evicted or the DAG corrupts.
+- AMD/ROCm single-GPU scaled-topology docs and `.env.example` example (narrow
+  `worker-rocm` to GPU stages, run a separate `worker-io`).
+- Deterministic queue-split throughput integration test. (#97)
+
+### Fixed
+
+- Optional LLM correction is now strictly best-effort: a failed or timed-out
+  `run_llm_correction` completes the job with the un-corrected transcript
+  instead of failing it, and a persist failure marks the job FAILED rather than
+  leaving it stuck in PROCESSING. (#94)
+- The stale-job reaper is now liveness-based (`is_pipeline_dead` via RQ sub-job
+  state) instead of wall-age, so a queued-but-waiting job behind a slow single
+  worker is no longer mass-reaped; `PIPELINE_STATE_TTL` raised from 24h to 7d.
+  (#95)
+- Documented runtime knobs now reach the containers. compose has no `env_file`,
+  so `LOG_LEVEL` / `LOG_JSON` (frontend + all workers) and `ALLOW_REGISTRATION`
+  / `MAX_UPLOAD_SIZE` (frontend) are passed explicitly; previously a `.env`
+  value for these was silently ignored — notably an `ALLOW_REGISTRATION=false`
+  registration lockdown. (#96)
+
 ## [2.7.0] - 2026-06-03
 
 ### Changed

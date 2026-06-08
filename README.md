@@ -242,6 +242,24 @@ back overlap: job B can be downloading while job A is on the GPU, and
 job A can be in llm_correction (hitting an external Ollama server) while
 job B is already transcribing.
 
+**AMD / ROCm single-GPU box.** The ROCm worker has a single GPU, so the
+same split applies — keep it on GPU stages only and run a separate CPU
+worker for the rest:
+
+```bash
+# .env
+WORKER_ROCM_QUEUES="whisper:gpu default"
+WORKER_IO_QUEUES="whisper:io whisper:cpu default"
+
+docker compose --profile rocm --profile io up -d --scale worker-io=2
+```
+
+`worker-io` uses the CPU image (the io/cpu stages need no GPU), so two
+replicas drain download / preprocess / assign / postprocess / llm while
+the single `worker-rocm` stays dedicated to transcribe_align / diarize. Do
+**not** scale `worker-rocm` past one on a single card — two whisper.cpp /
+pyannote processes would contend for the same VRAM and compute queue.
+
 **Multi-GPU hosts.** When the DAG fans out transcribe_align and diarize
 as sibling branches they will automatically run in parallel once you
 provision more than one GPU worker. Example with two cards:
