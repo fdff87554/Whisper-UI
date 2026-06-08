@@ -74,7 +74,7 @@ services:
         max-file: "5"
   redis:
     image: redis:7-alpine
-    command: redis-server --appendonly yes ${REDIS_PASSWORD:+--requirepass "${REDIS_PASSWORD}"}
+    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-0} --maxmemory-policy ${REDIS_MAXMEMORY_POLICY:-noeviction} ${REDIS_PASSWORD:+--requirepass "${REDIS_PASSWORD}"}
     volumes:
       - redis-data:/data
     healthcheck:
