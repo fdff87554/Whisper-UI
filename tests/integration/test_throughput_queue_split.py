@@ -48,6 +48,9 @@ def _build_fake_settings() -> MagicMock:
     settings = MagicMock()
     settings.batch_size = 16
     settings.ollama_base_url = ""
+    # Mirror real Settings: with no ollama endpoint, llm_correction_available is
+    # False (config.py). A bare MagicMock would otherwise return a truthy attr.
+    settings.llm_correction_available = False
     settings.job_timeout_default = 3600
     settings.job_timeout_floor = 300
     settings.job_timeout_max = 14_400
@@ -110,15 +113,32 @@ def _burst_worker(fake_redis, queue_names: list[str]) -> None:
     SimpleWorker(queues, connection=fake_redis).work(burst=True, with_scheduler=False)
 
 
+class _NoOpDeathPenalty:
+    """Death-penalty stand-in for the in-thread test workers.
+
+    The real SIGALRM penalty can't be armed off the main thread, and rq's
+    TimerDeathPenalty would spawn a per-job timer thread we don't need — the
+    test bounds every wait itself (gate timeout + ``thread.join``). The death
+    penalty is not what these tests exercise, so disable it entirely.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        pass
+
+    def __enter__(self) -> _NoOpDeathPenalty:
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        return False
+
+
 def _make_worker_thread_safe(monkeypatch) -> None:
     """SimpleWorker.work() runs jobs in-process; in a background thread its
     signal-based hooks (SIGINT/SIGTERM handlers + the SIGALRM death penalty)
-    raise "signal only works in main thread". Swap them for thread-safe
-    equivalents so the gated GPU worker can block in a thread."""
-    from rq.timeouts import TimerDeathPenalty
-
+    raise "signal only works in main thread". Disable both so the gated GPU
+    worker can block in a thread; the test's own gate/join timeouts bound it."""
     monkeypatch.setattr(SimpleWorker, "_install_signal_handlers", lambda self: None)
-    monkeypatch.setattr(SimpleWorker, "death_penalty_class", TimerDeathPenalty)
+    monkeypatch.setattr(SimpleWorker, "death_penalty_class", _NoOpDeathPenalty)
 
 
 def _wait_for(predicate, timeout: float = _SYNC_TIMEOUT) -> bool:
