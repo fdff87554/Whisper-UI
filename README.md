@@ -438,9 +438,10 @@ three of those, which is why it is silenced.
 
 **Tunables.**
 
-| Variable    | Default | Description                                                                       |
-| ----------- | ------- | --------------------------------------------------------------------------------- |
-| `LOG_LEVEL` | `INFO`  | One of `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`; invalid values fall back. |
+| Variable    | Default | Description                                                                                                                                                                                                        |
+| ----------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `LOG_LEVEL` | `INFO`  | One of `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`; invalid values fall back.                                                                                                                                  |
+| `LOG_JSON`  | `false` | Truthy (`1`/`true`/`yes`/`on`) emits one JSON object per line (ts/level/logger/request_id/user_id/message + structured fields like `stage`/`job_id`/`elapsed_ms`) for Loki/`jq`. Default is the text format above. |
 
 The worker container starts via `python -m whisper_ui.worker`, which
 calls `setup_logging()` before delegating to RQ so the dictConfig (and
@@ -451,6 +452,39 @@ the RQ-noise suppression) applies inside the worker process.
 (100 MB per container). Larger deployments should plug a centralised
 driver (Loki, Splunk, Datadog) via a compose override; the file-driver
 ceiling is sized for small-office deployments only.
+
+### Observability: metrics & monitoring (minimal)
+
+The frontend exposes Prometheus metrics at **`/metrics`** — unauthenticated,
+same posture as `/health`, so keep it internal. They are computed at scrape
+time from RQ/Redis and the SQLite `jobs` table, with no persistent counters:
+
+| Metric                                         | Type  | Labels   | Source             |
+| ---------------------------------------------- | ----- | -------- | ------------------ |
+| `whisper_jobs_total`                           | gauge | `status` | SQLite `jobs`      |
+| `whisper_queue_depth`                          | gauge | `queue`  | RQ queue length    |
+| `whisper_failed_jobs` / `whisper_started_jobs` | gauge | `queue`  | RQ registries      |
+| `whisper_rq_workers`                           | gauge | —        | RQ worker registry |
+
+A Redis blip degrades the scrape to the SQLite-only metrics rather than failing
+it. Per-stage latency is intentionally **not** a metric here (workers have no
+HTTP server); it ships as `elapsed_ms` in the structured JSON logs
+(`LOG_JSON=true`) and a histogram is a follow-up.
+
+Bring up a self-hosted stack with the `monitoring` profile:
+
+```bash
+docker compose --profile rocm --profile monitoring up -d
+# Prometheus UI: http://127.0.0.1:9090/targets  (whisper-frontend / redis / gpu should be UP)
+```
+
+It adds **Prometheus** (config in `monitoring/prometheus.yml`), a **Redis
+exporter**, and an **AMD GPU exporter** (`rocm/device-metrics-exporter`,
+reusing the ROCm `/dev/kfd`+`/dev/dri` passthrough). Caveats: that GPU exporter
+is officially validated on Instinct (MI) GPUs — on a gfx1151 APU some fields may
+be empty; if so, fall back to `node_exporter` + an `amd-smi metric --json`
+textfile collector. Grafana dashboards are a deliberate follow-up — Prometheus
+alone is queryable in the meantime.
 
 ## Local Development
 

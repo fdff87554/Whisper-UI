@@ -1,0 +1,21 @@
+# Minimal Prometheus scrape config for the `monitoring` compose profile.
+# Targets resolve over the default compose network by service name. Mounted
+# read-only into the prometheus container at /etc/prometheus/prometheus.yml.
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+scrape_configs:
+  # Whisper-UI app metrics (queue depth, job status, RQ workers). The frontend
+  # container listens on 8000 internally (8080 is only the host port map).
+  - job_name: whisper-frontend
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["frontend:8000"]
+  # Redis / RQ internals (memory, clients, keyspace).
+  - job_name: redis
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+  # AMD GPU metrics (rocm/device-metrics-exporter, default port 5000).
+  - job_name: gpu
+    static_configs:
+      - targets: ["gpu-exporter:5000"]

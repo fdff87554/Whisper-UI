@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 # ``/login/extra`` would still be gated — there's no nested route below
 # any of these so exact match is precise enough and avoids accidental
 # bypass via path traversal.
-PUBLIC_PATHS = frozenset({"/login", "/register", "/logout", "/health", "/favicon.ico"})
+PUBLIC_PATHS = frozenset({"/login", "/register", "/logout", "/health", "/metrics", "/favicon.ico"})
 
 # Path prefixes that never require authentication. ``/static/`` covers
 # CSS, vendored JS, and any future static assets.

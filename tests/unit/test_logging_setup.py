@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 import pytest
@@ -9,7 +10,9 @@ import pytest
 from whisper_ui.core.logging_setup import (
     _DEFAULT_REQUEST_ID,
     _DEFAULT_USER_ID,
+    JsonFormatter,
     RequestContextFilter,
+    _resolve_json,
     current_request_id,
     current_user_id,
     reset_request_context,
@@ -141,3 +144,82 @@ def test_request_context_isolated_across_nested_blocks():
         assert current_request_id() == "outer"
     finally:
         reset_request_context(outer)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("1", True),
+        ("true", True),
+        ("TRUE", True),
+        ("  Yes ", True),
+        ("on", True),
+        ("0", False),
+        ("false", False),
+        ("", False),
+        (None, False),
+        ("nope", False),
+    ],
+)
+def test_resolve_json(raw, expected):
+    assert _resolve_json(raw) is expected
+
+
+def test_json_formatter_emits_structured_extra_fields():
+    record = logging.LogRecord("w", logging.INFO, "p", 1, "Stage %s finished", ("diarize",), None)
+    record.request_id = "req-1"
+    record.user_id = "u-1"
+    record.event = "stage_finish"
+    record.stage = "diarize"
+    record.job_id = "abc123"
+    record.elapsed_ms = 651060
+
+    payload = json.loads(JsonFormatter(datefmt="%Y-%m-%dT%H:%M:%S%z").format(record))
+
+    assert payload["level"] == "INFO"
+    assert payload["logger"] == "w"
+    assert payload["request_id"] == "req-1"
+    assert payload["user_id"] == "u-1"
+    assert payload["message"] == "Stage diarize finished"
+    assert payload["event"] == "stage_finish"
+    assert payload["stage"] == "diarize"
+    assert payload["job_id"] == "abc123"
+    assert payload["elapsed_ms"] == 651060
+
+
+def test_json_formatter_includes_rendered_exception():
+    import sys
+
+    try:
+        raise ValueError("boom")
+    except ValueError:
+        record = logging.LogRecord("w", logging.ERROR, "p", 1, "failed", (), sys.exc_info())
+
+    payload = json.loads(JsonFormatter().format(record))
+
+    assert "ValueError: boom" in payload["exc"]
+
+
+def test_setup_logging_json_mode_outputs_one_json_object_per_line(monkeypatch, capsys):
+    monkeypatch.setenv("LOG_JSON", "true")
+    setup_logging()
+
+    logging.getLogger("whisper_ui.test").info("hello %s", "world", extra={"event": "x", "elapsed_ms": 5})
+
+    line = capsys.readouterr().err.strip().splitlines()[-1]
+    payload = json.loads(line)  # must be valid JSON
+    assert payload["message"] == "hello world"
+    assert payload["event"] == "x"
+    assert payload["elapsed_ms"] == 5
+    assert payload["request_id"] == _DEFAULT_REQUEST_ID  # no request context -> default dash
+
+
+def test_setup_logging_defaults_to_text_when_log_json_unset(monkeypatch, capsys):
+    monkeypatch.delenv("LOG_JSON", raising=False)
+    setup_logging()
+
+    logging.getLogger("whisper_ui.test").info("plain line")
+
+    captured = capsys.readouterr().err
+    assert "plain line" in captured
+    assert "[req=" in captured  # text format, not JSON
