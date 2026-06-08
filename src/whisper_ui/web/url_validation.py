@@ -115,6 +115,14 @@ def validate_google_drive_url(url: str) -> str:
     if host not in _GDRIVE_HOSTS:
         raise GoogleDriveURLError("Not a Google Drive URL.")
 
+    if host == "docs.google.com" and any(
+        parsed.path.startswith(p) for p in ("/document/", "/spreadsheets/", "/presentation/", "/forms/")
+    ):
+        raise GoogleDriveURLError(
+            "Google Docs, Sheets, Slides, and Forms are not supported. "
+            "Please provide a sharing link to an audio or video file stored in Google Drive."
+        )
+
     file_id = extract_gdrive_file_id(parsed.path, parse_qs(parsed.query))
     if not file_id or not _GDRIVE_FILE_ID_RE.match(file_id):
         raise GoogleDriveURLError("Could not extract a valid file ID.")

@@ -171,8 +171,8 @@ class TestGoogleDriveDownload:
 
         def mock_download(url, output, quiet=True, fuzzy=False):
             out_path = Path(output)
-            if out_path.is_dir() or output.endswith("/"):
-                out_path = Path(output.rstrip("/")) / "meeting_recording.m4a"
+            if out_path.is_dir():
+                out_path = out_path / "meeting_recording.m4a"
             out_path.write_bytes(b"fake audio content")
             return str(out_path)
 
@@ -188,7 +188,7 @@ class TestGoogleDriveDownload:
 
     def test_gdrive_progress_callback(self, context, download_dir):
         def mock_download(url, output, quiet=True, fuzzy=False):
-            out_path = Path(output.rstrip("/")) / "audio.mp3"
+            out_path = Path(output) / "audio.mp3"
             out_path.write_bytes(b"fake audio content")
             return str(out_path)
 
@@ -249,3 +249,18 @@ class TestGoogleDriveDownload:
             stage = DownloadStage()
             with pytest.raises(DownloadError, match="Failed to download from Google Drive"):
                 stage.execute(context)
+
+    def test_gdrive_unsupported_extension_raises(self, context, download_dir):
+        def mock_download(url, output, quiet=True, fuzzy=False):
+            out_path = Path(output) / "document.txt"
+            out_path.write_bytes(b"some text content")
+            return str(out_path)
+
+        mock_gdown = MagicMock()
+        mock_gdown.download = mock_download
+
+        with patch.dict("sys.modules", {"gdown": mock_gdown}):
+            stage = DownloadStage()
+            with pytest.raises(DownloadError, match="is not a supported audio or video format"):
+                stage.execute(context)
+        assert not (download_dir / "document.txt").exists()

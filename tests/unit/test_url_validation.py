@@ -127,6 +127,9 @@ class TestInvalidGoogleDriveURLs:
             "https://drive.google.com/",
             "https://drive.google.com/drive/my-drive",
             "ftp://drive.google.com/file/d/abc123/view",
+            "https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/edit",
+            "https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/edit",
+            "https://docs.google.com/presentation/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/edit",
         ],
     )
     def test_invalid_urls_raise(self, url):

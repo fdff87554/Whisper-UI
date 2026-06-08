@@ -63,7 +63,7 @@ class DownloadStage:
             raise DownloadError("Could not extract Google Drive file ID from URL.")
 
         gdrive_url = f"https://drive.google.com/uc?id={file_id}"
-        output_path = str(download_dir) + "/"
+        output_path = str(download_dir)
 
         try:
             if on_progress:
@@ -84,6 +84,12 @@ class DownloadStage:
         downloaded = Path(result)
         if not downloaded.exists():
             raise DownloadError("Download completed but no file was found.")
+
+        from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
+
+        if downloaded.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            downloaded.unlink(missing_ok=True)
+            raise DownloadError(f"Downloaded file '{downloaded.name}' is not a supported audio or video format.")
 
         if on_progress:
             on_progress(1.0, DOWNLOAD_DONE)
