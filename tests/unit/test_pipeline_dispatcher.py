@@ -935,3 +935,282 @@ def test_finalize_failure_generic_exception_still_uses_str(monkeypatch, tmp_path
     assert "whisper model oom" in (job.error or "")
     # Must not be silently rewritten to the timeout label.
     assert "任務總執行時間" not in (job.error or "")
+
+
+def _setup_llm_failure_case(monkeypatch, tmp_path, *, seed_transcript: bool):
+    """Build a pipeline with an active llm_correction tail and return the
+    handles a finalize_failure-on-LLM test needs.
+
+    Mirrors the production shape: postprocess has already written
+    ``transcript_result`` into the context (when ``seed_transcript``) by the
+    time the optional llm_correction sub-job fails.
+    """
+    from whisper_ui.core.models import TranscriptResult
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings()  # ollama set -> llm_correction active
+    filestore = _build_filestore(tmp_path)
+    job = Job(
+        id="job-llm-besteffort",
+        filename="m.mp3",
+        filepath=str(tmp_path / "m.mp3"),
+        status=JobStatus.PROCESSING,
+        llm_correction_enabled=True,
+    )
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    llm_sub = _by_stage(_load_subjobs(redis, job.id))["run_llm_correction"]
+
+    preprocessed = tmp_path / "preprocessed.wav"
+    preprocessed.write_bytes(b"fake")
+    if seed_transcript:
+        PipelineContextStore(redis, job.id).update(
+            {"transcript_result": TranscriptResult(language="zh", duration=42.0), "audio_path": str(preprocessed)}
+        )
+
+    runtime = MagicMock()
+    runtime.redis = redis
+    runtime.db.get_job.return_value = job
+    runtime.filestore.save_result.return_value = tmp_path / "result.json"
+    runtime.settings.redis_processing_expiry = 7200
+
+    from contextlib import contextmanager
+
+    from whisper_ui.worker.progress import RedisProgressReporter
+
+    @contextmanager
+    def _fake_builder(job_id, *, generation=None):
+        runtime.reporter = RedisProgressReporter(redis, job_id, processing_ttl=7200, generation=generation)
+        yield runtime
+
+    monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
+    return pd, redis, job, llm_sub, preprocessed
+
+
+def test_finalize_failure_on_llm_correction_completes_with_uncorrected_transcript(monkeypatch, tmp_path):
+    """An optional llm_correction sub-job that is abandoned mid-run (the
+    production incident: a scheduled host reboot killed the long LLM stage)
+    must NOT discard the finished transcript — the job completes with the
+    un-corrected text instead of being marked FAILED.
+    """
+    from whisper_ui.core.messages import LLM_CORRECTION_SKIPPED
+
+    pd, redis, job, llm_sub, preprocessed = _setup_llm_failure_case(monkeypatch, tmp_path, seed_transcript=True)
+
+    # AbandonedJobError-style failure: the worker died, RQ fires on_failure.
+    pd.finalize_failure(llm_sub, redis, RuntimeError, RuntimeError("Moved to FailedJobRegistry"), None)
+
+    assert job.status == JobStatus.COMPLETED, "optional LLM failure must not fail the whole job"
+    assert job.result_path == str(tmp_path / "result.json")
+    assert job.progress == 1.0
+    assert job.progress_message == LLM_CORRECTION_SKIPPED
+    stored = {
+        k.decode() if isinstance(k, bytes) else k: v.decode() if isinstance(v, bytes) else v
+        for k, v in redis.hgetall(f"job:{job.id}").items()
+    }
+    assert stored["status"] == "completed"
+    assert not preprocessed.exists(), "preprocessed WAV should still be cleaned up"
+    assert PipelineContextStore(redis, job.id).load() == {}
+
+
+def test_finalize_failure_on_llm_correction_timeout_completes_not_fails(monkeypatch, tmp_path):
+    """Even an RQ death-penalty (BaseTimeoutException) on the optional LLM
+    tail must salvage the transcript rather than surface the timeout error —
+    LLM correction is strictly best-effort.
+    """
+    from rq.timeouts import JobTimeoutException
+
+    pd, redis, job, llm_sub, _ = _setup_llm_failure_case(monkeypatch, tmp_path, seed_transcript=True)
+
+    pd.finalize_failure(llm_sub, redis, JobTimeoutException, JobTimeoutException("timed out"), None)
+
+    assert job.status == JobStatus.COMPLETED
+    assert job.result_path == str(tmp_path / "result.json")
+    assert "任務總執行時間" not in (job.error or "")
+
+
+def test_finalize_failure_on_llm_correction_without_transcript_still_fails(monkeypatch, tmp_path):
+    """Defensive fallback: if there is genuinely no transcript to salvage
+    (postprocess never produced one), an LLM failure still fails the job
+    instead of completing with nothing.
+    """
+    pd, redis, job, llm_sub, _ = _setup_llm_failure_case(monkeypatch, tmp_path, seed_transcript=False)
+
+    pd.finalize_failure(llm_sub, redis, RuntimeError, RuntimeError("boom"), None)
+
+    assert job.status == JobStatus.FAILED
+    assert "boom" in (job.error or "")
+
+
+def _build_completion_runtime(redis, job, tmp_path, *, save_side_effect=None):
+    """Build a MagicMock WorkerRuntime + a real generation-aware reporter for
+    the persist-failure tests. ``save_side_effect`` (when set) makes
+    ``filestore.save_result`` raise that exception."""
+    from whisper_ui.worker.progress import RedisProgressReporter
+
+    runtime = MagicMock()
+    runtime.redis = redis
+    runtime.db.get_job.return_value = job
+    if save_side_effect is not None:
+        runtime.filestore.save_result.side_effect = save_side_effect
+    else:
+        runtime.filestore.save_result.return_value = tmp_path / "result.json"
+    runtime.settings.redis_processing_expiry = 7200
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _fake_builder(job_id, *, generation=None):
+        runtime.reporter = RedisProgressReporter(redis, job_id, processing_ttl=7200, generation=generation)
+        yield runtime
+
+    return runtime, _fake_builder
+
+
+def test_persist_completion_save_failure_on_salvage_marks_failed_not_stuck(monkeypatch, tmp_path):
+    """PR #94 review #1: if salvaging the un-corrected transcript fails to
+    persist (disk full / DB error), the parent must be marked FAILED — never
+    left stuck in PROCESSING with its context already deleted."""
+    from whisper_ui.core.messages import RESULT_PERSIST_FAILED
+    from whisper_ui.core.models import TranscriptResult
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    job = Job(
+        id="job-salvage-savefail",
+        filename="m.mp3",
+        filepath=str(tmp_path / "m.mp3"),
+        status=JobStatus.PROCESSING,
+        llm_correction_enabled=True,
+    )
+    enqueue_pipeline(job, redis=redis, settings=_build_settings(), filestore=_build_filestore(tmp_path))
+    llm_sub = _by_stage(_load_subjobs(redis, job.id))["run_llm_correction"]
+    PipelineContextStore(redis, job.id).update({"transcript_result": TranscriptResult(language="zh", duration=42.0)})
+
+    _, builder = _build_completion_runtime(redis, job, tmp_path, save_side_effect=OSError("disk full"))
+    monkeypatch.setattr(pd, "build_worker_runtime", builder)
+
+    pd.finalize_failure(llm_sub, redis, RuntimeError, RuntimeError("llm crashed"), None)
+
+    assert job.status == JobStatus.FAILED, "save failure during salvage must not leave the job PROCESSING"
+    assert RESULT_PERSIST_FAILED in (job.error or "")
+    # The finally still runs, so context is cleaned up regardless.
+    assert PipelineContextStore(redis, job.id).load() == {}
+
+
+def test_finalize_success_save_failure_marks_failed(monkeypatch, tmp_path):
+    """The same guard protects the normal completion path: a save_result
+    failure in finalize_success marks FAILED instead of leaving PROCESSING
+    (pre-existing latent bug, now fixed via the shared helper)."""
+    from whisper_ui.core.messages import RESULT_PERSIST_FAILED
+    from whisper_ui.core.models import TranscriptResult
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    job = Job(id="job-succ-savefail", filename="m.mp3", filepath=str(tmp_path / "m.mp3"), status=JobStatus.PROCESSING)
+    PipelineContextStore(redis, job.id).initialize(
+        {"transcript_result": TranscriptResult(language="zh", duration=10.0)}
+    )
+
+    _, builder = _build_completion_runtime(redis, job, tmp_path, save_side_effect=OSError("disk full"))
+    monkeypatch.setattr(pd, "build_worker_runtime", builder)
+
+    rq_job = MagicMock()
+    rq_job.meta = {"parent_job_id": job.id}
+    pd.finalize_success(rq_job, redis, None)
+
+    assert job.status == JobStatus.FAILED
+    assert RESULT_PERSIST_FAILED in (job.error or "")
+
+
+def test_finalize_success_db_update_failure_marks_failed(monkeypatch, tmp_path):
+    """A DB error while writing the COMPLETED row also marks FAILED rather than
+    leaving the job stuck (save_result succeeds, the first update_job raises)."""
+    from whisper_ui.core.models import TranscriptResult
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    job = Job(id="job-succ-dbfail", filename="m.mp3", filepath=str(tmp_path / "m.mp3"), status=JobStatus.PROCESSING)
+    PipelineContextStore(redis, job.id).initialize(
+        {"transcript_result": TranscriptResult(language="zh", duration=10.0)}
+    )
+
+    runtime, builder = _build_completion_runtime(redis, job, tmp_path)
+    # First update_job (COMPLETED) raises; mark_failed's update_job then succeeds.
+    runtime.db.update_job.side_effect = [RuntimeError("db locked"), None]
+    monkeypatch.setattr(pd, "build_worker_runtime", builder)
+
+    rq_job = MagicMock()
+    rq_job.meta = {"parent_job_id": job.id}
+    pd.finalize_success(rq_job, redis, None)
+
+    assert job.status == JobStatus.FAILED
+
+
+def test_finalize_success_reporter_failure_keeps_completed(monkeypatch, tmp_path):
+    """A best-effort Redis terminal-write failure (reporter.complete) AFTER the
+    DB durably recorded COMPLETED must neither raise out of the callback nor
+    demote the finished job to FAILED."""
+    from whisper_ui.core.models import TranscriptResult
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    job = Job(
+        id="job-succ-reporterfail", filename="m.mp3", filepath=str(tmp_path / "m.mp3"), status=JobStatus.PROCESSING
+    )
+    PipelineContextStore(redis, job.id).initialize(
+        {"transcript_result": TranscriptResult(language="zh", duration=10.0)}
+    )
+
+    runtime = MagicMock()
+    runtime.redis = redis
+    runtime.db.get_job.return_value = job
+    runtime.filestore.save_result.return_value = tmp_path / "result.json"
+    runtime.settings.redis_processing_expiry = 7200
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _fake_builder(job_id, *, generation=None):
+        reporter = MagicMock()
+        reporter.complete.side_effect = RuntimeError("redis down")
+        runtime.reporter = reporter
+        yield runtime
+
+    monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
+
+    rq_job = MagicMock()
+    rq_job.meta = {"parent_job_id": job.id}
+    pd.finalize_success(rq_job, redis, None)  # must not raise
+
+    assert job.status == JobStatus.COMPLETED
+    runtime.db.update_job.assert_called_once()
+
+
+def test_is_llm_correction_subjob_identifies_via_func_name_without_meta(tmp_path):
+    """PR #94 review #2: the salvage path must recognise the llm_correction
+    tail even for a sub-job enqueued before meta["stage"] existed (in-flight
+    across a rolling deploy / reboot), via the stable RQ func_name."""
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    job = Job(
+        id="job-funcname",
+        filename="m.mp3",
+        filepath=str(tmp_path / "m.mp3"),
+        status=JobStatus.PROCESSING,
+        llm_correction_enabled=True,
+    )
+    enqueue_pipeline(job, redis=redis, settings=_build_settings(), filestore=_build_filestore(tmp_path))
+    subs = _by_stage(_load_subjobs(redis, job.id))
+    llm_sub = subs["run_llm_correction"]
+    transcribe_sub = subs["run_transcribe_align"]
+
+    # Simulate pre-change sub-jobs by stripping the new meta["stage"] tag.
+    llm_sub.meta.pop("stage", None)
+    transcribe_sub.meta.pop("stage", None)
+
+    assert pd._is_llm_correction_subjob(llm_sub) is True
+    assert pd._is_llm_correction_subjob(transcribe_sub) is False
+    # A bare mock (no string func_name) is never mis-identified as llm.
+    assert pd._is_llm_correction_subjob(MagicMock()) is False
