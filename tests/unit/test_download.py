@@ -250,6 +250,20 @@ class TestGoogleDriveDownload:
             with pytest.raises(DownloadError, match="Failed to download from Google Drive"):
                 stage.execute(context)
 
+    def test_gdrive_empty_file_raises(self, context, download_dir):
+        def mock_download(url, output, quiet=True, fuzzy=False):
+            out_path = Path(output) / "audio.mp3"
+            out_path.write_bytes(b"")
+            return str(out_path)
+
+        mock_gdown = MagicMock()
+        mock_gdown.download = mock_download
+
+        with patch.dict("sys.modules", {"gdown": mock_gdown}):
+            stage = DownloadStage()
+            with pytest.raises(DownloadError, match="empty or not found"):
+                stage.execute(context)
+
     def test_gdrive_unsupported_extension_raises(self, context, download_dir):
         def mock_download(url, output, quiet=True, fuzzy=False):
             out_path = Path(output) / "document.txt"

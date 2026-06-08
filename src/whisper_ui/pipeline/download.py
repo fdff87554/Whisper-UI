@@ -82,8 +82,8 @@ class DownloadStage:
             raise DownloadError(f"Failed to download from Google Drive: {e}") from e
 
         downloaded = Path(result)
-        if not downloaded.exists():
-            raise DownloadError("Download completed but no file was found.")
+        if not downloaded.exists() or downloaded.stat().st_size == 0:
+            raise DownloadError("Download completed but the file was empty or not found.")
 
         from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
 

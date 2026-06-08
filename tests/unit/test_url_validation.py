@@ -128,7 +128,9 @@ class TestInvalidGoogleDriveURLs:
             "https://drive.google.com/drive/my-drive",
             "ftp://drive.google.com/file/d/abc123/view",
             "https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/edit",
+            "https://docs.google.com/u/0/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/edit",
             "https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/edit",
+            "https://docs.google.com/u/1/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/edit",
             "https://docs.google.com/presentation/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/edit",
         ],
     )

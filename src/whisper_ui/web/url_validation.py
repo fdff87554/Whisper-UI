@@ -116,7 +116,7 @@ def validate_google_drive_url(url: str) -> str:
         raise GoogleDriveURLError("Not a Google Drive URL.")
 
     if host == "docs.google.com" and any(
-        parsed.path.startswith(p) for p in ("/document/", "/spreadsheets/", "/presentation/", "/forms/")
+        p in parsed.path for p in ("/document/", "/spreadsheets/", "/presentation/", "/forms/")
     ):
         raise GoogleDriveURLError(
             "Google Docs, Sheets, Slides, and Forms are not supported. "
