@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from whisper_ui.web.url_validation import PlaylistURLError, YouTubeURLError, validate_youtube_url
+from whisper_ui.web.url_validation import (
+    GoogleDriveURLError,
+    PlaylistURLError,
+    YouTubeURLError,
+    is_google_drive_url,
+    validate_google_drive_url,
+    validate_youtube_url,
+)
 
 
 class TestValidYouTubeURLs:
@@ -69,3 +76,75 @@ class TestPlaylistURLs:
         """A URL with both v= and list= should be accepted (single video from playlist)."""
         result = validate_youtube_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLxyz")
         assert "v=dQw4w9WgXcQ" in result
+
+
+class TestValidGoogleDriveURLs:
+    @pytest.mark.parametrize(
+        "url,expected_id",
+        [
+            (
+                "https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/view?usp=sharing",
+                "1AbCdEfGhIjKlMnOpQrStUvWxYz",
+            ),
+            (
+                "https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/view",
+                "1AbCdEfGhIjKlMnOpQrStUvWxYz",
+            ),
+            (
+                "https://drive.google.com/open?id=1AbCdEfGhIjKlMnOpQrStUvWxYz",
+                "1AbCdEfGhIjKlMnOpQrStUvWxYz",
+            ),
+            (
+                "https://drive.google.com/uc?id=1AbCdEfGhIjKlMnOpQrStUvWxYz&export=download",
+                "1AbCdEfGhIjKlMnOpQrStUvWxYz",
+            ),
+        ],
+    )
+    def test_valid_urls(self, url, expected_id):
+        result = validate_google_drive_url(url)
+        assert f"id={expected_id}" in result
+        assert result.startswith("https://drive.google.com/uc?")
+
+    def test_strips_whitespace(self):
+        result = validate_google_drive_url(
+            "  https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/view  "
+        )
+        assert "id=1AbCdEfGhIjKlMnOpQrStUvWxYz" in result
+
+    def test_returns_canonical_download_url(self):
+        result = validate_google_drive_url(
+            "https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/view?usp=sharing"
+        )
+        assert "export=download" in result
+        assert "id=1AbCdEfGhIjKlMnOpQrStUvWxYz" in result
+
+
+class TestInvalidGoogleDriveURLs:
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "",
+            "not a url",
+            "https://example.com/file/d/abc123/view",
+            "https://drive.google.com/",
+            "https://drive.google.com/drive/my-drive",
+            "ftp://drive.google.com/file/d/abc123/view",
+        ],
+    )
+    def test_invalid_urls_raise(self, url):
+        with pytest.raises(GoogleDriveURLError):
+            validate_google_drive_url(url)
+
+
+class TestIsGoogleDriveURL:
+    def test_google_drive_url(self):
+        assert is_google_drive_url("https://drive.google.com/file/d/abc123/view") is True
+
+    def test_youtube_url(self):
+        assert is_google_drive_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ") is False
+
+    def test_random_url(self):
+        assert is_google_drive_url("https://example.com") is False
+
+    def test_empty_string(self):
+        assert is_google_drive_url("") is False

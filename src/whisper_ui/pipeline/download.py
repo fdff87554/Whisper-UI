@@ -1,19 +1,47 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import parse_qs, urlparse
 
 from rq.timeouts import BaseTimeoutException
 
 from whisper_ui.core.constants import YT_DLP_SOCKET_TIMEOUT
 from whisper_ui.core.exceptions import DownloadError
-from whisper_ui.core.messages import DOWNLOAD_DONE, DOWNLOAD_EXTRACTING_INFO, DOWNLOAD_IN_PROGRESS
+from whisper_ui.core.messages import (
+    DOWNLOAD_DONE,
+    DOWNLOAD_EXTRACTING_INFO,
+    DOWNLOAD_GDRIVE_IN_PROGRESS,
+    DOWNLOAD_IN_PROGRESS,
+)
 
 if TYPE_CHECKING:
     from whisper_ui.pipeline.base import ProgressCallback
 
 logger = logging.getLogger(__name__)
+
+_GDRIVE_HOSTS = frozenset({"drive.google.com", "docs.google.com"})
+
+
+def _is_google_drive_url(url: str) -> bool:
+    try:
+        host = urlparse(url).hostname or ""
+        return host in _GDRIVE_HOSTS
+    except Exception:
+        return False
+
+
+def _extract_gdrive_file_id(url: str) -> str | None:
+    """Extract the Google Drive file ID from a canonical or sharing URL."""
+    parsed = urlparse(url)
+    qs = parse_qs(parsed.query)
+    id_list = qs.get("id")
+    if id_list:
+        return id_list[0]
+    match = re.search(r"/d/([a-zA-Z0-9_-]{10,})", parsed.path)
+    return match.group(1) if match else None
 
 
 class DownloadStage:
@@ -29,6 +57,68 @@ class DownloadStage:
         if not source_url:
             return context
 
+        if _is_google_drive_url(source_url):
+            return self._download_google_drive(source_url, context, on_progress)
+        return self._download_youtube(source_url, context, on_progress)
+
+    def _download_google_drive(
+        self,
+        source_url: str,
+        context: dict[str, Any],
+        on_progress: ProgressCallback | None,
+    ) -> dict[str, Any]:
+        try:
+            import gdown
+        except ImportError as err:
+            raise DownloadError("gdown is not installed.") from err
+
+        download_dir = Path(context["download_dir"])
+        download_dir.mkdir(parents=True, exist_ok=True)
+
+        if on_progress:
+            on_progress(0.0, DOWNLOAD_EXTRACTING_INFO)
+
+        file_id = _extract_gdrive_file_id(source_url)
+        if not file_id:
+            raise DownloadError("Could not extract Google Drive file ID from URL.")
+
+        gdrive_url = f"https://drive.google.com/uc?id={file_id}"
+        output_path = str(download_dir / "gdrive_file")
+
+        try:
+            if on_progress:
+                on_progress(0.1, DOWNLOAD_GDRIVE_IN_PROGRESS)
+
+            result = gdown.download(gdrive_url, output_path, quiet=True, fuzzy=False)
+            if result is None:
+                raise DownloadError(
+                    "Failed to download from Google Drive. "
+                    "Make sure the file is shared as 'Anyone with the link'."
+                )
+        except DownloadError:
+            raise
+        except BaseTimeoutException:
+            raise
+        except Exception as e:
+            raise DownloadError(f"Failed to download from Google Drive: {e}") from e
+
+        downloaded = Path(result)
+        if not downloaded.exists():
+            raise DownloadError("Download completed but no file was found.")
+
+        if on_progress:
+            on_progress(1.0, DOWNLOAD_DONE)
+
+        context["input_path"] = str(downloaded)
+        context["video_title"] = downloaded.stem
+        return context
+
+    def _download_youtube(
+        self,
+        source_url: str,
+        context: dict[str, Any],
+        on_progress: ProgressCallback | None,
+    ) -> dict[str, Any]:
         try:
             import yt_dlp
         except ImportError as err:

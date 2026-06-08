@@ -149,3 +149,99 @@ class TestDownloadStageImportError:
             stage = DownloadStage()
             with pytest.raises(DownloadError, match="yt-dlp is not installed"):
                 stage.execute(context)
+
+
+class TestGoogleDriveDownload:
+    @pytest.fixture
+    def download_dir(self, tmp_path: Path) -> Path:
+        d = tmp_path / "downloads"
+        d.mkdir()
+        return d
+
+    @pytest.fixture
+    def context(self, download_dir: Path) -> dict[str, Any]:
+        return {
+            "source_url": "https://drive.google.com/uc?export=download&id=1AbCdEfGhIjKlMnOpQrStUvWxYz",
+            "download_dir": str(download_dir),
+            "input_path": "",
+        }
+
+    def test_successful_gdrive_download(self, context, download_dir):
+        output_file = str(download_dir / "gdrive_file")
+
+        def mock_download(url, output, quiet=True, fuzzy=False):
+            Path(output).write_bytes(b"fake audio content")
+            return output
+
+        mock_gdown = MagicMock()
+        mock_gdown.download = mock_download
+
+        with patch.dict("sys.modules", {"gdown": mock_gdown}):
+            stage = DownloadStage()
+            result = stage.execute(context)
+
+        assert result["input_path"] == output_file
+        assert result["video_title"] == "gdrive_file"
+
+    def test_gdrive_progress_callback(self, context, download_dir):
+        def mock_download(url, output, quiet=True, fuzzy=False):
+            Path(output).write_bytes(b"fake audio content")
+            return output
+
+        mock_gdown = MagicMock()
+        mock_gdown.download = mock_download
+
+        progress_log: list[tuple[float, str]] = []
+
+        def on_progress(p: float, msg: str) -> None:
+            progress_log.append((p, msg))
+
+        with patch.dict("sys.modules", {"gdown": mock_gdown}):
+            stage = DownloadStage()
+            stage.execute(context, on_progress=on_progress)
+
+        assert len(progress_log) >= 2
+        assert progress_log[0][1] == "正在取得影片資訊..."
+        assert progress_log[-1][1] == "音訊下載完成。"
+
+    def test_gdrive_download_returns_none(self, context, download_dir):
+        mock_gdown = MagicMock()
+        mock_gdown.download.return_value = None
+
+        with patch.dict("sys.modules", {"gdown": mock_gdown}):
+            stage = DownloadStage()
+            with pytest.raises(DownloadError, match="Failed to download from Google Drive"):
+                stage.execute(context)
+
+    def test_gdrive_missing_gdown_raises(self):
+        context: dict[str, Any] = {
+            "source_url": "https://drive.google.com/uc?export=download&id=abc123xyz",
+            "download_dir": "/tmp/test",
+            "input_path": "",
+        }
+        with patch.dict("sys.modules", {"gdown": None}):
+            stage = DownloadStage()
+            with pytest.raises(DownloadError, match="gdown is not installed"):
+                stage.execute(context)
+
+    def test_gdrive_invalid_file_id(self, download_dir):
+        context: dict[str, Any] = {
+            "source_url": "https://drive.google.com/drive/my-drive",
+            "download_dir": str(download_dir),
+            "input_path": "",
+        }
+        mock_gdown = MagicMock()
+
+        with patch.dict("sys.modules", {"gdown": mock_gdown}):
+            stage = DownloadStage()
+            with pytest.raises(DownloadError, match="Could not extract Google Drive file ID"):
+                stage.execute(context)
+
+    def test_gdrive_network_error(self, context, download_dir):
+        mock_gdown = MagicMock()
+        mock_gdown.download.side_effect = Exception("Connection refused")
+
+        with patch.dict("sys.modules", {"gdown": mock_gdown}):
+            stage = DownloadStage()
+            with pytest.raises(DownloadError, match="Failed to download from Google Drive"):
+                stage.execute(context)

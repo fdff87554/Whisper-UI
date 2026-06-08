@@ -286,8 +286,8 @@ def enqueue_pipeline(
 
 
 def _apply_filename_from_video_title(job: Job, context: dict) -> None:
-    """If the pipeline downloaded a YouTube video, surface its title as the
-    user-facing filename so the UI shows the human-readable title instead
+    """If the pipeline downloaded from a URL source, surface the title as the
+    user-facing filename so the UI shows a human-readable name instead
     of the auto-generated "_" placeholder used at enqueue time.
     """
     if job.source_url and context.get("video_title"):
