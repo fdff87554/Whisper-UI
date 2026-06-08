@@ -192,8 +192,29 @@ class JobDatabase:
         ).fetchall()
         return [_row_to_job(r) for r in rows]
 
-    def recover_stale_jobs(self, timeout_seconds: int, error_message: str) -> int:
+    def list_stale_processing_job_ids(self, timeout_seconds: int) -> list[str]:
+        """Return ids of PROCESSING jobs whose updated_at is older than the timeout.
+
+        Candidate list for the liveness-aware stale reaper
+        (``worker.pipeline_dispatcher.recover_stale_pipeline_jobs``): the caller
+        checks each candidate's RQ pipeline liveness and only fails the
+        genuinely-dead ones, sparing jobs that are merely waiting behind a
+        slow/backed-up worker. Ordered oldest-first for deterministic logs.
+        """
+        threshold = (datetime.now(UTC) - timedelta(seconds=timeout_seconds)).isoformat()
+        rows = self._conn.execute(
+            "SELECT id FROM jobs WHERE status = ? AND updated_at < ? ORDER BY updated_at ASC, id ASC",
+            (JobStatus.PROCESSING.value, threshold),
+        ).fetchall()
+        return [row["id"] for row in rows]
+
+    def recover_stale_jobs(self, timeout_seconds: int, error_message: str, *, only_ids: list[str] | None = None) -> int:
         """Mark PROCESSING jobs whose updated_at is older than the timeout as FAILED.
+
+        When ``only_ids`` is given, the UPDATE is additionally restricted to
+        that id set — the liveness-aware reaper passes the subset of stale
+        candidates whose RQ pipeline is genuinely dead, so jobs still waiting
+        in a queue are never failed. ``only_ids=[]`` is a no-op.
 
         Concurrency contract: this is a single UPDATE statement with a WHERE
         clause gated on ``updated_at < threshold``. SQLite WAL mode allows
@@ -227,16 +248,22 @@ class JobDatabase:
         # cache limit. Tighter bounding would require batching the
         # UPDATE (e.g. SELECT id LIMIT N then UPDATE WHERE id IN ...)
         # and is not justified at current row sizes.
-        cursor = self._conn.execute(
-            "UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE status = ? AND updated_at < ? RETURNING id",
-            (
-                JobStatus.FAILED.value,
-                error_message,
-                datetime.now(UTC).isoformat(),
-                JobStatus.PROCESSING.value,
-                threshold,
-            ),
-        )
+        sql = "UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE status = ? AND updated_at < ?"
+        params: list[object] = [
+            JobStatus.FAILED.value,
+            error_message,
+            datetime.now(UTC).isoformat(),
+            JobStatus.PROCESSING.value,
+            threshold,
+        ]
+        if only_ids is not None:
+            if not only_ids:
+                return 0
+            placeholders = ", ".join("?" for _ in only_ids)
+            sql += f" AND id IN ({placeholders})"
+            params.extend(only_ids)
+        sql += " RETURNING id"
+        cursor = self._conn.execute(sql, params)
         recovered = 0
         shown: list[str] = []
         for row in cursor:

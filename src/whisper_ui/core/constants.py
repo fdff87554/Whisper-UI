@@ -51,20 +51,23 @@ REDIS_COMPLETED_EXPIRY = 86400  # 24 hours
 REDIS_FAILED_EXPIRY = 86400  # 24 hours
 
 # Pipeline TTLs at a glance (three layers, longest to shortest):
-#   PIPELINE_STATE_TTL_SECONDS (here, 24h)
+#   PIPELINE_STATE_TTL_SECONDS (here, 7d)
 #       Safety net for per-pipeline state (context HSET, generation
 #       counter, sub-job sets). Only matters when a worker is killed
 #       between bumping the generation counter and writing the
 #       finalizer; a successful/failed pipeline always deletes these
-#       keys explicitly. Must outlive the longest plausible stage so
-#       late writers still observe the bumped generation and self-drop.
+#       keys explicitly. Under the liveness-aware stale reaper a job can stay
+#       PROCESSING (queued behind a slow worker) far longer than any single
+#       stage, so this must outlive the longest plausible BACKLOG WAIT, not
+#       just the longest stage — otherwise is_pipeline_dead reads the expired
+#       generation counter as "no live work" and reaps a healthy queued job.
 #   Settings.redis_processing_expiry (core/config.py, default ~8.5h)
 #       TTL on the per-job progress HSET emitted by RedisProgressReporter
 #       during a running job, sized to outlive job_timeout_max.
 #   progress._DEFAULT_PROCESSING_TTL (worker/progress.py, 2h)
 #       Fallback when callers construct a reporter without going through
 #       Settings (unit tests, ad-hoc scripts).
-PIPELINE_STATE_TTL_SECONDS = 86_400  # 24 hours
+PIPELINE_STATE_TTL_SECONDS = 604_800  # 7 days (must outlive max backlog wait)
 
 # Worker queues. Stages are partitioned across these queues by the resource
 # they consume so a long-running IO or network stage (download, llm_correction)

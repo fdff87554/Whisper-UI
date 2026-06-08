@@ -76,6 +76,7 @@ if TYPE_CHECKING:
 
     from whisper_ui.core.config import Settings
     from whisper_ui.core.models import Job
+    from whisper_ui.storage.database import JobDatabase
     from whisper_ui.storage.filestore import FileStore
 
 logger = logging.getLogger(__name__)
@@ -542,8 +543,92 @@ def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> No
                 _clear_subjob_set(runtime.redis, parent_job_id, meta_generation)
 
 
+def is_pipeline_dead(redis: Redis, parent_job_id: str) -> bool:
+    """Return True when a PROCESSING parent has no live RQ work left.
+
+    "Live" means at least one current-generation sub-job is still queued,
+    deferred, scheduled, or started. A parent whose sub-jobs are all finished,
+    failed, cancelled, or gone has nothing progressing it and is a genuine
+    stale/dead pipeline. A job merely waiting in a backed-up queue is ALIVE and
+    must not be reaped — that is the whole point of moving the stale reaper from
+    wall-age to liveness, so a slow single-worker box stops mass-failing a
+    healthy batch whose tail simply has not been reached yet.
+
+    A started sub-job whose worker has died is still reported STARTED until RQ's
+    own maintenance moves it to the failed registry (bounded by its
+    death-penalty ``job_timeout``); treating STARTED as live therefore only ever
+    errs toward sparing a job, never toward failing a healthy one.
+    """
+    from rq.exceptions import NoSuchJobError
+    from rq.job import Job as RQJob
+    from rq.job import JobStatus as RQJobStatus
+
+    generation = _current_generation(redis, parent_job_id)
+    if generation is None:
+        return True
+    sub_ids = _load_subjob_ids(redis, parent_job_id, generation)
+    if not sub_ids:
+        return True
+    live = {RQJobStatus.QUEUED, RQJobStatus.STARTED, RQJobStatus.DEFERRED, RQJobStatus.SCHEDULED}
+    for sub_id in sub_ids:
+        try:
+            status = RQJob.fetch(sub_id, connection=redis).get_status(refresh=True)
+        except NoSuchJobError:
+            # The sub-job hash is genuinely gone → that branch is dead; keep
+            # checking the rest. Only NoSuchJobError is swallowed: a transient
+            # redis.exceptions.RedisError must NOT be treated as "dead" (that
+            # would mark a live, queued job FAILED on a Redis blip) — it
+            # propagates so the stale checker's outer handler logs it and skips
+            # this round, leaving every candidate untouched.
+            continue
+        if status in live:
+            return False
+    return True
+
+
+def recover_stale_pipeline_jobs(
+    db: JobDatabase,
+    redis: Redis,
+    timeout_seconds: int,
+    error_message: str,
+) -> int:
+    """Fail only genuinely-dead stale jobs; spare jobs still waiting in RQ.
+
+    Replaces the blind wall-age reaper. A parent PROCESSING for longer than
+    ``timeout_seconds`` is failed only if :func:`is_pipeline_dead` confirms none
+    of its current-generation sub-jobs is still alive in RQ. This stops a
+    single-/slow-worker box from mass-failing a healthy batch whose tail had
+    simply not been reached yet (the production incident: 31/38 jobs reaped
+    while their transcribe sub-jobs were still queued behind one worker).
+
+    For each job it does fail, the generation counter is bumped so any zombie
+    sub-job that later resurfaces drops its writes through the existing
+    generation gate.
+    """
+    candidates = db.list_stale_processing_job_ids(timeout_seconds)
+    if not candidates:
+        return 0
+    dead = [job_id for job_id in candidates if is_pipeline_dead(redis, job_id)]
+    spared = len(candidates) - len(dead)
+    if spared:
+        logger.info(
+            "stale check: %d candidate(s) older than %ds, %d still live (spared), %d dead",
+            len(candidates),
+            timeout_seconds,
+            spared,
+            len(dead),
+        )
+    if not dead:
+        return 0
+    for job_id in dead:
+        _bump_generation(redis, job_id)
+    return db.recover_stale_jobs(timeout_seconds, error_message, only_ids=dead)
+
+
 __all__ = [
     "enqueue_pipeline",
     "finalize_failure",
     "finalize_success",
+    "is_pipeline_dead",
+    "recover_stale_pipeline_jobs",
 ]
