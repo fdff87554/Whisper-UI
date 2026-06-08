@@ -30,7 +30,7 @@ from whisper_ui.core.constants import (
     WORKER_QUEUE_GPU,
     WORKER_QUEUE_IO,
 )
-from whisper_ui.core.messages import PIPELINE_COMPLETE
+from whisper_ui.core.messages import LLM_CORRECTION_SKIPPED, PIPELINE_COMPLETE
 from whisper_ui.core.models import JobStatus
 from whisper_ui.worker.context_store import PipelineContextStore
 from whisper_ui.worker.pipeline_callbacks import (
@@ -218,7 +218,10 @@ def enqueue_pipeline(
         queue_name = _STAGE_QUEUES[func.__name__]
         kwargs = {
             "job_timeout": timeout,
-            "meta": dict(meta),
+            # Tag each sub-job with its stage name so finalize_failure can
+            # recognise the optional llm_correction tail and complete with the
+            # already-produced transcript instead of failing the whole job.
+            "meta": {**meta, "stage": func.__name__},
             "on_failure": failure_cb,
         }
         if depends_on is not None:
@@ -290,6 +293,48 @@ def _apply_filename_from_video_title(job: Job, context: dict) -> None:
         job.filename = context["video_title"]
 
 
+def _persist_completion(
+    runtime,
+    job: Job,
+    context: dict,
+    ctx_store: PipelineContextStore,
+    transcript_result,
+    meta_generation: int | None,
+    *,
+    progress_message: str = PIPELINE_COMPLETE,
+) -> None:
+    """Save ``transcript_result``, mark ``job`` COMPLETED, then clean up.
+
+    Shared by ``finalize_success`` (the normal pipeline tail) and
+    ``finalize_failure``'s best-effort branch for an optional stage
+    (``llm_correction``) that failed after the transcript was already
+    produced. Keeping the persist + cleanup in one place means the success
+    path and the optional-stage-salvage path cannot drift on what they save
+    or clear. The ``finally`` mirrors ``finalize_success``'s original
+    cleanup: delete the preprocessed WAV, drop the Redis context hash, and
+    clear the per-generation sub-job tracking set.
+    """
+    reporter = runtime.reporter
+    try:
+        _apply_filename_from_video_title(job, context)
+        result_path = runtime.filestore.save_result(job.id, transcript_result)
+
+        job.status = JobStatus.COMPLETED
+        job.progress = 1.0
+        job.progress_message = progress_message
+        job.result_path = str(result_path)
+        job.duration = transcript_result.duration
+        runtime.db.update_job(job)
+        reporter.complete(str(result_path))
+
+        logger.info("Job %s completed successfully via DAG pipeline", job.id)
+    finally:
+        cleanup_preprocessed_audio(context)
+        ctx_store.delete()
+        if meta_generation is not None:
+            _clear_subjob_set(runtime.redis, job.id, meta_generation)
+
+
 def finalize_success(rq_job, connection, _result) -> None:
     """RQ ``on_success`` callback for the final sub-job.
 
@@ -349,24 +394,7 @@ def finalize_success(rq_job, connection, _result) -> None:
                 _clear_subjob_set(runtime.redis, parent_job_id, meta_generation)
             return
 
-        try:
-            _apply_filename_from_video_title(job, context)
-            result_path = runtime.filestore.save_result(parent_job_id, transcript_result)
-
-            job.status = JobStatus.COMPLETED
-            job.progress = 1.0
-            job.progress_message = PIPELINE_COMPLETE
-            job.result_path = str(result_path)
-            job.duration = transcript_result.duration
-            runtime.db.update_job(job)
-            reporter.complete(str(result_path))
-
-            logger.info("Job %s completed successfully via DAG pipeline", parent_job_id)
-        finally:
-            cleanup_preprocessed_audio(context)
-            ctx_store.delete()
-            if meta_generation is not None:
-                _clear_subjob_set(runtime.redis, parent_job_id, meta_generation)
+        _persist_completion(runtime, job, context, ctx_store, transcript_result, meta_generation)
 
 
 def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> None:
@@ -432,6 +460,35 @@ def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> No
         ctx_store = PipelineContextStore(runtime.redis, parent_job_id)
         context = ctx_store.load()
         reporter = runtime.reporter
+
+        # Optional stages must never discard a finished transcript. If the
+        # failing sub-job is the optional llm_correction tail and the
+        # transcript is already in context (postprocess ran before it), the
+        # job is effectively done — complete it with the un-corrected
+        # transcript instead of marking it FAILED. This covers every failure
+        # route for that sub-job uniformly: an in-task exception, the RQ
+        # death-penalty, and the AbandonedJobError raised when a worker/host
+        # restart (e.g. a scheduled reboot) kills the long LLM stage mid-run.
+        stage_name = rq_job.meta.get("stage") if rq_job.meta else None
+        transcript_result = context.get("transcript_result")
+        if stage_name == run_llm_correction.__name__ and transcript_result is not None:
+            logger.warning(
+                "Optional stage %s failed for job %s (%s); completing with the "
+                "un-corrected transcript instead of failing the job",
+                stage_name,
+                parent_job_id,
+                _exc_type.__name__ if _exc_type is not None else "?",
+            )
+            _persist_completion(
+                runtime,
+                job,
+                context,
+                ctx_store,
+                transcript_result,
+                meta_generation,
+                progress_message=LLM_CORRECTION_SKIPPED,
+            )
+            return
 
         try:
             if meta_generation is not None:
