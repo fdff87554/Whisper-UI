@@ -167,11 +167,14 @@ class TestGoogleDriveDownload:
         }
 
     def test_successful_gdrive_download(self, context, download_dir):
-        output_file = str(download_dir / "gdrive_file")
+        resolved_file = str(download_dir / "meeting_recording.m4a")
 
         def mock_download(url, output, quiet=True, fuzzy=False):
-            Path(output).write_bytes(b"fake audio content")
-            return output
+            out_path = Path(output)
+            if out_path.is_dir() or output.endswith("/"):
+                out_path = Path(output.rstrip("/")) / "meeting_recording.m4a"
+            out_path.write_bytes(b"fake audio content")
+            return str(out_path)
 
         mock_gdown = MagicMock()
         mock_gdown.download = mock_download
@@ -180,13 +183,14 @@ class TestGoogleDriveDownload:
             stage = DownloadStage()
             result = stage.execute(context)
 
-        assert result["input_path"] == output_file
-        assert result["video_title"] == "gdrive_file"
+        assert result["input_path"] == resolved_file
+        assert result["video_title"] == "meeting_recording"
 
     def test_gdrive_progress_callback(self, context, download_dir):
         def mock_download(url, output, quiet=True, fuzzy=False):
-            Path(output).write_bytes(b"fake audio content")
-            return output
+            out_path = Path(output.rstrip("/")) / "audio.mp3"
+            out_path.write_bytes(b"fake audio content")
+            return str(out_path)
 
         mock_gdown = MagicMock()
         mock_gdown.download = mock_download

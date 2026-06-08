@@ -83,7 +83,7 @@ class DownloadStage:
             raise DownloadError("Could not extract Google Drive file ID from URL.")
 
         gdrive_url = f"https://drive.google.com/uc?id={file_id}"
-        output_path = str(download_dir / "gdrive_file")
+        output_path = str(download_dir) + "/"
 
         try:
             if on_progress:
