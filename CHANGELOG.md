@@ -17,10 +17,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `monitoring` compose profile (Prometheus + Redis exporter + AMD GPU
   exporter). Grafana dashboards and per-stage histograms are deliberate
   follow-ups. (#96)
-- Defensive Redis memory cap via `REDIS_MAXMEMORY` / `REDIS_MAXMEMORY_POLICY`
-  (default `0` / `noeviction` preserves current behaviour). `noeviction` is
-  mandatory — RQ generation counters and pipeline context must never be
-  evicted.
+- Defensive Redis memory cap via `REDIS_MAXMEMORY` (default `0` = unlimited
+  preserves current behaviour). The eviction policy is hardcoded to
+  `noeviction` and is not configurable — RQ generation counters, sub-job sets,
+  and pipeline context must never be evicted or the DAG corrupts.
 - AMD/ROCm single-GPU scaled-topology docs and `.env.example` example (narrow
   `worker-rocm` to GPU stages, run a separate `worker-io`).
 - Deterministic queue-split throughput integration test. (#97)
