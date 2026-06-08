@@ -83,6 +83,26 @@ def _run_retention_sweep(db_path, filestore, threshold_iso: str, limit: int) -> 
     return removed
 
 
+def _run_stale_recovery(db_path, redis, timeout_seconds: int, error_message: str) -> int:
+    """Sync helper run inside ``asyncio.to_thread`` for the stale-job checker.
+
+    The liveness-aware reaper does a SQLite scan plus several Redis roundtrips
+    per stale candidate (one ``RQJob.fetch`` per sub-job), so running it inline
+    on the event loop would block the web tier during the sweep. Mirrors
+    ``_run_retention_sweep``: it opens its own short-lived ``JobDatabase``
+    instead of borrowing ``app.state.db`` (Python's sqlite3 does not serialise a
+    shared connection across threads); the redis client is thread-safe and is
+    passed straight through.
+    """
+    from contextlib import closing
+
+    from whisper_ui.storage.database import JobDatabase
+    from whisper_ui.worker.pipeline_dispatcher import recover_stale_pipeline_jobs
+
+    with closing(JobDatabase(db_path)) as db:
+        return recover_stale_pipeline_jobs(db, redis, timeout_seconds, error_message)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from datetime import UTC, datetime, timedelta
@@ -95,7 +115,6 @@ async def lifespan(app: FastAPI):
     from whisper_ui.storage.database import JobDatabase
     from whisper_ui.storage.filestore import FileStore
     from whisper_ui.ui.labels import JOBS_STALE_ERROR
-    from whisper_ui.worker.pipeline_dispatcher import recover_stale_pipeline_jobs
 
     settings = get_settings()
     app.state.settings = settings
@@ -111,8 +130,12 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(STALE_JOB_CHECK_INTERVAL)
             try:
-                recovered = recover_stale_pipeline_jobs(
-                    app.state.db, app.state.redis, settings.stale_job_timeout, JOBS_STALE_ERROR
+                recovered = await asyncio.to_thread(
+                    _run_stale_recovery,
+                    settings.database_path,
+                    app.state.redis,
+                    settings.stale_job_timeout,
+                    JOBS_STALE_ERROR,
                 )
                 if recovered > 0:
                     logger.warning("Recovered %d stale job(s)", recovered)

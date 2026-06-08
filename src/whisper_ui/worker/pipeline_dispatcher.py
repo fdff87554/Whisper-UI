@@ -559,6 +559,7 @@ def is_pipeline_dead(redis: Redis, parent_job_id: str) -> bool:
     death-penalty ``job_timeout``); treating STARTED as live therefore only ever
     errs toward sparing a job, never toward failing a healthy one.
     """
+    from rq.exceptions import NoSuchJobError
     from rq.job import Job as RQJob
     from rq.job import JobStatus as RQJobStatus
 
@@ -572,8 +573,13 @@ def is_pipeline_dead(redis: Redis, parent_job_id: str) -> bool:
     for sub_id in sub_ids:
         try:
             status = RQJob.fetch(sub_id, connection=redis).get_status(refresh=True)
-        except Exception:
-            # Sub-job hash is gone → that branch is dead; keep checking the rest.
+        except NoSuchJobError:
+            # The sub-job hash is genuinely gone → that branch is dead; keep
+            # checking the rest. Only NoSuchJobError is swallowed: a transient
+            # redis.exceptions.RedisError must NOT be treated as "dead" (that
+            # would mark a live, queued job FAILED on a Redis blip) — it
+            # propagates so the stale checker's outer handler logs it and skips
+            # this round, leaving every candidate untouched.
             continue
         if status in live:
             return False

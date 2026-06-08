@@ -1293,3 +1293,95 @@ def test_recover_stale_pipeline_jobs_spares_live_and_fails_dead(tmp_path):
         assert db.get_job(live.id).status == JobStatus.PROCESSING, "a job still waiting in queue must be spared"
     finally:
         db.close()
+
+
+def test_recover_stale_pipeline_jobs_propagates_redis_error_without_reaping(tmp_path, monkeypatch):
+    """PR #95 review #1: a transient RedisError during the liveness probe must
+    PROPAGATE (so the stale checker logs it and skips the round), not be
+    swallowed as 'dead' and used to reap a live job."""
+    from redis.exceptions import RedisError
+
+    from whisper_ui.storage.database import JobDatabase
+    from whisper_ui.ui.labels import JOBS_STALE_ERROR
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    db = JobDatabase(tmp_path / "stale.db")
+    try:
+        job = Job(id="live-candidate", filename="m.mp3", filepath=str(tmp_path / "m.mp3"), status=JobStatus.PROCESSING)
+        db.insert_job(job)
+        enqueue_pipeline(job, redis=redis, settings=_build_settings(ollama=""), filestore=_build_filestore(tmp_path))
+        db._conn.execute(
+            "UPDATE jobs SET updated_at = '2000-01-01T00:00:00+00:00' WHERE status = ?",
+            (JobStatus.PROCESSING.value,),
+        )
+        db._conn.commit()
+
+        def _raise_redis(*args, **kwargs):
+            raise RedisError("connection reset")
+
+        monkeypatch.setattr("rq.job.Job.fetch", _raise_redis)
+
+        with pytest.raises(RedisError):
+            pd.recover_stale_pipeline_jobs(db, redis, timeout_seconds=60, error_message=JOBS_STALE_ERROR)
+
+        # The candidate must be left untouched for a later round, not reaped.
+        assert db.get_job(job.id).status == JobStatus.PROCESSING
+    finally:
+        db.close()
+
+
+def test_is_pipeline_dead_treats_missing_subjob_as_dead_branch(tmp_path):
+    """A genuinely-deleted sub-job (RQJob.fetch raises NoSuchJobError) is a dead
+    branch; when every sub-job is gone the pipeline is dead. Contrast with the
+    propagation test: only NoSuchJobError is swallowed, never a RedisError."""
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    job = Job(id="job-gone", filename="m.mp3", filepath=str(tmp_path / "m.mp3"), status=JobStatus.PROCESSING)
+    enqueue_pipeline(job, redis=redis, settings=_build_settings(ollama=""), filestore=_build_filestore(tmp_path))
+
+    # Remove every RQ job hash so RQJob.fetch raises NoSuchJobError (while the
+    # sub-job id set still lists them).
+    for sub in _load_subjobs(redis, job.id):
+        sub.delete()
+
+    assert pd.is_pipeline_dead(redis, job.id) is True
+
+
+def test_run_stale_recovery_offload_reaps_dead_via_short_lived_db(tmp_path):
+    """PR #95 review (Gemini): the stale check now runs in a thread via a
+    module-level helper that opens its OWN short-lived JobDatabase (instead of
+    blocking the event loop on the shared connection). It still reaps
+    genuinely-dead jobs, equivalent to calling recover_stale_pipeline_jobs."""
+    from whisper_ui.storage.database import JobDatabase
+    from whisper_ui.ui.labels import JOBS_STALE_ERROR
+    from whisper_ui.web.app import _run_stale_recovery
+
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    db_path = tmp_path / "stale.db"
+    seed = JobDatabase(db_path)
+    try:
+        dead = Job(id="dead", filename="d.mp3", filepath=str(tmp_path / "d.mp3"), status=JobStatus.PROCESSING)
+        seed.insert_job(dead)
+        enqueue_pipeline(dead, redis=redis, settings=settings, filestore=filestore)
+        for sub in _load_subjobs(redis, dead.id):
+            sub.cancel()
+        seed._conn.execute(
+            "UPDATE jobs SET updated_at = '2000-01-01T00:00:00+00:00' WHERE status = ?",
+            (JobStatus.PROCESSING.value,),
+        )
+        seed._conn.commit()
+    finally:
+        seed.close()
+
+    recovered = _run_stale_recovery(db_path, redis, 60, JOBS_STALE_ERROR)
+
+    assert recovered == 1
+    verify = JobDatabase(db_path)
+    try:
+        assert verify.get_job(dead.id).status == JobStatus.FAILED
+    finally:
+        verify.close()
