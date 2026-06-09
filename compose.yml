@@ -148,6 +148,10 @@ services:
       - LANGUAGE=${LANGUAGE:-zh}
       - HF_TOKEN=${HF_TOKEN:-}
       - YOUTUBE_MAX_DURATION=${YOUTUBE_MAX_DURATION:-14400}
+      - TWITTER_MAX_DURATION=${TWITTER_MAX_DURATION:-14400}
+      # X login-walled / age-restricted posts: set a container path here and
+      # mount the cookies.txt there (see .env.example). Empty = anonymous.
+      - TWITTER_COOKIES_FILE=${TWITTER_COOKIES_FILE:-}
       # Queue / job timeouts — see README "Queue / Timeout tuning".
       - JOB_TIMEOUT_DEFAULT=${JOB_TIMEOUT_DEFAULT:-7200}
       - JOB_TIMEOUT_FLOOR=${JOB_TIMEOUT_FLOOR:-1800}
@@ -214,6 +218,10 @@ services:
       - LANGUAGE=${LANGUAGE:-zh}
       - HF_TOKEN=${HF_TOKEN:-}
       - YOUTUBE_MAX_DURATION=${YOUTUBE_MAX_DURATION:-14400}
+      - TWITTER_MAX_DURATION=${TWITTER_MAX_DURATION:-14400}
+      # X login-walled / age-restricted posts: set a container path here and
+      # mount the cookies.txt there (see .env.example). Empty = anonymous.
+      - TWITTER_COOKIES_FILE=${TWITTER_COOKIES_FILE:-}
       # Queue / job timeouts — see README "Queue / Timeout tuning".
       - JOB_TIMEOUT_DEFAULT=${JOB_TIMEOUT_DEFAULT:-7200}
       - JOB_TIMEOUT_FLOOR=${JOB_TIMEOUT_FLOOR:-1800}
@@ -278,6 +286,10 @@ services:
       - LANGUAGE=${LANGUAGE:-zh}
       - HF_TOKEN=${HF_TOKEN:-}
       - YOUTUBE_MAX_DURATION=${YOUTUBE_MAX_DURATION:-14400}
+      - TWITTER_MAX_DURATION=${TWITTER_MAX_DURATION:-14400}
+      # X login-walled / age-restricted posts: set a container path here and
+      # mount the cookies.txt there (see .env.example). Empty = anonymous.
+      - TWITTER_COOKIES_FILE=${TWITTER_COOKIES_FILE:-}
       # Queue / job timeouts — see README "Queue / Timeout tuning".
       - JOB_TIMEOUT_DEFAULT=${JOB_TIMEOUT_DEFAULT:-7200}
       - JOB_TIMEOUT_FLOOR=${JOB_TIMEOUT_FLOOR:-1800}
@@ -349,6 +361,10 @@ services:
       - DEVICE=cpu
       - LANGUAGE=${LANGUAGE:-zh}
       - YOUTUBE_MAX_DURATION=${YOUTUBE_MAX_DURATION:-14400}
+      - TWITTER_MAX_DURATION=${TWITTER_MAX_DURATION:-14400}
+      # X login-walled / age-restricted posts: set a container path here and
+      # mount the cookies.txt there (see .env.example). Empty = anonymous.
+      - TWITTER_COOKIES_FILE=${TWITTER_COOKIES_FILE:-}
       - JOB_TIMEOUT_DEFAULT=${JOB_TIMEOUT_DEFAULT:-7200}
       - JOB_TIMEOUT_FLOOR=${JOB_TIMEOUT_FLOOR:-1800}
       - JOB_TIMEOUT_AUDIO_MULTIPLIER=${JOB_TIMEOUT_AUDIO_MULTIPLIER:-3.0}
