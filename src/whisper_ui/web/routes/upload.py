@@ -22,9 +22,12 @@ from whisper_ui.web.flash import set_flash
 from whisper_ui.web.url_validation import (
     GoogleDriveURLError,
     PlaylistURLError,
+    TwitterURLError,
     YouTubeURLError,
     is_google_drive_url,
+    is_twitter_url,
     validate_google_drive_url,
+    validate_twitter_url,
     validate_youtube_url,
 )
 from whisper_ui.web.validation import clamp_num_speakers
@@ -357,13 +360,15 @@ async def upload_url_submit(
         try:
             if is_google_drive_url(raw_url):
                 clean_url = validate_google_drive_url(raw_url)
+            elif is_twitter_url(raw_url):
+                clean_url = validate_twitter_url(raw_url)
             else:
                 clean_url = validate_youtube_url(raw_url)
             valid_urls.append(clean_url)
         except PlaylistURLError:
             invalid_line_nums.append(line_num)
             has_playlist_error = True
-        except (YouTubeURLError, GoogleDriveURLError):
+        except (YouTubeURLError, GoogleDriveURLError, TwitterURLError):
             invalid_line_nums.append(line_num)
 
     if not valid_urls:

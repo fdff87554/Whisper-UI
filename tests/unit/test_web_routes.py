@@ -1254,6 +1254,31 @@ class TestUploadURLPost:
         assert len(jobs) == 1
         assert jobs[0].source_url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
+    def test_upload_x_url_submits_job(self, client, app, db):
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
+            resp = self._post_url(client, url="https://x.com/jack/status/20")
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/jobs"
+
+    def test_upload_x_url_creates_job_with_canonical_source_url(self, client, app, db):
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
+            self._post_url(client, url="https://x.com/jack/status/20?s=20")
+        jobs = db.list_jobs()
+        assert len(jobs) == 1
+        assert jobs[0].source_url == "https://x.com/i/status/20"
+
+    def test_upload_twitter_com_url_accepted(self, client, app, db):
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
+            self._post_url(client, url="https://twitter.com/jack/status/20")
+        jobs = db.list_jobs()
+        assert len(jobs) == 1
+        assert jobs[0].source_url == "https://x.com/i/status/20"
+
+    def test_upload_x_profile_url_rejected(self, client):
+        resp = self._post_url(client, url="https://x.com/jack")
+        assert resp.status_code == 303
+        assert "error=all_invalid_urls" in resp.headers["location"]
+
     def test_upload_invalid_url_redirects(self, client):
         resp = self._post_url(client, url="https://example.com/not-youtube")
         assert resp.status_code == 303
