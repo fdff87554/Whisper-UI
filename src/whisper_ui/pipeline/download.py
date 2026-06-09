@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlparse
@@ -14,6 +15,7 @@ from whisper_ui.core.messages import (
     DOWNLOAD_EXTRACTING_INFO,
     DOWNLOAD_GDRIVE_IN_PROGRESS,
     DOWNLOAD_IN_PROGRESS,
+    DOWNLOAD_SOURCE_TRANSIENT,
     DOWNLOAD_TWITTER_RESTRICTED,
 )
 from whisper_ui.web.url_validation import extract_gdrive_file_id, is_google_drive_url, is_twitter_url
@@ -43,6 +45,31 @@ _TWITTER_RESTRICTED_MARKERS = (
     "no suitable extractor",
     "broadcast",
 )
+
+# Substrings (lowercase) that mark a *transient* download failure worth
+# retrying with a fresh yt-dlp client. The headline case is X throttling its
+# anonymous guest-token endpoint ("Bad guest token"): yt-dlp 2026.03.17 fetches
+# a new token on every attempt but does not retry the rejection itself, so a
+# clean retry clears the blip (verified on the 129 production host). HTTP 429
+# and 5xx are likewise server-side and retryable. The HTTP codes are matched in
+# their "http error NNN" form so a tweet/video id that merely contains "503"
+# cannot trip a false positive.
+_RETRYABLE_MARKERS = (
+    "guest token",
+    "http error 429",
+    "http error 500",
+    "http error 502",
+    "http error 503",
+    "http error 504",
+    "service unavailable",
+    "temporarily unavailable",
+)
+
+# A transient failure gets this many total extraction attempts; the backoff is
+# multiplied by the attempt number (2s, then 4s) so X's per-IP guest-token rate
+# limit has a moment to clear without risking the stage's job timeout.
+_MAX_DOWNLOAD_ATTEMPTS = 3
+_RETRY_BACKOFF_SECONDS = 2
 
 
 class DownloadStage:
@@ -192,30 +219,7 @@ class DownloadStage:
         if cookiefile:
             ydl_opts["cookiefile"] = cookiefile
 
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(source_url, download=False)
-                if info is None:
-                    raise DownloadError("Failed to extract video information.")
-
-                duration = info.get("duration") or 0
-                if duration > self._max_duration:
-                    hours = self._max_duration // 3600
-                    raise DownloadError(f"Video duration ({duration}s) exceeds the maximum allowed ({hours}h).")
-
-                info = ydl.extract_info(source_url, download=True)
-                if info is None:
-                    raise DownloadError("Download returned no information.")
-        except DownloadError:
-            raise
-        except BaseTimeoutException:
-            # Let RQ's death penalty propagate so the worker task classifies
-            # it as a timeout instead of a download failure.
-            raise
-        except Exception as e:
-            if "twitter" in allowed_extractors and any(m in str(e).lower() for m in _TWITTER_RESTRICTED_MARKERS):
-                raise DownloadError(DOWNLOAD_TWITTER_RESTRICTED) from e
-            raise DownloadError(f"Failed to download video: {e}") from e
+        info = self._extract_with_retries(yt_dlp, source_url, ydl_opts, allowed_extractors=allowed_extractors)
 
         downloaded_files = list(download_dir.glob("video.*"))
         if not downloaded_files:
@@ -224,6 +228,64 @@ class DownloadStage:
         context["input_path"] = str(downloaded_files[0])
         context["video_title"] = info.get("title", "")
         return context
+
+    def _extract_with_retries(
+        self,
+        yt_dlp_mod: Any,
+        source_url: str,
+        ydl_opts: dict[str, Any],
+        *,
+        allowed_extractors: list[str],
+    ) -> dict[str, Any]:
+        """Extract+download via yt-dlp, retrying only *transient* failures.
+
+        Each attempt uses a fresh ``YoutubeDL`` instance so a rejected guest
+        token (or other server-side blip) is re-fetched cleanly. Login walls,
+        age/NSFW gating and over-length media are not transient and fail fast;
+        RQ timeouts propagate untouched so the worker still classifies them as
+        timeouts rather than download failures.
+        """
+        for attempt in range(1, _MAX_DOWNLOAD_ATTEMPTS + 1):
+            try:
+                return self._extract_once(yt_dlp_mod, source_url, ydl_opts)
+            except DownloadError:
+                raise
+            except BaseTimeoutException:
+                raise
+            except Exception as e:
+                msg = str(e).lower()
+                if "twitter" in allowed_extractors and any(m in msg for m in _TWITTER_RESTRICTED_MARKERS):
+                    raise DownloadError(DOWNLOAD_TWITTER_RESTRICTED) from e
+                if not any(m in msg for m in _RETRYABLE_MARKERS):
+                    raise DownloadError(f"Failed to download video: {e}") from e
+                if attempt >= _MAX_DOWNLOAD_ATTEMPTS:
+                    raise DownloadError(DOWNLOAD_SOURCE_TRANSIENT) from e
+                logger.warning(
+                    "Download attempt %d/%d failed transiently (%s); retrying",
+                    attempt,
+                    _MAX_DOWNLOAD_ATTEMPTS,
+                    e,
+                )
+                time.sleep(_RETRY_BACKOFF_SECONDS * attempt)
+        # Defensive: every loop iteration returns or raises above.
+        raise DownloadError(DOWNLOAD_SOURCE_TRANSIENT)
+
+    def _extract_once(self, yt_dlp_mod: Any, source_url: str, ydl_opts: dict[str, Any]) -> dict[str, Any]:
+        """Run one yt-dlp pass: probe metadata, enforce the duration cap, then download."""
+        with yt_dlp_mod.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(source_url, download=False)
+            if info is None:
+                raise DownloadError("Failed to extract video information.")
+
+            duration = info.get("duration") or 0
+            if duration > self._max_duration:
+                hours = self._max_duration // 3600
+                raise DownloadError(f"Video duration ({duration}s) exceeds the maximum allowed ({hours}h).")
+
+            info = ydl.extract_info(source_url, download=True)
+            if info is None:
+                raise DownloadError("Download returned no information.")
+            return info
 
     def cleanup(self) -> None:
         pass

@@ -9,6 +9,7 @@ DOWNLOAD_IN_PROGRESS = "正在下載音訊..."
 DOWNLOAD_GDRIVE_IN_PROGRESS = "正在從 Google Drive 下載檔案..."
 DOWNLOAD_DONE = "音訊下載完成。"
 DOWNLOAD_TWITTER_RESTRICTED = "無法下載此貼文，可能需要登入、內容受限，或影片為 X 直播/Spaces（目前不支援）。"
+DOWNLOAD_SOURCE_TRANSIENT = "來源暫時無法回應（可能正在限流或維護中），請稍後再試一次。"
 
 # -- Pipeline progress messages --
 PREPROCESS_CONVERTING = "正在將音訊轉換為 16kHz 單聲道 WAV..."

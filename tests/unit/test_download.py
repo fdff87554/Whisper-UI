@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from whisper_ui.core.exceptions import DownloadError
-from whisper_ui.pipeline.download import DownloadStage
+from whisper_ui.pipeline.download import _MAX_DOWNLOAD_ATTEMPTS, DownloadStage
 
 
 class TestDownloadStageNoOp:
@@ -406,9 +406,45 @@ class TestTwitterDownload:
         with patch.dict("sys.modules", {"yt_dlp": mock_module}), pytest.raises(DownloadError, match="無法下載此貼文"):
             DownloadStage().execute(context)
 
-    def test_transient_server_error_stays_generic(self, context, download_dir):
+    def test_transient_guest_token_error_retries_then_succeeds(self, context, download_dir):
+        # X intermittently rejects anonymous guest tokens. The first attempt
+        # fails with "Bad guest token"; a fresh-client retry fetches a new token
+        # and succeeds, so the user never sees the error.
+        calls = {"n": 0}
+
+        def extract_info(url, download=True):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise Exception(
+                    "ERROR: [twitter] 123: Error(s) while querying API: Bad guest token; please report this issue"
+                )
+            info = {"duration": 120, "title": "X Post"}
+            if download:
+                (Path(download_dir) / "video.mp4").write_bytes(b"fake video")
+            return info
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info = extract_info
+        mock_ydl_instance.__enter__ = lambda self: self
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl_instance
+
+        with (
+            patch.dict("sys.modules", {"yt_dlp": mock_module}),
+            patch("whisper_ui.pipeline.download.time.sleep"),
+        ):
+            result = DownloadStage().execute(context)
+
+        assert result["input_path"] == str(download_dir / "video.mp4")
+        # First attempt failed at the metadata probe, second attempt built a
+        # fresh client and completed: two YoutubeDL instances in total.
+        assert mock_module.YoutubeDL.call_count == 2
+
+    def test_transient_error_exhausts_retries_then_raises_transient_message(self, context, download_dir):
         # A retryable HTTP 503 must NOT be reported as "restricted" (which would
-        # wrongly tell the user to export cookies); it keeps the generic path.
+        # wrongly tell the user to export cookies). It is retried with a fresh
+        # client up to the cap, then surfaces the actionable transient hint.
         mock_ydl_instance = MagicMock()
         mock_ydl_instance.extract_info.side_effect = Exception(
             "ERROR: Unable to download API page: HTTP Error 503: Service Unavailable"
@@ -420,9 +456,34 @@ class TestTwitterDownload:
 
         with (
             patch.dict("sys.modules", {"yt_dlp": mock_module}),
-            pytest.raises(DownloadError, match="Failed to download"),
+            patch("whisper_ui.pipeline.download.time.sleep"),
+            pytest.raises(DownloadError, match="來源暫時無法回應"),
         ):
             DownloadStage().execute(context)
+
+        assert mock_module.YoutubeDL.call_count == _MAX_DOWNLOAD_ATTEMPTS
+
+    def test_restricted_error_fails_fast_without_retry(self, context, download_dir):
+        # A login wall is permanent: it must raise on the first attempt, never
+        # burning retry budget on a request that cannot succeed.
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.side_effect = Exception(
+            "Sorry, you are not authorized to view this tweet. Log in."
+        )
+        mock_ydl_instance.__enter__ = lambda self: self
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl_instance
+
+        with (
+            patch.dict("sys.modules", {"yt_dlp": mock_module}),
+            patch("whisper_ui.pipeline.download.time.sleep") as mock_sleep,
+            pytest.raises(DownloadError, match="無法下載此貼文"),
+        ):
+            DownloadStage().execute(context)
+
+        assert mock_module.YoutubeDL.call_count == 1
+        mock_sleep.assert_not_called()
 
     def test_duration_exceeds_limit(self, context, download_dir):
         mock_module = MagicMock()
