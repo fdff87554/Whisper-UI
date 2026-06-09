@@ -22,7 +22,7 @@ from fastapi import APIRouter, Response
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, generate_latest
 from prometheus_client.core import GaugeMetricFamily
 
-from whisper_ui.core.constants import WORKER_QUEUE_CPU, WORKER_QUEUE_GPU, WORKER_QUEUE_IO
+from whisper_ui.core.constants import WORKER_QUEUE_CPU, WORKER_QUEUE_GPU, WORKER_QUEUE_IO, WORKER_QUEUE_LLM
 from whisper_ui.core.models import JobStatus
 
 # DbDep/RedisDep stay runtime imports: FastAPI evaluates these Depends
@@ -42,7 +42,7 @@ router = APIRouter()
 
 # RQ queues to report. "default" is the ad-hoc maintenance queue every worker
 # also subscribes to.
-_QUEUES = (WORKER_QUEUE_GPU, WORKER_QUEUE_IO, WORKER_QUEUE_CPU, "default")
+_QUEUES = (WORKER_QUEUE_GPU, WORKER_QUEUE_IO, WORKER_QUEUE_CPU, WORKER_QUEUE_LLM, "default")
 _STATUSES = tuple(s.value for s in JobStatus)
 
 

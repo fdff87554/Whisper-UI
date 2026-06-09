@@ -7,6 +7,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-06-09
+
+### Added
+
+- Dedicated `whisper:llm` queue for the optional LLM correction stage, plus a
+  `worker-llm` compose service (`llm-worker` profile) and `WORKER_LLM_QUEUES`.
+  The slow LLM stage no longer shares a worker with the fast io/cpu
+  finalisation, so a slow Ollama model can no longer starve `whisper:cpu` from
+  draining. Single-container deployments are unchanged — every worker still
+  drains `whisper:llm` by default.
+- `OLLAMA_THINK` (default `false`) to disable a thinking-capable Ollama model's
+  chain-of-thought. For JSON transcript correction, thinking is markedly slower
+  and (on gemma-class models) degrades the output; off is faster and cleaner.
+
 ## [2.8.0] - 2026-06-08
 
 ### Added

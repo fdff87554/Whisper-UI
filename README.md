@@ -213,11 +213,12 @@ stage) rather than a single monolithic task. Sub-jobs are routed to
 resource-class queues so a long-running IO or network stage never blocks
 a GPU worker from picking up the next job:
 
-| Queue         | Stages                                     |
-| ------------- | ------------------------------------------ |
-| `whisper:gpu` | `transcribe_align`, `diarize`              |
-| `whisper:io`  | `download`, `preprocess`, `llm_correction` |
-| `whisper:cpu` | `assign_speakers`, `postprocess`           |
+| Queue         | Stages                            |
+| ------------- | --------------------------------- |
+| `whisper:gpu` | `transcribe_align`, `diarize`     |
+| `whisper:io`  | `download`, `preprocess`          |
+| `whisper:cpu` | `assign_speakers`, `postprocess`  |
+| `whisper:llm` | `llm_correction` (optional, slow) |
 
 **Single-container (default).** `docker compose --profile gpu up -d` keeps
 the existing behaviour: `worker-gpu` listens to every queue so one
@@ -236,29 +237,37 @@ docker compose --profile gpu --profile io up -d
 ```
 
 `worker-io` is a lightweight CPU container that drains `whisper:io`
-(download / preprocess / llm_correction) in parallel with `worker-gpu`
-running transcribe_align / diarize on the GPU. Two jobs enqueued back to
-back overlap: job B can be downloading while job A is on the GPU, and
-job A can be in llm_correction (hitting an external Ollama server) while
-job B is already transcribing.
+(download / preprocess) in parallel with `worker-gpu` running
+transcribe_align / diarize on the GPU. Two jobs enqueued back to back
+overlap: job B can be downloading while job A is on the GPU.
 
-**AMD / ROCm single-GPU box.** The ROCm worker has a single GPU, so the
-same split applies — keep it on GPU stages only and run a separate CPU
-worker for the rest:
+The optional, slow LLM correction has its own `whisper:llm` queue so it
+cannot starve the fast io/cpu finalisation path. Every worker drains it by
+default; on a host where the LLM is slow, run a dedicated `worker-llm` (the
+`llm-worker` profile) and drop `whisper:llm` from the other workers'
+`WORKER_*_QUEUES` — see the AMD example below.
+
+**AMD / ROCm single-GPU box.** The ROCm worker has a single GPU, so the same
+split applies, plus a dedicated LLM worker so a slow Ollama model never blocks
+the io/cpu path:
 
 ```bash
 # .env
 WORKER_ROCM_QUEUES="whisper:gpu default"
 WORKER_IO_QUEUES="whisper:io whisper:cpu default"
+WORKER_LLM_QUEUES="whisper:llm default"
 
-docker compose --profile rocm --profile io up -d --scale worker-io=2
+docker compose --profile rocm --profile io --profile llm-worker up -d --scale worker-io=2
 ```
 
-`worker-io` uses the CPU image (the io/cpu stages need no GPU), so two
-replicas drain download / preprocess / assign / postprocess / llm while
-the single `worker-rocm` stays dedicated to transcribe_align / diarize. Do
-**not** scale `worker-rocm` past one on a single card — two whisper.cpp /
-pyannote processes would contend for the same VRAM and compute queue.
+`worker-io` (×2) and `worker-llm` use the CPU image (none of these stages need
+the GPU). `worker-io` drains download / preprocess / assign / postprocess;
+`worker-llm` drains the optional LLM correction (HTTP calls to Ollama); the
+single `worker-rocm` stays dedicated to transcribe_align / diarize. Do **not**
+scale `worker-rocm` past one on a single card — two whisper.cpp / pyannote
+processes would contend for the same VRAM and compute queue. Ollama itself
+still shares the GPU with the worker; if that contention hurts transcription,
+point Ollama at CPU or use a smaller model.
 
 **Multi-GPU hosts.** When the DAG fans out transcribe_align and diarize
 as sibling branches they will automatically run in parallel once you

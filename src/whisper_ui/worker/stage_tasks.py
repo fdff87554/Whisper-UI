@@ -474,6 +474,7 @@ def run_llm_correction(parent_job_id: str) -> str:
             chunk_context=settings.llm_chunk_context,
             temperature=settings.llm_temperature,
             request_timeout=float(settings.ollama_request_timeout),
+            think=settings.ollama_think,
         )
 
     return _run_single_stage(

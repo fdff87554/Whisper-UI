@@ -70,15 +70,19 @@ REDIS_FAILED_EXPIRY = 86400  # 24 hours
 PIPELINE_STATE_TTL_SECONDS = 604_800  # 7 days (must outlive max backlog wait)
 
 # Worker queues. Stages are partitioned across these queues by the resource
-# they consume so a long-running IO or network stage (download, llm_correction)
-# never blocks a GPU worker from picking up the next job.
-#   whisper:io  -> network / disk IO (download, preprocess, llm_correction)
+# they consume so a long-running stage never blocks an unrelated worker from
+# picking up the next job.
+#   whisper:io  -> network / disk IO (download, preprocess)
 #   whisper:gpu -> GPU inference (transcribe_align, diarize)
 #   whisper:cpu -> lightweight CPU finalisation (assign_speakers, postprocess)
+#   whisper:llm -> optional Ollama LLM correction. Kept separate from whisper:io
+#                  so a slow LLM call cannot starve the fast io/cpu finalisation
+#                  path (a worker serving io+cpu would otherwise block on it).
 # The default queue stays listed because worker startup scripts include it in
 # their queue list so an operator can drop ad-hoc maintenance jobs on every
 # worker without learning the resource-class names.
 WORKER_QUEUE_IO = "whisper:io"
 WORKER_QUEUE_GPU = "whisper:gpu"
 WORKER_QUEUE_CPU = "whisper:cpu"
+WORKER_QUEUE_LLM = "whisper:llm"
 WORKER_QUEUE_DEFAULT = "default"

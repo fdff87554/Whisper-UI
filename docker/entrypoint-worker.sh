@@ -20,7 +20,7 @@ echo "Device: ${DEVICE:-auto}, Compute type: ${COMPUTE_TYPE:-int8_float16}"
 MODEL_DIR="${HF_HOME:-/cache/huggingface}"
 echo "Model cache directory: ${MODEL_DIR}"
 
-WORKER_QUEUES="${WORKER_QUEUES:-whisper:gpu whisper:io whisper:cpu default}"
+WORKER_QUEUES="${WORKER_QUEUES:-whisper:gpu whisper:io whisper:cpu whisper:llm default}"
 
 # CUDA cannot be re-initialised in a forked subprocess. When the device is
 # set to cuda, use SimpleWorker which runs jobs in the main process instead

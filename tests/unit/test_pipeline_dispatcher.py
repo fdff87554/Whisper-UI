@@ -10,6 +10,7 @@ from whisper_ui.core.constants import (
     WORKER_QUEUE_CPU,
     WORKER_QUEUE_GPU,
     WORKER_QUEUE_IO,
+    WORKER_QUEUE_LLM,
 )
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.worker.context_store import PipelineContextStore
@@ -337,7 +338,7 @@ def test_subjobs_are_routed_to_resource_specific_queues(tmp_path):
     expected = {
         "run_download": WORKER_QUEUE_IO,
         "run_preprocess": WORKER_QUEUE_IO,
-        "run_llm_correction": WORKER_QUEUE_IO,
+        "run_llm_correction": WORKER_QUEUE_LLM,
         "run_transcribe_align": WORKER_QUEUE_GPU,
         "run_diarize": WORKER_QUEUE_GPU,
         "run_assign_speakers": WORKER_QUEUE_CPU,

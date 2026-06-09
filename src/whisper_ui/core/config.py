@@ -143,6 +143,12 @@ class Settings(BaseSettings):
     llm_chunk_size: int = 8
     llm_chunk_context: int = 2
     llm_temperature: float = 0.1
+    # Whether to let a thinking-capable Ollama model emit chain-of-thought
+    # before its answer. Default false: for JSON transcript correction,
+    # thinking is markedly slower and (measured on gemma-class models)
+    # degrades the corrected output. Set true only if a reasoning model is
+    # shown to benefit.
+    ollama_think: bool = False
 
     @field_validator("transcribe_backend")
     @classmethod

@@ -30,6 +30,7 @@ from whisper_ui.core.constants import (
     WORKER_QUEUE_CPU,
     WORKER_QUEUE_GPU,
     WORKER_QUEUE_IO,
+    WORKER_QUEUE_LLM,
 )
 from whisper_ui.core.models import JobStatus
 from whisper_ui.pipeline.align import AlignStage
@@ -228,7 +229,8 @@ def _drain_queues(fake_redis: Any) -> None:
     from rq import Queue, SimpleWorker
 
     queues = {
-        name: Queue(name=name, connection=fake_redis) for name in (WORKER_QUEUE_IO, WORKER_QUEUE_GPU, WORKER_QUEUE_CPU)
+        name: Queue(name=name, connection=fake_redis)
+        for name in (WORKER_QUEUE_IO, WORKER_QUEUE_GPU, WORKER_QUEUE_CPU, WORKER_QUEUE_LLM)
     }
     for _ in range(50):
         progressed = False

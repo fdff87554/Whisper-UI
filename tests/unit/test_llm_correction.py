@@ -22,6 +22,7 @@ class RecordedCall:
     user: str
     temperature: float
     keep_alive: str
+    think: bool
 
 
 @dataclass
@@ -40,9 +41,12 @@ class FakeOllamaClient:
         user: str,
         temperature: float,
         keep_alive: str,
+        think: bool,
     ) -> str:
         self.calls.append(
-            RecordedCall(model=model, system=system, user=user, temperature=temperature, keep_alive=keep_alive)
+            RecordedCall(
+                model=model, system=system, user=user, temperature=temperature, keep_alive=keep_alive, think=think
+            )
         )
         if not self.responses:
             return '{"segments": []}'
@@ -342,7 +346,40 @@ def test_request_parameters_passed_through():
     assert call.temperature == 0.1
     assert call.keep_alive == "1h"
     assert call.model == "gemma4:e2b"
+    assert call.think is False  # default: thinking off for JSON correction
     assert "中文轉錄校對助理" in call.system
+
+
+def test_think_flag_propagates_to_client():
+    stage, client = _make_stage(chunk_size=10, chunk_context=0, think=True)
+    transcript = _make_transcript(["甲"])
+    client.responses = [_valid_response_for([0], ["改"])]
+
+    stage.execute({"transcript_result": transcript, "language": "zh"})
+
+    assert client.calls[0].think is True
+
+
+def test_httpx_client_puts_think_at_payload_top_level():
+    import json
+
+    import httpx
+
+    from whisper_ui.pipeline.llm_correction import HttpxOllamaClient
+
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"message": {"content": '{"segments": {}}'}})
+
+    client = HttpxOllamaClient(base_url="http://ollama:11434", timeout=5.0)
+    client._client = httpx.Client(base_url="http://ollama:11434", transport=httpx.MockTransport(handler))
+
+    client.chat_json(model="m", system="s", user="u", temperature=0.1, keep_alive="30m", think=False)
+
+    assert captured["body"]["think"] is False  # top-level
+    assert "think" not in captured["body"]["options"]  # not nested under options
 
 
 def test_aligned_result_not_touched():
