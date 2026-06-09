@@ -76,8 +76,9 @@ PIPELINE_STATE_TTL_SECONDS = 604_800  # 7 days (must outlive max backlog wait)
 #   whisper:gpu -> GPU inference (transcribe_align, diarize)
 #   whisper:cpu -> lightweight CPU finalisation (assign_speakers, postprocess)
 #   whisper:llm -> optional Ollama LLM correction. Kept separate from whisper:io
-#                  so a slow LLM call cannot starve the fast io/cpu finalisation
-#                  path (a worker serving io+cpu would otherwise block on it).
+#                  so a worker bound to only io+cpu does not pick up (and block
+#                  on) a slow LLM; bind whisper:llm to a dedicated worker to
+#                  isolate it from the fast io/cpu path.
 # The default queue stays listed because worker startup scripts include it in
 # their queue list so an operator can drop ad-hoc maintenance jobs on every
 # worker without learning the resource-class names.

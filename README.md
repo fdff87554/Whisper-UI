@@ -210,8 +210,8 @@ $remote_addr;` (overrides any client-sent header).
 
 Each upload is dispatched as an RQ **DAG of sub-jobs** (one per pipeline
 stage) rather than a single monolithic task. Sub-jobs are routed to
-resource-class queues so a long-running IO or network stage never blocks
-a GPU worker from picking up the next job:
+resource-class queues so that, in a scaled topology (below), a long-running
+IO or network stage need not block a GPU worker from picking up the next job:
 
 | Queue         | Stages                            |
 | ------------- | --------------------------------- |
@@ -243,11 +243,12 @@ back to back overlap: job B can be downloading while job A is on the GPU.
 (Keeping `whisper:llm` here means the io worker also runs LLM correction; to
 isolate a slow LLM onto its own worker, see the AMD example below.)
 
-The optional, slow LLM correction has its own `whisper:llm` queue so it
-cannot starve the fast io/cpu finalisation path. Every worker drains it by
-default; on a host where the LLM is slow, run a dedicated `worker-llm` (the
-`llm-worker` profile) and drop `whisper:llm` from the other workers'
-`WORKER_*_QUEUES` — see the AMD example below.
+The optional, slow LLM correction has its own `whisper:llm` queue, so a
+dedicated `worker-llm` (the `llm-worker` profile) can run it without blocking
+the fast io/cpu finalisation path. Every worker drains `whisper:llm` by
+default, so by default a slow LLM still shares a worker with io/cpu; the
+isolation is opt-in — run `worker-llm` and drop `whisper:llm` from the other
+workers' `WORKER_*_QUEUES` (see the AMD example below).
 
 **AMD / ROCm single-GPU box.** The ROCm worker has a single GPU, so the same
 split applies, plus a dedicated LLM worker so a slow Ollama model never blocks

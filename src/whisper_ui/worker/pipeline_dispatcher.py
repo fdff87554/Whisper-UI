@@ -60,8 +60,9 @@ from whisper_ui.worker.timeout import calculate_job_timeout
 # Stage function → queue name. IO stages (download, preprocess) go to a queue
 # serviced by workers that do not hold a CUDA context; GPU stages go to the GPU
 # queue; lightweight CPU finalisation stages go to the CPU queue; the optional,
-# slow LLM correction goes to its own queue so it never starves the io/cpu
-# finalisation path. See whisper_ui.core.constants for the rationale.
+# slow LLM correction goes to its own queue so it can be isolated onto a
+# dedicated worker, keeping a slow LLM off the io/cpu finalisation path. See
+# whisper_ui.core.constants for the rationale.
 _STAGE_QUEUES = {
     run_download.__name__: WORKER_QUEUE_IO,
     run_preprocess.__name__: WORKER_QUEUE_IO,
