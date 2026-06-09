@@ -36,6 +36,7 @@ from whisper_ui.pipeline.progress_bands import (
 )
 from whisper_ui.pipeline.transcribe import TranscribeStage
 from whisper_ui.pipeline.whispercpp_transcribe import WhisperCppTranscribeStage
+from whisper_ui.web.url_validation import is_twitter_url
 from whisper_ui.worker.context_store import PipelineContextStore
 from whisper_ui.worker.runtime import (
     WorkerRuntime,
@@ -352,7 +353,12 @@ def run_download(parent_job_id: str) -> str:
         parent_job_id,
         stage_name="download",
         build_stage=lambda job, runtime: DownloadStage(
-            max_duration=runtime.settings.youtube_max_duration,
+            max_duration=(
+                runtime.settings.twitter_max_duration
+                if is_twitter_url(job.source_url or "")
+                else runtime.settings.youtube_max_duration
+            ),
+            twitter_cookies_file=runtime.settings.twitter_cookies_file,
         ),
         output_keys=("input_path", "video_title"),
         pre_context_update=_seed_download_context,
