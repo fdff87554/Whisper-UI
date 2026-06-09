@@ -105,6 +105,15 @@ class Settings(BaseSettings):
     # YouTube
     youtube_max_duration: int = 14400  # seconds (4 hours)
 
+    # Twitter / X
+    # Reject X posts whose attached video is longer than this many seconds.
+    twitter_max_duration: int = 14400  # seconds (4 hours), mirrors YouTube
+    # Optional Netscape-format cookies file (exported from a logged-in browser)
+    # mounted into the io worker. When set AND the file exists, it is passed to
+    # yt-dlp as cookiefile so login-walled / age-restricted X posts can be
+    # fetched. Unset or missing file => anonymous attempt for public posts.
+    twitter_cookies_file: str | None = None
+
     # Queue / job timeouts (seconds)
     # Fallback when audio duration is unknown (e.g., YouTube URL before download).
     job_timeout_default: int = 7200  # 2h
