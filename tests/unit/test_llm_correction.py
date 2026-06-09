@@ -374,9 +374,13 @@ def test_httpx_client_puts_think_at_payload_top_level():
         return httpx.Response(200, json={"message": {"content": '{"segments": {}}'}})
 
     client = HttpxOllamaClient(base_url="http://ollama:11434", timeout=5.0)
+    client._client.close()  # discard the real client created by __init__
     client._client = httpx.Client(base_url="http://ollama:11434", transport=httpx.MockTransport(handler))
 
-    client.chat_json(model="m", system="s", user="u", temperature=0.1, keep_alive="30m", think=False)
+    try:
+        client.chat_json(model="m", system="s", user="u", temperature=0.1, keep_alive="30m", think=False)
+    finally:
+        client.close()  # close the mock-backed client
 
     assert captured["body"]["think"] is False  # top-level
     assert "think" not in captured["body"]["options"]  # not nested under options

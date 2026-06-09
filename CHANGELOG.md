@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   chain-of-thought. For JSON transcript correction, thinking is markedly slower
   and (on gemma-class models) degrades the output; off is faster and cleaner.
 
+### Migration
+
+- **Scaled topologies with LLM correction:** because `llm_correction` moved off
+  `whisper:io` to its own `whisper:llm` queue, a deployment that explicitly
+  narrows `WORKER_*_QUEUES` and has `OLLAMA_BASE_URL` set must ensure some worker
+  listens on `whisper:llm` — add it to a worker's queue list (e.g.
+  `WORKER_IO_QUEUES="whisper:io whisper:cpu whisper:llm default"`) or run a
+  dedicated `worker-llm` (`--profile llm-worker`). Otherwise an LLM-enabled job's
+  final stage strands with no consumer. Default and single-container deployments
+  are unaffected (every worker drains `whisper:llm` by default).
+
 ## [2.8.0] - 2026-06-08
 
 ### Added

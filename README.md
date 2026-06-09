@@ -231,15 +231,17 @@ add the `io` profile and narrow the GPU worker's queue set:
 ```bash
 # .env
 WORKER_GPU_QUEUES="whisper:gpu default"
-WORKER_IO_QUEUES="whisper:io whisper:cpu default"
+WORKER_IO_QUEUES="whisper:io whisper:cpu whisper:llm default"
 
 docker compose --profile gpu --profile io up -d
 ```
 
 `worker-io` is a lightweight CPU container that drains `whisper:io`
-(download / preprocess) in parallel with `worker-gpu` running
-transcribe_align / diarize on the GPU. Two jobs enqueued back to back
-overlap: job B can be downloading while job A is on the GPU.
+(download / preprocess), `whisper:cpu`, and `whisper:llm` in parallel with
+`worker-gpu` running transcribe_align / diarize on the GPU. Two jobs enqueued
+back to back overlap: job B can be downloading while job A is on the GPU.
+(Keeping `whisper:llm` here means the io worker also runs LLM correction; to
+isolate a slow LLM onto its own worker, see the AMD example below.)
 
 The optional, slow LLM correction has its own `whisper:llm` queue so it
 cannot starve the fast io/cpu finalisation path. Every worker drains it by
@@ -396,15 +398,16 @@ server, or split Whisper and Ollama onto separate GPUs as above.
 
 **Tuning (all optional):**
 
-| Variable                 | Default      | Description                                                                            |
-| ------------------------ | ------------ | -------------------------------------------------------------------------------------- |
-| `OLLAMA_BASE_URL`        | (empty)      | Empty disables the feature globally. Set to reach a bundled or external Ollama server. |
-| `OLLAMA_MODEL`           | `gemma4:e4b` | Any Ollama-compatible chat model. Bigger = better accuracy, more VRAM (see note).      |
-| `OLLAMA_KEEP_ALIVE`      | `30m`        | How long Ollama keeps the model loaded in VRAM between requests.                       |
-| `OLLAMA_REQUEST_TIMEOUT` | `120`        | Per-request timeout in seconds.                                                        |
-| `LLM_CHUNK_SIZE`         | `8`          | Segments corrected per Ollama request. Larger reduces HTTP overhead.                   |
-| `LLM_CHUNK_CONTEXT`      | `2`          | Neighbor segments attached as read-only context for disambiguation.                    |
-| `LLM_TEMPERATURE`        | `0.1`        | Sampling temperature. Low values keep corrections deterministic.                       |
+| Variable                 | Default      | Description                                                                                                                                                      |
+| ------------------------ | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OLLAMA_BASE_URL`        | (empty)      | Empty disables the feature globally. Set to reach a bundled or external Ollama server.                                                                           |
+| `OLLAMA_MODEL`           | `gemma4:e4b` | Any Ollama-compatible chat model. Bigger = better accuracy, more VRAM (see note).                                                                                |
+| `OLLAMA_KEEP_ALIVE`      | `30m`        | How long Ollama keeps the model loaded in VRAM between requests.                                                                                                 |
+| `OLLAMA_REQUEST_TIMEOUT` | `120`        | Per-request timeout in seconds.                                                                                                                                  |
+| `LLM_CHUNK_SIZE`         | `8`          | Segments corrected per Ollama request. Larger reduces HTTP overhead.                                                                                             |
+| `LLM_CHUNK_CONTEXT`      | `2`          | Neighbor segments attached as read-only context for disambiguation.                                                                                              |
+| `LLM_TEMPERATURE`        | `0.1`        | Sampling temperature. Low values keep corrections deterministic.                                                                                                 |
+| `OLLAMA_THINK`           | `false`      | Let a thinking-capable model reason before answering. Off is faster and gives cleaner JSON for correction; set `true` only for a reasoning model proven to help. |
 
 ### Optional upload retention
 
