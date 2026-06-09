@@ -191,6 +191,9 @@ class TestValidTwitterURLs:
             "https://x.com/i/status/1879891361333190778"
         )
 
+    def test_handle_named_status_resolves_real_id(self):
+        assert validate_twitter_url("https://x.com/status/status/20") == "https://x.com/i/status/20"
+
 
 class TestInvalidTwitterURLs:
     @pytest.mark.parametrize(

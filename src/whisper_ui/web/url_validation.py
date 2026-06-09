@@ -31,8 +31,9 @@ _GDRIVE_FILE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{10,}$")
 
 _TWITTER_HOSTS = {"x.com", "www.x.com", "twitter.com", "www.twitter.com", "mobile.twitter.com"}
 # Numeric snowflake post id (currently ~19 digits); upper bound stays generous
-# while still rejecting any non-numeric segment.
-_TWEET_ID_RE = re.compile(r"^\d{1,25}$")
+# while still rejecting any non-numeric segment. ASCII-only ([0-9], not \d) so
+# unicode digits cannot slip into the canonical URL.
+_TWEET_ID_RE = re.compile(r"^[0-9]{1,25}$")
 
 
 def _parse_with_scheme(url: str):
@@ -197,9 +198,11 @@ def validate_twitter_url(url: str) -> str:
 def _extract_tweet_id(path: str) -> str | None:
     """Extract the numeric post ID from /{user}/status/{id} or /i/status/{id}."""
     parts = [p for p in path.split("/") if p]
-    # The id is the segment following a 'status' (legacy: 'statuses') segment.
+    # The id is the numeric segment following a 'status' (legacy: 'statuses')
+    # segment. Require the next segment to be numeric so a handle literally
+    # named "status" (e.g. /status/status/20) does not shadow the real id.
     for i, seg in enumerate(parts):
-        if seg in ("status", "statuses") and i + 1 < len(parts):
+        if seg in ("status", "statuses") and i + 1 < len(parts) and parts[i + 1].isdigit():
             return parts[i + 1]
     return None
 
