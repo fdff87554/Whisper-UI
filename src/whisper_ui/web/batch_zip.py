@@ -17,10 +17,10 @@ def _zip_entry_base(job: Job) -> str:
 
     For uploaded media we keep the user's filename (already basename-
     sanitised at upload time) so the ZIP is self-describing. For URL
-    jobs the canonical YouTube URL is stored as ``job.filename`` and
-    would produce entries like ``watch?v=abc.srt`` — the ``?`` and
-    ``=`` confuse Windows ZIP tools — so we fall back to the job id,
-    which is the same identifier the viewer URL uses.
+    jobs the canonical source URL is stored as ``job.filename`` and can
+    contain characters like ``?`` and ``=`` (e.g. a YouTube
+    ``watch?v=abc`` URL) that confuse Windows ZIP tools — so we fall back
+    to the job id, which is the same identifier the viewer URL uses.
     """
     if job.source_url:
         return job.id

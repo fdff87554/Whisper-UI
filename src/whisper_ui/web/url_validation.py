@@ -1,4 +1,4 @@
-"""URL validation and cleaning for YouTube and Google Drive (regex-only, no external dependencies)."""
+"""URL validation and cleaning for YouTube, Google Drive, and Twitter/X (regex-only, no external dependencies)."""
 
 from __future__ import annotations
 
@@ -18,12 +18,31 @@ class GoogleDriveURLError(ValueError):
     pass
 
 
+class TwitterURLError(ValueError):
+    pass
+
+
 _YOUTUBE_HOSTS = {"www.youtube.com", "youtube.com", "m.youtube.com", "youtu.be", "www.youtu.be"}
 
 _VIDEO_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
 
 _GDRIVE_HOSTS = {"drive.google.com", "docs.google.com"}
 _GDRIVE_FILE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{10,}$")
+
+_TWITTER_HOSTS = {
+    "x.com",
+    "www.x.com",
+    "m.x.com",
+    "mobile.x.com",
+    "twitter.com",
+    "www.twitter.com",
+    "m.twitter.com",
+    "mobile.twitter.com",
+}
+# Numeric snowflake post id (currently ~19 digits); upper bound stays generous
+# while still rejecting any non-numeric segment. ASCII-only ([0-9], not \d) so
+# unicode digits cannot slip into the canonical URL.
+_TWEET_ID_RE = re.compile(r"^[0-9]{1,25}$")
 
 
 def _parse_with_scheme(url: str):
@@ -149,11 +168,69 @@ def extract_gdrive_file_id(path: str, qs: dict[str, list[str]]) -> str | None:
     return None
 
 
+def validate_twitter_url(url: str) -> str:
+    """Validate a Twitter/X status URL and return a canonical URL.
+
+    Accepts a link to a single post, e.g.:
+      - https://x.com/{user}/status/{id}
+      - https://twitter.com/{user}/status/{id}
+      - https://mobile.twitter.com/{user}/status/{id}
+      - https://x.com/i/status/{id}
+
+    Raises TwitterURLError for non-post URLs (profiles, threads, Spaces).
+    Returns a canonical URL: https://x.com/i/status/{id} (handle and any
+    tracking query params such as ?s=20 are dropped).
+    """
+    url = url.strip()
+    if not url:
+        raise TwitterURLError("URL is empty.")
+
+    parsed = _parse_with_scheme(url)
+
+    if parsed.scheme not in ("http", "https"):
+        raise TwitterURLError("Invalid URL scheme.")
+
+    host = parsed.hostname or ""
+    if host not in _TWITTER_HOSTS:
+        raise TwitterURLError("Not a Twitter/X URL.")
+
+    tweet_id = _extract_tweet_id(parsed.path)
+    if not tweet_id or not _TWEET_ID_RE.match(tweet_id):
+        raise TwitterURLError(
+            "Could not extract a post ID. Provide a link to a single post "
+            "(e.g. https://x.com/user/status/123...), not a profile or Space."
+        )
+
+    return urlunparse(("https", "x.com", f"/i/status/{tweet_id}", "", "", ""))
+
+
+def _extract_tweet_id(path: str) -> str | None:
+    """Extract the numeric post ID from /{user}/status/{id} or /i/status/{id}."""
+    parts = [p for p in path.split("/") if p]
+    # The id is the numeric segment following a 'status' (legacy: 'statuses')
+    # segment. Require the next segment to be numeric so a handle literally
+    # named "status" (e.g. /status/status/20) does not shadow the real id.
+    for i, seg in enumerate(parts):
+        if seg in ("status", "statuses") and i + 1 < len(parts) and parts[i + 1].isdigit():
+            return parts[i + 1]
+    return None
+
+
 def is_google_drive_url(url: str) -> bool:
     """Quick check whether a URL looks like a Google Drive link."""
     try:
         parsed = _parse_with_scheme(url.strip())
         host = parsed.hostname or ""
         return host in _GDRIVE_HOSTS
+    except Exception:
+        return False
+
+
+def is_twitter_url(url: str) -> bool:
+    """Quick check whether a URL looks like a Twitter/X link."""
+    try:
+        parsed = _parse_with_scheme(url.strip())
+        host = parsed.hostname or ""
+        return host in _TWITTER_HOSTS
     except Exception:
         return False

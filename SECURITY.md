@@ -45,9 +45,13 @@ deployment:
 - **Upload hardening**: filenames stripped to basename, sizes capped via
   streamed reads, allowed extensions enumerated, output paths derived from
   job IDs (`web/routes/upload.py`, `storage/filestore.py`).
-- **URL ingest whitelist**: only YouTube URLs from a fixed host set are
-  accepted; the URL is rebuilt from the extracted video ID before being
-  passed to yt-dlp (`web/url_validation.py`).
+- **URL ingest whitelist**: link downloads accept only YouTube, Google Drive,
+  and Twitter/X URLs from fixed host sets; each URL is canonicalised from the
+  extracted ID before download (`web/url_validation.py`). The YouTube and
+  Twitter/X paths additionally pin yt-dlp's `allowed_extractors`, so a crafted
+  link can never fall back to the generic extractor and reach an arbitrary
+  (e.g. internal) host (`pipeline/download.py`). Optional X login cookies are an
+  operator-mounted file, never user input, so they do not widen this surface.
 - **Template autoescape**: enabled (FastAPI / Jinja2 default).
 - **Error surface**: unhandled exceptions return a generic 500; tracebacks
   go to the operator log only (`web/app.py`).

@@ -122,6 +122,22 @@ class TestDownloadStageWithMock:
             with pytest.raises(DownloadError, match="Failed to download"):
                 stage.execute(context)
 
+    def test_youtube_error_with_marker_word_stays_generic(self, context, download_dir):
+        # The restricted-marker classification must never run on the youtube
+        # path: a youtube "Private video" error keeps the generic message.
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.side_effect = Exception("ERROR: Private video. Sign in to view.")
+        mock_ydl_instance.__enter__ = lambda self: self
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl_instance
+
+        with (
+            patch.dict("sys.modules", {"yt_dlp": mock_module}),
+            pytest.raises(DownloadError, match="Failed to download"),
+        ):
+            DownloadStage().execute(context)
+
     def test_restricts_yt_dlp_to_youtube_extractor(self, context, download_dir):
         mock_ydl = self._make_mock_ydl(download_dir)
         mock_module = MagicMock()
@@ -278,3 +294,142 @@ class TestGoogleDriveDownload:
             with pytest.raises(DownloadError, match="is not a supported audio or video format"):
                 stage.execute(context)
         assert not (download_dir / "document.txt").exists()
+
+
+class TestTwitterDownload:
+    @pytest.fixture
+    def download_dir(self, tmp_path: Path) -> Path:
+        d = tmp_path / "downloads"
+        d.mkdir()
+        return d
+
+    @pytest.fixture
+    def context(self, download_dir: Path) -> dict[str, Any]:
+        return {
+            "source_url": "https://x.com/i/status/2052048266687332852",
+            "download_dir": str(download_dir),
+            "input_path": "",
+        }
+
+    def _make_mock_ydl(self, download_dir: Path, duration: int = 120, title: str = "X Post"):
+        mock_ydl_instance = MagicMock()
+
+        def extract_info(url, download=True):
+            info = {"duration": duration, "title": title}
+            if download:
+                (Path(download_dir) / "video.mp4").write_bytes(b"fake video")
+            return info
+
+        mock_ydl_instance.extract_info = extract_info
+        mock_ydl_instance.__enter__ = lambda self: self
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+        return mock_ydl_instance
+
+    def test_successful_twitter_download(self, context, download_dir):
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = self._make_mock_ydl(download_dir)
+
+        with patch.dict("sys.modules", {"yt_dlp": mock_module}):
+            result = DownloadStage().execute(context)
+
+        assert result["input_path"] == str(download_dir / "video.mp4")
+        assert result["video_title"] == "X Post"
+
+    def test_restricts_yt_dlp_to_twitter_extractor(self, context, download_dir):
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = self._make_mock_ydl(download_dir)
+
+        with patch.dict("sys.modules", {"yt_dlp": mock_module}):
+            DownloadStage().execute(context)
+
+        ydl_opts = mock_module.YoutubeDL.call_args.args[0]
+        assert ydl_opts["allowed_extractors"] == ["twitter"]
+
+    def test_cookiefile_passed_when_file_exists(self, context, download_dir, tmp_path):
+        cookies = tmp_path / "cookies.txt"
+        cookies.write_text("# Netscape HTTP Cookie File\n")
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = self._make_mock_ydl(download_dir)
+
+        with patch.dict("sys.modules", {"yt_dlp": mock_module}):
+            DownloadStage(twitter_cookies_file=str(cookies)).execute(context)
+
+        ydl_opts = mock_module.YoutubeDL.call_args.args[0]
+        assert ydl_opts["cookiefile"] == str(cookies)
+
+    def test_cookiefile_omitted_when_unset(self, context, download_dir):
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = self._make_mock_ydl(download_dir)
+
+        with patch.dict("sys.modules", {"yt_dlp": mock_module}):
+            DownloadStage().execute(context)
+
+        ydl_opts = mock_module.YoutubeDL.call_args.args[0]
+        assert "cookiefile" not in ydl_opts
+
+    def test_cookiefile_omitted_when_file_missing(self, context, download_dir):
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = self._make_mock_ydl(download_dir)
+
+        with patch.dict("sys.modules", {"yt_dlp": mock_module}):
+            DownloadStage(twitter_cookies_file="/nonexistent/cookies.txt").execute(context)
+
+        ydl_opts = mock_module.YoutubeDL.call_args.args[0]
+        assert "cookiefile" not in ydl_opts
+
+    def test_restricted_post_raises_actionable_error(self, context, download_dir):
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.side_effect = Exception(
+            "Sorry, you are not authorized to view this tweet. Log in."
+        )
+        mock_ydl_instance.__enter__ = lambda self: self
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl_instance
+
+        with patch.dict("sys.modules", {"yt_dlp": mock_module}), pytest.raises(DownloadError, match="無法下載此貼文"):
+            DownloadStage().execute(context)
+
+    def test_broadcast_extractor_block_raises_actionable_error(self, context, download_dir):
+        # A /status/ tweet whose video is an X Broadcast: the ["twitter"] pin
+        # blocks the twitter:broadcast re-extraction. yt-dlp 2026.03.17 reports
+        # this as "No suitable extractor (TwitterBroadcast) found".
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.side_effect = Exception(
+            "ERROR: No suitable extractor (TwitterBroadcast) found for URL https://twitter.com/i/broadcasts/1abc"
+        )
+        mock_ydl_instance.__enter__ = lambda self: self
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl_instance
+
+        with patch.dict("sys.modules", {"yt_dlp": mock_module}), pytest.raises(DownloadError, match="無法下載此貼文"):
+            DownloadStage().execute(context)
+
+    def test_transient_server_error_stays_generic(self, context, download_dir):
+        # A retryable HTTP 503 must NOT be reported as "restricted" (which would
+        # wrongly tell the user to export cookies); it keeps the generic path.
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.side_effect = Exception(
+            "ERROR: Unable to download API page: HTTP Error 503: Service Unavailable"
+        )
+        mock_ydl_instance.__enter__ = lambda self: self
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl_instance
+
+        with (
+            patch.dict("sys.modules", {"yt_dlp": mock_module}),
+            pytest.raises(DownloadError, match="Failed to download"),
+        ):
+            DownloadStage().execute(context)
+
+    def test_duration_exceeds_limit(self, context, download_dir):
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = self._make_mock_ydl(download_dir, duration=50000)
+
+        with (
+            patch.dict("sys.modules", {"yt_dlp": mock_module}),
+            pytest.raises(DownloadError, match="exceeds the maximum"),
+        ):
+            DownloadStage(max_duration=3600).execute(context)
