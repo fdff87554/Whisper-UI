@@ -25,7 +25,10 @@ logger = logging.getLogger(__name__)
 
 # Substrings (lowercase) that mark an X download failure the user can act on:
 # login walls, age/NSFW gating, protected accounts, or media that needs a
-# different (unsupported) extractor such as Broadcasts / Spaces.
+# different (unsupported) extractor such as Broadcasts / Spaces. The
+# "no suitable extractor" / "broadcast" markers fire when the ["twitter"] pin
+# blocks yt-dlp from re-extracting into a twitter:broadcast / twitter:spaces
+# sub-extractor (verified against yt-dlp 2026.03.17 on a real Broadcast tweet).
 _TWITTER_RESTRICTED_MARKERS = (
     "log in",
     "login",
@@ -35,6 +38,8 @@ _TWITTER_RESTRICTED_MARKERS = (
     "unavailable",
     "private",
     "unsupported url",
+    "no suitable extractor",
+    "broadcast",
 )
 
 

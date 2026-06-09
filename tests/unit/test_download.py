@@ -374,6 +374,22 @@ class TestTwitterDownload:
         with patch.dict("sys.modules", {"yt_dlp": mock_module}), pytest.raises(DownloadError, match="無法下載此貼文"):
             DownloadStage().execute(context)
 
+    def test_broadcast_extractor_block_raises_actionable_error(self, context, download_dir):
+        # A /status/ tweet whose video is an X Broadcast: the ["twitter"] pin
+        # blocks the twitter:broadcast re-extraction. yt-dlp 2026.03.17 reports
+        # this as "No suitable extractor (TwitterBroadcast) found".
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.side_effect = Exception(
+            "ERROR: No suitable extractor (TwitterBroadcast) found for URL https://twitter.com/i/broadcasts/1abc"
+        )
+        mock_ydl_instance.__enter__ = lambda self: self
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl_instance
+
+        with patch.dict("sys.modules", {"yt_dlp": mock_module}), pytest.raises(DownloadError, match="無法下載此貼文"):
+            DownloadStage().execute(context)
+
     def test_duration_exceeds_limit(self, context, download_dir):
         mock_module = MagicMock()
         mock_module.YoutubeDL.return_value = self._make_mock_ydl(download_dir, duration=50000)
