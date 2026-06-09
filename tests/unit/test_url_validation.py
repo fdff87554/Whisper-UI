@@ -5,9 +5,12 @@ import pytest
 from whisper_ui.web.url_validation import (
     GoogleDriveURLError,
     PlaylistURLError,
+    TwitterURLError,
     YouTubeURLError,
     is_google_drive_url,
+    is_twitter_url,
     validate_google_drive_url,
+    validate_twitter_url,
     validate_youtube_url,
 )
 
@@ -154,3 +157,76 @@ class TestIsGoogleDriveURL:
 
     def test_empty_string(self):
         assert is_google_drive_url("") is False
+
+
+class TestValidTwitterURLs:
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://x.com/jack/status/20",
+            "https://www.x.com/jack/status/20",
+            "https://twitter.com/jack/status/20",
+            "https://www.twitter.com/jack/status/20",
+            "https://mobile.twitter.com/jack/status/20",
+            "https://x.com/i/status/20",
+            "http://x.com/jack/status/20",
+            "www.x.com/jack/status/20",
+        ],
+    )
+    def test_valid_urls_canonicalize_to_i_status(self, url):
+        assert validate_twitter_url(url) == "https://x.com/i/status/20"
+
+    def test_strips_whitespace(self):
+        assert validate_twitter_url("  https://x.com/jack/status/20  ") == "https://x.com/i/status/20"
+
+    def test_drops_handle_and_tracking_params(self):
+        assert validate_twitter_url("https://x.com/jack/status/20?s=20&t=abc") == "https://x.com/i/status/20"
+
+    def test_preserves_long_numeric_id(self):
+        result = validate_twitter_url("https://x.com/SpaceX/status/2057292990532481513")
+        assert result == "https://x.com/i/status/2057292990532481513"
+
+    def test_extracts_id_from_video_subpath(self):
+        assert validate_twitter_url("https://x.com/A24/status/1879891361333190778/video/1") == (
+            "https://x.com/i/status/1879891361333190778"
+        )
+
+
+class TestInvalidTwitterURLs:
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "",
+            "not a url",
+            "https://example.com/jack/status/20",
+            "https://x.com/jack",
+            "https://x.com/jack/status/",
+            "https://x.com/jack/status/abc",
+            "https://x.com/home",
+            "https://x.com/i/spaces/1nAJELXabcEKL",
+            "ftp://x.com/jack/status/20",
+        ],
+    )
+    def test_invalid_urls_raise(self, url):
+        with pytest.raises(TwitterURLError):
+            validate_twitter_url(url)
+
+
+class TestIsTwitterURL:
+    def test_x_url(self):
+        assert is_twitter_url("https://x.com/jack/status/20") is True
+
+    def test_twitter_com_url(self):
+        assert is_twitter_url("https://twitter.com/jack/status/20") is True
+
+    def test_mobile_url_without_scheme(self):
+        assert is_twitter_url("mobile.twitter.com/jack/status/20") is True
+
+    def test_youtube_url(self):
+        assert is_twitter_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ") is False
+
+    def test_google_drive_url(self):
+        assert is_twitter_url("https://drive.google.com/file/d/abc123/view") is False
+
+    def test_empty_string(self):
+        assert is_twitter_url("") is False
