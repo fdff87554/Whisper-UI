@@ -7,6 +7,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.10.1] - 2026-06-09
+
+### Fixed
+
+- X post download no longer fails on a transient `Bad guest token` (X throttling
+  its anonymous guest-token endpoint) or HTTP 429/5xx. The yt-dlp extraction now
+  retries up to 3 times with a fresh client (2s/4s backoff) so a re-fetched guest
+  token clears the blip; login walls, age/NSFW gating and over-length media still
+  fail fast. When retries are exhausted the user gets an actionable "source
+  temporarily unavailable, retry later" hint instead of the raw yt-dlp error.
+
 ## [2.10.0] - 2026-06-09
 
 ### Added
