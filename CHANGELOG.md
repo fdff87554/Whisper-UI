@@ -7,6 +7,24 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-06-09
+
+### Added
+
+- Twitter/X post video download. Paste an `x.com` / `twitter.com` status link
+  (incl. `m.` / `mobile.` subdomains) to download and transcribe the video
+  attached to a post, alongside the existing YouTube and Google Drive sources.
+  The URL is host-whitelisted and canonicalised to `https://x.com/i/status/{id}`
+  before download, and yt-dlp's extractor is pinned to `twitter` — the same SSRF
+  defence as the YouTube path.
+- `TWITTER_MAX_DURATION` (default `14400`, mirrors `YOUTUBE_MAX_DURATION`) to cap
+  the attached video length on the X path.
+- Optional `TWITTER_COOKIES_FILE` (default unset → anonymous) to fetch
+  login-walled / age-restricted posts. Enabling it needs both the env var AND
+  the `cookies.txt` mounted read-only into the download worker — see
+  `.env.example`. X Broadcasts / Spaces are intentionally out of scope and
+  surface a clear error.
+
 ## [2.9.0] - 2026-06-09
 
 ### Added
