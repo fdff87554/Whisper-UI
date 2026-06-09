@@ -168,6 +168,9 @@ class TestValidTwitterURLs:
             "https://twitter.com/jack/status/20",
             "https://www.twitter.com/jack/status/20",
             "https://mobile.twitter.com/jack/status/20",
+            "https://m.twitter.com/jack/status/20",
+            "https://mobile.x.com/jack/status/20",
+            "https://m.x.com/jack/status/20",
             "https://x.com/i/status/20",
             "http://x.com/jack/status/20",
             "www.x.com/jack/status/20",
@@ -224,6 +227,10 @@ class TestIsTwitterURL:
 
     def test_mobile_url_without_scheme(self):
         assert is_twitter_url("mobile.twitter.com/jack/status/20") is True
+
+    @pytest.mark.parametrize("host", ["m.twitter.com", "mobile.x.com", "m.x.com"])
+    def test_mobile_subdomains(self, host):
+        assert is_twitter_url(f"https://{host}/jack/status/20") is True
 
     def test_youtube_url(self):
         assert is_twitter_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ") is False

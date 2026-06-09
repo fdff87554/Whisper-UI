@@ -29,7 +29,16 @@ _VIDEO_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
 _GDRIVE_HOSTS = {"drive.google.com", "docs.google.com"}
 _GDRIVE_FILE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{10,}$")
 
-_TWITTER_HOSTS = {"x.com", "www.x.com", "twitter.com", "www.twitter.com", "mobile.twitter.com"}
+_TWITTER_HOSTS = {
+    "x.com",
+    "www.x.com",
+    "m.x.com",
+    "mobile.x.com",
+    "twitter.com",
+    "www.twitter.com",
+    "m.twitter.com",
+    "mobile.twitter.com",
+}
 # Numeric snowflake post id (currently ~19 digits); upper bound stays generous
 # while still rejecting any non-numeric segment. ASCII-only ([0-9], not \d) so
 # unicode digits cannot slip into the canonical URL.
