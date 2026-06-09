@@ -38,7 +38,7 @@ class DownloadStage:
 
         if is_google_drive_url(source_url):
             return self._download_google_drive(source_url, context, on_progress)
-        return self._download_youtube(source_url, context, on_progress)
+        return self._download_via_ytdlp(source_url, context, on_progress, allowed_extractors=["youtube"])
 
     def _download_google_drive(
         self,
@@ -98,11 +98,13 @@ class DownloadStage:
         context["video_title"] = downloaded.stem
         return context
 
-    def _download_youtube(
+    def _download_via_ytdlp(
         self,
         source_url: str,
         context: dict[str, Any],
         on_progress: ProgressCallback | None,
+        *,
+        allowed_extractors: list[str],
     ) -> dict[str, Any]:
         try:
             import yt_dlp
@@ -132,10 +134,10 @@ class DownloadStage:
             "merge_output_format": "mp4",
             "noplaylist": True,
             # Defense in depth: the URL is already whitelisted and canonicalised
-            # to a youtube.com/watch URL by validate_youtube_url, but pinning the
-            # extractor stops yt-dlp from ever falling back to the generic
-            # extractor and fetching an arbitrary (e.g. internal) host.
-            "allowed_extractors": ["youtube"],
+            # by the validate_*_url helper, but pinning the extractor stops
+            # yt-dlp from ever falling back to the generic extractor and
+            # fetching an arbitrary (e.g. internal) host.
+            "allowed_extractors": allowed_extractors,
             "socket_timeout": YT_DLP_SOCKET_TIMEOUT,
             "progress_hooks": [progress_hook],
             "quiet": True,
