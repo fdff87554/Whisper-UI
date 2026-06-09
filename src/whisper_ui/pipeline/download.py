@@ -29,13 +29,15 @@ logger = logging.getLogger(__name__)
 # "no suitable extractor" / "broadcast" markers fire when the ["twitter"] pin
 # blocks yt-dlp from re-extracting into a twitter:broadcast / twitter:spaces
 # sub-extractor (verified against yt-dlp 2026.03.17 on a real Broadcast tweet).
+# Deliberately NOT included: bare "unavailable" (matches the transient
+# "HTTP Error 503: Service Unavailable") and HTTP 5xx/429 — those are retryable
+# and must keep the generic "Failed to download" path, not the cookies hint.
 _TWITTER_RESTRICTED_MARKERS = (
     "log in",
     "login",
     "authenticate",
     "nsfw",
     "not authorized",
-    "unavailable",
     "private",
     "unsupported url",
     "no suitable extractor",

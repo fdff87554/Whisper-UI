@@ -122,6 +122,22 @@ class TestDownloadStageWithMock:
             with pytest.raises(DownloadError, match="Failed to download"):
                 stage.execute(context)
 
+    def test_youtube_error_with_marker_word_stays_generic(self, context, download_dir):
+        # The restricted-marker classification must never run on the youtube
+        # path: a youtube "Private video" error keeps the generic message.
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.side_effect = Exception("ERROR: Private video. Sign in to view.")
+        mock_ydl_instance.__enter__ = lambda self: self
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl_instance
+
+        with (
+            patch.dict("sys.modules", {"yt_dlp": mock_module}),
+            pytest.raises(DownloadError, match="Failed to download"),
+        ):
+            DownloadStage().execute(context)
+
     def test_restricts_yt_dlp_to_youtube_extractor(self, context, download_dir):
         mock_ydl = self._make_mock_ydl(download_dir)
         mock_module = MagicMock()
@@ -388,6 +404,24 @@ class TestTwitterDownload:
         mock_module.YoutubeDL.return_value = mock_ydl_instance
 
         with patch.dict("sys.modules", {"yt_dlp": mock_module}), pytest.raises(DownloadError, match="無法下載此貼文"):
+            DownloadStage().execute(context)
+
+    def test_transient_server_error_stays_generic(self, context, download_dir):
+        # A retryable HTTP 503 must NOT be reported as "restricted" (which would
+        # wrongly tell the user to export cookies); it keeps the generic path.
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.side_effect = Exception(
+            "ERROR: Unable to download API page: HTTP Error 503: Service Unavailable"
+        )
+        mock_ydl_instance.__enter__ = lambda self: self
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl_instance
+
+        with (
+            patch.dict("sys.modules", {"yt_dlp": mock_module}),
+            pytest.raises(DownloadError, match="Failed to download"),
+        ):
             DownloadStage().execute(context)
 
     def test_duration_exceeds_limit(self, context, download_dir):
