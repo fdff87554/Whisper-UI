@@ -7,6 +7,33 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-06-09
+
+### Added
+
+- Dedicated `whisper:llm` queue for the optional LLM correction stage, plus a
+  `worker-llm` compose service (`llm-worker` profile) and `WORKER_LLM_QUEUES`.
+  This lets a dedicated `worker-llm` run the slow LLM without blocking the fast
+  io/cpu finalisation — previously `llm_correction` shared `whisper:io`, so the
+  io worker (which also drains `whisper:cpu`) was held up by a slow model.
+  Default / single-container deployments still run everything on one worker
+  (every worker drains `whisper:llm` by default); the isolation is opt-in via
+  the `llm-worker` profile.
+- `OLLAMA_THINK` (default `false`) to disable a thinking-capable Ollama model's
+  chain-of-thought. For JSON transcript correction, thinking is markedly slower
+  and (on gemma-class models) degrades the output; off is faster and cleaner.
+
+### Migration
+
+- **Scaled topologies with LLM correction:** because `llm_correction` moved off
+  `whisper:io` to its own `whisper:llm` queue, a deployment that explicitly
+  narrows `WORKER_*_QUEUES` and has `OLLAMA_BASE_URL` set must ensure some worker
+  listens on `whisper:llm` — add it to a worker's queue list (e.g.
+  `WORKER_IO_QUEUES="whisper:io whisper:cpu whisper:llm default"`) or run a
+  dedicated `worker-llm` (`--profile llm-worker`). Otherwise an LLM-enabled job's
+  final stage strands with no consumer. Default and single-container deployments
+  are unaffected (every worker drains `whisper:llm` by default).
+
 ## [2.8.0] - 2026-06-08
 
 ### Added

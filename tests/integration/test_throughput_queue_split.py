@@ -33,7 +33,7 @@ from tests.unit.test_pipeline_dag_parallelism import (
     _install_runtime,
     _stub_stages,
 )
-from whisper_ui.core.constants import WORKER_QUEUE_CPU, WORKER_QUEUE_GPU, WORKER_QUEUE_IO
+from whisper_ui.core.constants import WORKER_QUEUE_CPU, WORKER_QUEUE_GPU, WORKER_QUEUE_IO, WORKER_QUEUE_LLM
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.worker.pipeline_dispatcher import enqueue_pipeline
 
@@ -238,7 +238,7 @@ def test_combined_worker_blocks_io_behind_busy_gpu(monkeypatch, tmp_path):
         # GPU stage with no other worker free to take over.
         combined = threading.Thread(
             target=_burst_worker,
-            args=(fake_redis, [WORKER_QUEUE_IO, WORKER_QUEUE_GPU, WORKER_QUEUE_CPU]),
+            args=(fake_redis, [WORKER_QUEUE_IO, WORKER_QUEUE_GPU, WORKER_QUEUE_CPU, WORKER_QUEUE_LLM]),
         )
         combined.start()
         try:

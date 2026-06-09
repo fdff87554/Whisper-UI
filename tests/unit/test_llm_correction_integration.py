@@ -46,7 +46,7 @@ class _FakeOllamaClient:
         self._corrections = corrections
         self.closed = False
 
-    def chat_json(self, *, model: str, system: str, user: str, temperature: float, keep_alive: str) -> str:
+    def chat_json(self, *, model: str, system: str, user: str, temperature: float, keep_alive: str, think: bool) -> str:
         # Pull the EDIT block's indices back out so we only "correct" the
         # ones the stage asked about; we cheat by returning everything our
         # fixture knows, filtered to what was requested.

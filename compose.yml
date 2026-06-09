@@ -132,7 +132,7 @@ services:
       # pipeline end-to-end. For the scaled topology, set
       # `WORKER_GPU_QUEUES=whisper:gpu default` and add the `io` profile so
       # a dedicated worker-io handles download / preprocess / llm_correction.
-      - WORKER_QUEUES=${WORKER_GPU_QUEUES:-whisper:gpu whisper:io whisper:cpu default}
+      - WORKER_QUEUES=${WORKER_GPU_QUEUES:-whisper:gpu whisper:io whisper:cpu whisper:llm default}
       - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
       # Logging knobs reach the container only if listed here — compose has no
       # env_file, so a .env value alone would never apply. See README.
@@ -164,6 +164,7 @@ services:
       - LLM_CHUNK_SIZE=${LLM_CHUNK_SIZE:-8}
       - LLM_CHUNK_CONTEXT=${LLM_CHUNK_CONTEXT:-2}
       - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.1}
+      - OLLAMA_THINK=${OLLAMA_THINK:-false}
     volumes:
       - app-data:/app/data
       - model-cache:/cache/huggingface
@@ -197,7 +198,7 @@ services:
       # Same broad default as worker-gpu: runs the whole pipeline in a
       # single container when the CPU profile is used alone. Override with
       # `WORKER_CPU_QUEUES=whisper:cpu default` to specialise.
-      - WORKER_QUEUES=${WORKER_CPU_QUEUES:-whisper:gpu whisper:io whisper:cpu default}
+      - WORKER_QUEUES=${WORKER_CPU_QUEUES:-whisper:gpu whisper:io whisper:cpu whisper:llm default}
       - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
       # Logging knobs reach the container only if listed here — compose has no
       # env_file, so a .env value alone would never apply. See README.
@@ -229,6 +230,7 @@ services:
       - LLM_CHUNK_SIZE=${LLM_CHUNK_SIZE:-8}
       - LLM_CHUNK_CONTEXT=${LLM_CHUNK_CONTEXT:-2}
       - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.1}
+      - OLLAMA_THINK=${OLLAMA_THINK:-false}
     volumes:
       - app-data:/app/data
       - model-cache:/cache/huggingface
@@ -259,7 +261,7 @@ services:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
         AMDGPU_TARGETS: ${AMDGPU_TARGETS:-gfx1151}
     environment:
-      - WORKER_QUEUES=${WORKER_ROCM_QUEUES:-whisper:gpu whisper:io whisper:cpu default}
+      - WORKER_QUEUES=${WORKER_ROCM_QUEUES:-whisper:gpu whisper:io whisper:cpu whisper:llm default}
       - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
       # Logging knobs reach the container only if listed here — compose has no
       # env_file, so a .env value alone would never apply. See README.
@@ -292,6 +294,7 @@ services:
       - LLM_CHUNK_SIZE=${LLM_CHUNK_SIZE:-8}
       - LLM_CHUNK_CONTEXT=${LLM_CHUNK_CONTEXT:-2}
       - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.1}
+      - OLLAMA_THINK=${OLLAMA_THINK:-false}
     devices:
       - /dev/kfd
       - /dev/dri
@@ -334,7 +337,7 @@ services:
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     environment:
-      - WORKER_QUEUES=${WORKER_IO_QUEUES:-whisper:io whisper:cpu default}
+      - WORKER_QUEUES=${WORKER_IO_QUEUES:-whisper:io whisper:cpu whisper:llm default}
       - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
       # Logging knobs reach the container only if listed here — compose has no
       # env_file, so a .env value alone would never apply. See README.
@@ -360,6 +363,58 @@ services:
       - LLM_CHUNK_SIZE=${LLM_CHUNK_SIZE:-8}
       - LLM_CHUNK_CONTEXT=${LLM_CHUNK_CONTEXT:-2}
       - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.1}
+      - OLLAMA_THINK=${OLLAMA_THINK:-false}
+    volumes:
+      - app-data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      volume-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+  # Dedicated LLM-correction worker (whisper:llm queue only). Enable with
+  # `--profile llm-worker` on hosts where the LLM is slow (a big Ollama model)
+  # and must NOT block the fast io/cpu finalisation path. Uses the CPU image —
+  # the stage only makes HTTP calls to Ollama, so it needs no GPU. When you run
+  # it, narrow the other workers off whisper:llm (e.g. set
+  # WORKER_IO_QUEUES="whisper:io whisper:cpu default").
+  worker-llm:
+    profiles: [llm-worker]
+    image: ghcr.io/fdff87554/whisper-ui-worker-cpu:${WHISPER_UI_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker.cpu
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+    environment:
+      - WORKER_QUEUES=${WORKER_LLM_QUEUES:-whisper:llm default}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_JSON=${LOG_JSON:-false}
+      - DATABASE_PATH=/app/data/db/whisper_ui.db
+      - UPLOAD_DIR=/app/data/uploads
+      - OUTPUT_DIR=/app/data/outputs
+      - DEVICE=cpu
+      - LANGUAGE=${LANGUAGE:-zh}
+      - JOB_TIMEOUT_DEFAULT=${JOB_TIMEOUT_DEFAULT:-7200}
+      - JOB_TIMEOUT_FLOOR=${JOB_TIMEOUT_FLOOR:-1800}
+      - JOB_TIMEOUT_AUDIO_MULTIPLIER=${JOB_TIMEOUT_AUDIO_MULTIPLIER:-3.0}
+      - JOB_TIMEOUT_MAX=${JOB_TIMEOUT_MAX:-28800}
+      - STALE_JOB_BUFFER=${STALE_JOB_BUFFER:-1800}
+      - REDIS_PROCESSING_EXPIRY=${REDIS_PROCESSING_EXPIRY:-30600}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e4b}
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
+      - OLLAMA_REQUEST_TIMEOUT=${OLLAMA_REQUEST_TIMEOUT:-120}
+      - LLM_CHUNK_SIZE=${LLM_CHUNK_SIZE:-8}
+      - LLM_CHUNK_CONTEXT=${LLM_CHUNK_CONTEXT:-2}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.1}
+      - OLLAMA_THINK=${OLLAMA_THINK:-false}
     volumes:
       - app-data:/app/data
     depends_on:

@@ -210,14 +210,15 @@ $remote_addr;` (overrides any client-sent header).
 
 Each upload is dispatched as an RQ **DAG of sub-jobs** (one per pipeline
 stage) rather than a single monolithic task. Sub-jobs are routed to
-resource-class queues so a long-running IO or network stage never blocks
-a GPU worker from picking up the next job:
+resource-class queues so that, in a scaled topology (below), a long-running
+IO or network stage need not block a GPU worker from picking up the next job:
 
-| Queue         | Stages                                     |
-| ------------- | ------------------------------------------ |
-| `whisper:gpu` | `transcribe_align`, `diarize`              |
-| `whisper:io`  | `download`, `preprocess`, `llm_correction` |
-| `whisper:cpu` | `assign_speakers`, `postprocess`           |
+| Queue         | Stages                            |
+| ------------- | --------------------------------- |
+| `whisper:gpu` | `transcribe_align`, `diarize`     |
+| `whisper:io`  | `download`, `preprocess`          |
+| `whisper:cpu` | `assign_speakers`, `postprocess`  |
+| `whisper:llm` | `llm_correction` (optional, slow) |
 
 **Single-container (default).** `docker compose --profile gpu up -d` keeps
 the existing behaviour: `worker-gpu` listens to every queue so one
@@ -230,35 +231,46 @@ add the `io` profile and narrow the GPU worker's queue set:
 ```bash
 # .env
 WORKER_GPU_QUEUES="whisper:gpu default"
-WORKER_IO_QUEUES="whisper:io whisper:cpu default"
+WORKER_IO_QUEUES="whisper:io whisper:cpu whisper:llm default"
 
 docker compose --profile gpu --profile io up -d
 ```
 
 `worker-io` is a lightweight CPU container that drains `whisper:io`
-(download / preprocess / llm_correction) in parallel with `worker-gpu`
-running transcribe_align / diarize on the GPU. Two jobs enqueued back to
-back overlap: job B can be downloading while job A is on the GPU, and
-job A can be in llm_correction (hitting an external Ollama server) while
-job B is already transcribing.
+(download / preprocess), `whisper:cpu`, and `whisper:llm` in parallel with
+`worker-gpu` running transcribe_align / diarize on the GPU. Two jobs enqueued
+back to back overlap: job B can be downloading while job A is on the GPU.
+(Keeping `whisper:llm` here means the io worker also runs LLM correction; to
+isolate a slow LLM onto its own worker, see the AMD example below.)
 
-**AMD / ROCm single-GPU box.** The ROCm worker has a single GPU, so the
-same split applies — keep it on GPU stages only and run a separate CPU
-worker for the rest:
+The optional, slow LLM correction has its own `whisper:llm` queue, so a
+dedicated `worker-llm` (the `llm-worker` profile) can run it without blocking
+the fast io/cpu finalisation path. Every worker drains `whisper:llm` by
+default, so by default a slow LLM still shares a worker with io/cpu; the
+isolation is opt-in — run `worker-llm` and drop `whisper:llm` from the other
+workers' `WORKER_*_QUEUES` (see the AMD example below).
+
+**AMD / ROCm single-GPU box.** The ROCm worker has a single GPU, so the same
+split applies, plus a dedicated LLM worker so a slow Ollama model never blocks
+the io/cpu path:
 
 ```bash
 # .env
 WORKER_ROCM_QUEUES="whisper:gpu default"
 WORKER_IO_QUEUES="whisper:io whisper:cpu default"
+WORKER_LLM_QUEUES="whisper:llm default"
 
-docker compose --profile rocm --profile io up -d --scale worker-io=2
+docker compose --profile rocm --profile io --profile llm-worker up -d --scale worker-io=2
 ```
 
-`worker-io` uses the CPU image (the io/cpu stages need no GPU), so two
-replicas drain download / preprocess / assign / postprocess / llm while
-the single `worker-rocm` stays dedicated to transcribe_align / diarize. Do
-**not** scale `worker-rocm` past one on a single card — two whisper.cpp /
-pyannote processes would contend for the same VRAM and compute queue.
+`worker-io` (×2) and `worker-llm` use the CPU image (none of these stages need
+the GPU). `worker-io` drains download / preprocess / assign / postprocess;
+`worker-llm` drains the optional LLM correction (HTTP calls to Ollama); the
+single `worker-rocm` stays dedicated to transcribe_align / diarize. Do **not**
+scale `worker-rocm` past one on a single card — two whisper.cpp / pyannote
+processes would contend for the same VRAM and compute queue. Ollama itself
+still shares the GPU with the worker; if that contention hurts transcription,
+point Ollama at CPU or use a smaller model.
 
 **Multi-GPU hosts.** When the DAG fans out transcribe_align and diarize
 as sibling branches they will automatically run in parallel once you
@@ -387,15 +399,16 @@ server, or split Whisper and Ollama onto separate GPUs as above.
 
 **Tuning (all optional):**
 
-| Variable                 | Default      | Description                                                                            |
-| ------------------------ | ------------ | -------------------------------------------------------------------------------------- |
-| `OLLAMA_BASE_URL`        | (empty)      | Empty disables the feature globally. Set to reach a bundled or external Ollama server. |
-| `OLLAMA_MODEL`           | `gemma4:e4b` | Any Ollama-compatible chat model. Bigger = better accuracy, more VRAM (see note).      |
-| `OLLAMA_KEEP_ALIVE`      | `30m`        | How long Ollama keeps the model loaded in VRAM between requests.                       |
-| `OLLAMA_REQUEST_TIMEOUT` | `120`        | Per-request timeout in seconds.                                                        |
-| `LLM_CHUNK_SIZE`         | `8`          | Segments corrected per Ollama request. Larger reduces HTTP overhead.                   |
-| `LLM_CHUNK_CONTEXT`      | `2`          | Neighbor segments attached as read-only context for disambiguation.                    |
-| `LLM_TEMPERATURE`        | `0.1`        | Sampling temperature. Low values keep corrections deterministic.                       |
+| Variable                 | Default      | Description                                                                                                                                                      |
+| ------------------------ | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OLLAMA_BASE_URL`        | (empty)      | Empty disables the feature globally. Set to reach a bundled or external Ollama server.                                                                           |
+| `OLLAMA_MODEL`           | `gemma4:e4b` | Any Ollama-compatible chat model. Bigger = better accuracy, more VRAM (see note).                                                                                |
+| `OLLAMA_KEEP_ALIVE`      | `30m`        | How long Ollama keeps the model loaded in VRAM between requests.                                                                                                 |
+| `OLLAMA_REQUEST_TIMEOUT` | `120`        | Per-request timeout in seconds.                                                                                                                                  |
+| `LLM_CHUNK_SIZE`         | `8`          | Segments corrected per Ollama request. Larger reduces HTTP overhead.                                                                                             |
+| `LLM_CHUNK_CONTEXT`      | `2`          | Neighbor segments attached as read-only context for disambiguation.                                                                                              |
+| `LLM_TEMPERATURE`        | `0.1`        | Sampling temperature. Low values keep corrections deterministic.                                                                                                 |
+| `OLLAMA_THINK`           | `false`      | Let a thinking-capable model reason before answering. Off is faster and gives cleaner JSON for correction; set `true` only for a reasoning model proven to help. |
 
 ### Optional upload retention
 

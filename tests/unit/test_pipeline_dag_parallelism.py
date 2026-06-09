@@ -26,6 +26,7 @@ from whisper_ui.core.constants import (
     WORKER_QUEUE_CPU,
     WORKER_QUEUE_GPU,
     WORKER_QUEUE_IO,
+    WORKER_QUEUE_LLM,
 )
 from whisper_ui.core.models import Job, JobStatus, TranscriptResult
 from whisper_ui.worker import pipeline_dispatcher
@@ -155,7 +156,7 @@ def _drain_queues(fake_redis) -> list[str]:
     finished: list[str] = []
     queues_by_name = {
         name: __import__("rq").Queue(name=name, connection=fake_redis)
-        for name in (WORKER_QUEUE_IO, WORKER_QUEUE_GPU, WORKER_QUEUE_CPU)
+        for name in (WORKER_QUEUE_IO, WORKER_QUEUE_GPU, WORKER_QUEUE_CPU, WORKER_QUEUE_LLM)
     }
 
     for _ in range(50):  # hard cap to guarantee test termination

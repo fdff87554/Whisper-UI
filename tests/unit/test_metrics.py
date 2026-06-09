@@ -46,6 +46,7 @@ def test_whisper_collector_reports_status_counts_and_queue_depth(tmp_path):
         assert 'whisper_jobs_total{status="pending"} 0.0' in out  # missing status -> 0, series never disappears
         assert 'whisper_queue_depth{queue="whisper:gpu"} 1.0' in out
         assert 'whisper_queue_depth{queue="whisper:io"} 0.0' in out
+        assert 'whisper_queue_depth{queue="whisper:llm"} 0.0' in out  # dedicated LLM queue is scraped
         assert "whisper_failed_jobs" in out
         assert "whisper_started_jobs" in out
         assert "whisper_rq_workers " in out

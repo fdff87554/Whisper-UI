@@ -62,6 +62,7 @@ class OllamaClient(Protocol):
         user: str,
         temperature: float,
         keep_alive: str,
+        think: bool,
     ) -> str: ...
 
     def close(self) -> None: ...
@@ -81,12 +82,16 @@ class HttpxOllamaClient:
         user: str,
         temperature: float,
         keep_alive: str,
+        think: bool,
     ) -> str:
         payload = {
             "model": model,
             "stream": False,
             "format": "json",
             "keep_alive": keep_alive,
+            # Top-level (not an `options` key): Ollama's /api/chat reads `think`
+            # to toggle a reasoning model's chain-of-thought. Off for correction.
+            "think": think,
             "options": {
                 "temperature": temperature,
                 "top_p": 0.9,
@@ -134,6 +139,7 @@ class LLMCorrectionStage:
         chunk_context: int,
         temperature: float,
         request_timeout: float,
+        think: bool = False,
         client: OllamaClient | None = None,
     ) -> None:
         self._base_url = base_url
@@ -143,6 +149,7 @@ class LLMCorrectionStage:
         self._chunk_context = chunk_context
         self._temperature = temperature
         self._request_timeout = request_timeout
+        self._think = think
         self._client = client
         self._owns_client = client is None
 
@@ -248,6 +255,7 @@ class LLMCorrectionStage:
             user=user_prompt,
             temperature=self._temperature,
             keep_alive=self._keep_alive,
+            think=self._think,
         )
         return _parse_response(raw_response, {idx for idx, _ in chunk.edit_items})
 

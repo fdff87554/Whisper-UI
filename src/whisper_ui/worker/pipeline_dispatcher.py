@@ -29,6 +29,7 @@ from whisper_ui.core.constants import (
     WORKER_QUEUE_CPU,
     WORKER_QUEUE_GPU,
     WORKER_QUEUE_IO,
+    WORKER_QUEUE_LLM,
 )
 from whisper_ui.core.messages import LLM_CORRECTION_SKIPPED, PIPELINE_COMPLETE, RESULT_PERSIST_FAILED
 from whisper_ui.core.models import JobStatus
@@ -56,14 +57,16 @@ from whisper_ui.worker.stage_tasks import (
 )
 from whisper_ui.worker.timeout import calculate_job_timeout
 
-# Stage function → queue name. IO stages (download, preprocess, llm_correction)
-# go to a queue serviced by workers that do not hold a CUDA context, GPU
-# stages go to the GPU queue, and lightweight CPU finalisation stages go to
-# the CPU queue. See whisper_ui.core.constants for the rationale.
+# Stage function → queue name. IO stages (download, preprocess) go to a queue
+# serviced by workers that do not hold a CUDA context; GPU stages go to the GPU
+# queue; lightweight CPU finalisation stages go to the CPU queue; the optional,
+# slow LLM correction goes to its own queue so it can be isolated onto a
+# dedicated worker, keeping a slow LLM off the io/cpu finalisation path. See
+# whisper_ui.core.constants for the rationale.
 _STAGE_QUEUES = {
     run_download.__name__: WORKER_QUEUE_IO,
     run_preprocess.__name__: WORKER_QUEUE_IO,
-    run_llm_correction.__name__: WORKER_QUEUE_IO,
+    run_llm_correction.__name__: WORKER_QUEUE_LLM,
     run_transcribe_align.__name__: WORKER_QUEUE_GPU,
     run_diarize.__name__: WORKER_QUEUE_GPU,
     run_assign_speakers.__name__: WORKER_QUEUE_CPU,
@@ -155,7 +158,8 @@ def enqueue_pipeline(
     monitoring to the tail of the pipeline if they want to.
     """
     queues = {
-        name: Queue(name=name, connection=redis) for name in (WORKER_QUEUE_IO, WORKER_QUEUE_GPU, WORKER_QUEUE_CPU)
+        name: Queue(name=name, connection=redis)
+        for name in (WORKER_QUEUE_IO, WORKER_QUEUE_GPU, WORKER_QUEUE_CPU, WORKER_QUEUE_LLM)
     }
 
     initial_context: dict = {
