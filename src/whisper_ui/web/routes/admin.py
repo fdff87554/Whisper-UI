@@ -236,7 +236,6 @@ async def admin_jobs_page(
     # owner_id=None → no owner filter; admin sees everything.
     ctx = build_list_context(db, redis, filestore, status, page, owner_id=None)
     ctx["active_page"] = "admin_jobs"
-    ctx["status_counts"] = db.get_status_counts()
     ctx["DEFAULT_JOBS_PER_PAGE"] = DEFAULT_JOBS_PER_PAGE
     _add_admin_list_context(ctx, db)
     return templates.TemplateResponse(request=request, name="admin_jobs.html", context=ctx)
@@ -260,4 +259,6 @@ async def admin_jobs_list_fragment(
         status = ""
     ctx = build_list_context(db, redis, filestore, status, page, owner_id=None)
     _add_admin_list_context(ctx, db)
+    # Fragment-only OOB chip-count spans — same contract as /jobs/list.
+    ctx["oob_counts"] = True
     return templates.TemplateResponse(request=request, name="_job_list.html", context=ctx)

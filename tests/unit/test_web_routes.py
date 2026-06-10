@@ -279,7 +279,33 @@ class TestJobsRoutes:
 
         assert resp.status_code == 200
         # The 全部 chip badge must reflect both jobs, not just the 1 failed.
-        assert '<span class="badge badge-sm">2</span>' in resp.text
+        assert '<span id="status-count-all" class="badge badge-sm">2</span>' in resp.text
+
+    def test_jobs_list_fragment_emits_oob_status_counts(self, client, db, filestore):
+        """A poll that changes job states must also refresh the sticky-header
+        chips: the fragment carries hx-swap-oob count badges keyed to the
+        ids rendered by _status_chips.html."""
+        _create_completed_job(db, filestore)
+        _create_failed_job(db)
+
+        resp = client.get("/jobs/list")
+
+        assert resp.status_code == 200
+        assert '<span id="status-count-all" class="badge badge-sm" hx-swap-oob="true">2</span>' in resp.text
+        assert '<span id="status-count-completed" class="badge badge-sm" hx-swap-oob="true">1</span>' in resp.text
+        assert '<span id="status-count-failed" class="badge badge-sm" hx-swap-oob="true">1</span>' in resp.text
+
+    def test_jobs_full_page_renders_chips_without_oob_duplicates(self, client, db, filestore):
+        """jobs.html renders the chips itself; the _job_list.html include must
+        not emit the OOB spans there, or the badge ids would duplicate and
+        break the out-of-band targeting."""
+        _create_completed_job(db, filestore)
+
+        resp = client.get("/jobs")
+
+        assert resp.status_code == 200
+        assert resp.text.count('id="status-count-all"') == 1
+        assert "hx-swap-oob" not in resp.text
 
     def test_jobs_list_fragment_emits_stable_id_for_single_job(self, client, db, filestore):
         """Without a stable wrapper id Idiomorph falls back to positional

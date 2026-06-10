@@ -133,3 +133,16 @@
 
 {% endif %}
 </div>
+
+{% if oob_counts %}
+{# Out-of-band refresh of the sticky-header chip counts (rendered by
+   _status_chips.html), so a poll that changes job states updates the header
+   too. Gated on oob_counts — set only by the fragment routes: the full pages
+   render the chips themselves, and emitting these spans there would
+   duplicate the ids. htmx extracts hx-swap-oob elements before the main
+   morph swap, so they must sit top-level, outside #job-list-wrapper. #}
+{% from "_status_count_badge.html" import count_badge %}
+{% for value in [''] + labels.STATUS_LABELS.keys()|list %}
+{{ count_badge(value, status_counts, oob=true) }}
+{% endfor %}
+{% endif %}

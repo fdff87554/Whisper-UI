@@ -10,19 +10,8 @@
    polled list fragment point at /admin/jobs/list so the admin (owner_id=None)
    scope and owner badges are preserved. #}
 <div class="sticky top-0 z-10 bg-base-100 pt-1 pb-3 mb-4 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 border-b border-line">
-  <div class="flex flex-wrap gap-2 mb-3" x-data="{ activeFilter: {{ status|tojson }} }">
-    {% set _all_count = status_counts.values()|sum %}
-    {% for value, label in [('', labels.JOBS_FILTER_ALL)] + labels.STATUS_LABELS.items()|list %}
-    {%- set _count = _all_count if value == '' else status_counts.get(value, 0) -%}
-    <button class="btn btn-sm gap-1.5"
-            :class="activeFilter === '{{ value }}' ? 'btn-primary' : 'btn-ghost border border-line'"
-            hx-get="/admin/jobs/list?status={{ value }}" hx-target="#job-list-wrapper" hx-swap="outerHTML"
-            @click="activeFilter = '{{ value }}'">
-      <span>{{ label }}</span>
-      <span class="badge badge-sm">{{ _count }}</span>
-    </button>
-    {% endfor %}
-  </div>
+  {# list_url (set by the admin routes) points the chips at /admin/jobs/list. #}
+  {% include "_status_chips.html" %}
 
   {% include "_job_search.html" %}
 </div>

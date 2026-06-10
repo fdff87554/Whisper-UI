@@ -316,6 +316,19 @@ def test_admin_jobs_list_fragment_blocks_non_admin(app, test_user):
     assert resp.status_code == 403
 
 
+def test_admin_jobs_list_fragment_emits_oob_status_counts(app, db, test_admin, test_user):
+    """The admin fragment must refresh the admin page's chip counts the same
+    way /jobs/list does — both render chips from _status_chips.html."""
+    db.insert_job(Job(filename="alices.mp3", status=JobStatus.COMPLETED, language="zh", owner_id=test_user.id))
+    client = authed_test_client(app, test_admin)
+
+    resp = client.get("/admin/jobs/list")
+
+    assert resp.status_code == 200
+    assert '<span id="status-count-all" class="badge badge-sm" hx-swap-oob="true">1</span>' in resp.text
+    assert '<span id="status-count-completed" class="badge badge-sm" hx-swap-oob="true">1</span>' in resp.text
+
+
 def test_admin_jobs_list_poll_wrapper_is_quiet(app, test_admin):
     """The admin list reuses _job_list.html; guard against the admin route
     ever switching to a template whose poll wrapper forgets the quiet
