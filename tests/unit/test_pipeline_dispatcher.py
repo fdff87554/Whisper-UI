@@ -539,6 +539,49 @@ def test_finalize_success_marks_job_completed(monkeypatch, tmp_path):
     assert PipelineContextStore(redis, job.id).load() == {}
 
 
+def test_finalize_success_completes_even_if_cleanup_raises(monkeypatch, tmp_path):
+    """Cleanup in the completion finally is best-effort: a Redis failure
+    dropping the context hash must not surface as a callback error after the
+    job is already COMPLETED in the DB."""
+    from whisper_ui.core.models import TranscriptResult
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    job = Job(id="job-cleanup-fail", filename="m.mp3", filepath=str(tmp_path / "m.mp3"), status=JobStatus.PROCESSING)
+    transcript = TranscriptResult(language="zh", duration=10.0)
+    PipelineContextStore(redis, job.id).initialize({"transcript_result": transcript})
+
+    runtime = MagicMock()
+    runtime.redis = redis
+    runtime.db.get_job.return_value = job
+    runtime.filestore.save_result.return_value = tmp_path / "result.json"
+    runtime.settings.redis_processing_expiry = 7200
+
+    from contextlib import contextmanager
+
+    from whisper_ui.worker.progress import RedisProgressReporter
+
+    @contextmanager
+    def _fake_builder(job_id, *, generation=None):
+        runtime.reporter = RedisProgressReporter(redis, job_id, processing_ttl=7200, generation=generation)
+        yield runtime
+
+    monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
+    # Make the context-store cleanup blow up inside the finally.
+    monkeypatch.setattr(
+        PipelineContextStore, "delete", lambda self: (_ for _ in ()).throw(RuntimeError("redis delete failed"))
+    )
+
+    fake_rq_job = MagicMock()
+    fake_rq_job.meta = {"parent_job_id": job.id}
+
+    # Must not raise despite the cleanup failure.
+    pd.finalize_success(fake_rq_job, redis, None)
+
+    assert job.status == JobStatus.COMPLETED
+    assert job.result_path == str(tmp_path / "result.json")
+
+
 def test_finalize_success_skips_already_completed_job(monkeypatch, tmp_path):
     """A second finalize_success for an already-COMPLETED job is a no-op, so
     it never re-saves a result or touches terminal state (mirrors the

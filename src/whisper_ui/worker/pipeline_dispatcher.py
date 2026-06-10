@@ -448,10 +448,18 @@ def _persist_completion(
             logger.exception("reporter.complete failed for job %s (already COMPLETED in DB)", job.id)
         logger.info("Job %s completed successfully via DAG pipeline", job.id)
     finally:
-        cleanup_preprocessed_audio(context)
-        ctx_store.delete()
-        if meta_generation is not None:
-            _clear_subjob_set(runtime.redis, job.id, meta_generation)
+        # Best-effort housekeeping: by now the DB already records the terminal
+        # status (COMPLETED here, or FAILED via mark_failed above) and the
+        # Redis keys have a TTL backstop. A cleanup failure must neither
+        # surface as an RQ callback error on the success path nor mask a
+        # re-raised mark_failed exception on the failure path, so swallow it.
+        try:
+            cleanup_preprocessed_audio(context)
+            ctx_store.delete()
+            if meta_generation is not None:
+                _clear_subjob_set(runtime.redis, job.id, meta_generation)
+        except Exception:
+            logger.warning("Best-effort cleanup failed for job %s", job.id, exc_info=True)
 
 
 def _is_llm_correction_subjob(rq_job) -> bool:
