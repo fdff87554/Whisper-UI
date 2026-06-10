@@ -27,6 +27,15 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - The sticky-header status chip counts refresh during polling via
   out-of-band swaps instead of going stale until a full page reload; the
   chip markup is now shared between `/jobs` and `/admin/jobs`.
+- Several `x-data` / `@click` attributes that interpolated a string with
+  `|tojson` rendered literal double quotes that terminated the attribute
+  early, breaking the status filter chips, the dashboard greeting heading,
+  the dashboard active-job ETA, and the admin reset-password dialog. They now
+  use single-quoted JS literals (for quote-free values) or a data attribute
+  read via `$el.dataset` (for the username).
+- The `/jobs/list` polling fragment now resets an unknown `status` filter to
+  empty, matching `/jobs` and `/admin/jobs/list`, so a bogus value no longer
+  stays baked into the poll URL.
 
 ## [2.11.0] - 2026-06-10
 
