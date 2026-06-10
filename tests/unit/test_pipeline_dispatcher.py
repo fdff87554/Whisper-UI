@@ -197,6 +197,47 @@ def test_adjust_subjob_timeouts_is_noop_without_duration(tmp_path):
     assert subs["run_transcribe_align"].timeout == settings.job_timeout_default
 
 
+def test_adjust_subjob_timeouts_swallows_subjob_load_failure(tmp_path, monkeypatch):
+    """A Redis failure while loading the sub-job set must not propagate: the
+    preprocess hook that calls this runs after the stage already persisted its
+    output, so a resize failure must never fail that preprocess job."""
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(id="job-load-fail", filename="video", source_url="https://youtu.be/abc", status=JobStatus.QUEUED)
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    generation = _current_generation(redis, job.id)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("redis smembers failed")
+
+    monkeypatch.setattr("whisper_ui.worker.pipeline_dispatcher._load_subjob_ids", _boom)
+
+    # Must not raise (the reviewer's regression).
+    adjust_subjob_timeouts(redis, job.id, generation, 2000.0, settings)
+
+
+def test_adjust_subjob_timeouts_swallows_timeout_calc_failure(tmp_path, monkeypatch):
+    """A failure computing the new timeout is also best-effort, not fatal."""
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(id="job-calc-fail", filename="video", source_url="https://youtu.be/abc", status=JobStatus.QUEUED)
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    generation = _current_generation(redis, job.id)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("timeout calc failed")
+
+    monkeypatch.setattr("whisper_ui.worker.pipeline_dispatcher.calculate_job_timeout", _boom)
+
+    adjust_subjob_timeouts(redis, job.id, generation, 2000.0, settings)
+
+    # Sub-jobs keep their enqueue-time default since the resize was abandoned.
+    subs = _by_stage(_load_subjobs(redis, job.id))
+    assert subs["run_transcribe_align"].timeout == settings.job_timeout_default
+
+
 def test_llm_enabled_dag_appends_llm_correction(tmp_path):
     redis = fakeredis.FakeRedis()
     settings = _build_settings()

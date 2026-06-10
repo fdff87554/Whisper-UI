@@ -186,38 +186,49 @@ def adjust_subjob_timeouts(
     """
     if not duration_seconds or duration_seconds <= 0:
         return
-    from rq.exceptions import NoSuchJobError
-    from rq.job import Job as RQJob
-    from rq.job import JobStatus as RQJobStatus
+    # The whole body is wrapped so this stays truly best-effort: a resize
+    # failure (e.g. the SMEMBERS in _load_subjob_ids or a save() hitting a
+    # Redis blip) must never propagate out of the preprocess post_persist hook
+    # and fail a preprocess that already produced its output. The inner
+    # per-subjob handler lets one bad sub-job be skipped without aborting the
+    # rest; the outer handler covers id loading and timeout calculation.
+    try:
+        from rq.exceptions import NoSuchJobError
+        from rq.job import Job as RQJob
+        from rq.job import JobStatus as RQJobStatus
 
-    new_timeout = calculate_job_timeout(duration_seconds, settings)
-    resizable = {RQJobStatus.DEFERRED, RQJobStatus.QUEUED, RQJobStatus.SCHEDULED}
-    resized = 0
-    for sub_id in _load_subjob_ids(redis, parent_job_id, generation):
-        try:
-            sub = RQJob.fetch(sub_id, connection=redis)
-            if sub.meta.get("stage") not in _DURATION_SCALED_STAGES:
+        new_timeout = calculate_job_timeout(duration_seconds, settings)
+        resizable = {RQJobStatus.DEFERRED, RQJobStatus.QUEUED, RQJobStatus.SCHEDULED}
+        resized = 0
+        for sub_id in _load_subjob_ids(redis, parent_job_id, generation):
+            try:
+                sub = RQJob.fetch(sub_id, connection=redis)
+                if sub.meta.get("stage") not in _DURATION_SCALED_STAGES:
+                    continue
+                if sub.get_status(refresh=True) not in resizable:
+                    continue
+                if sub.timeout != new_timeout:
+                    sub.timeout = new_timeout
+                    sub.save()
+                    resized += 1
+            except NoSuchJobError:
                 continue
-            if sub.get_status(refresh=True) not in resizable:
-                continue
-            if sub.timeout != new_timeout:
-                sub.timeout = new_timeout
-                sub.save()
-                resized += 1
-        except NoSuchJobError:
-            continue
-        except Exception:
-            # Best-effort optimisation: a resize failure must never fail a
-            # preprocess that already produced its output. Log and move on.
-            logger.warning("Could not resize timeout for sub-job %s of %s", sub_id, parent_job_id, exc_info=True)
-    if resized:
-        logger.info(
-            "Resized %d duration-scaled sub-job timeout(s) for job %s to %ss (duration=%.0fs gen=%d)",
-            resized,
+            except Exception:
+                logger.warning("Could not resize timeout for sub-job %s of %s", sub_id, parent_job_id, exc_info=True)
+        if resized:
+            logger.info(
+                "Resized %d duration-scaled sub-job timeout(s) for job %s to %ss (duration=%.0fs gen=%d)",
+                resized,
+                parent_job_id,
+                new_timeout,
+                duration_seconds,
+                generation,
+            )
+    except Exception:
+        logger.warning(
+            "Could not resize sub-job timeouts for %s; keeping enqueue-time defaults",
             parent_job_id,
-            new_timeout,
-            duration_seconds,
-            generation,
+            exc_info=True,
         )
 
 
