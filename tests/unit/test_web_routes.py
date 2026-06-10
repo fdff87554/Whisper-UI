@@ -258,6 +258,17 @@ class TestJobsRoutes:
         assert "function isQuietPoll(evt)" in resp.text
         assert "hasAttribute('data-quiet-poll')" in resp.text
 
+    def test_error_toasts_guard_quiet_poll(self, client):
+        """A failed background poll retries on the next tick; toasting it
+        every 3s during a backend hiccup buries the user in error popups.
+        Both error handlers must skip quiet-poll requests."""
+        resp = client.get("/jobs")
+        assert resp.status_code == 200
+        send_error_handler = resp.text.split("htmx:sendError", 1)[1].split("});", 1)[0]
+        assert "if (isQuietPoll(evt)) return;" in send_error_handler
+        response_error_handler = resp.text.split("htmx:responseError", 1)[1].split("});", 1)[0]
+        assert "if (isQuietPoll(evt)) return;" in response_error_handler
+
     def test_jobs_all_chip_shows_unfiltered_total_when_filtered(self, client, db, filestore):
         """Finding F5: opening /jobs?status=failed must still show the true
         total on the 全部 chip, not the failed-only count."""
