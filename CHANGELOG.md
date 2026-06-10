@@ -7,6 +7,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-06-10
+
 ### Fixed
 
 - The jobs list poll now actually morphs the DOM instead of replacing it:
