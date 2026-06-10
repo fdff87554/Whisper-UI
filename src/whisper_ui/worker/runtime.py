@@ -207,6 +207,16 @@ class _ThrottledProgressReporter:
                 self._job.id,
             )
             return False
+        # The Redis write above is monotonic (the reporter's Lua max-write only
+        # ever advances progress) and is the single source of truth for live
+        # progress: the UI reads job:{id} from Redis while a job is
+        # QUEUED/PROCESSING. This SQLite mirror is the durable copy and is NOT
+        # guaranteed monotonic — parallel branches (transcribe vs diarize) run
+        # in separate processes with independent Job snapshots and reporters,
+        # so their interleaved full-column UPDATEs can momentarily write a
+        # lower progress here. That is fine because no live path reads progress
+        # from the DB; if one is ever added, give this mirror a max(old, new)
+        # guard first.
         self._job.progress = progress
         self._job.progress_message = message
         self._db.update_job(self._job)

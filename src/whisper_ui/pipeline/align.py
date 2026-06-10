@@ -75,6 +75,13 @@ class AlignStage:
                 e,
                 exc_info=True,
             )
+            # Fall back to the unaligned transcription as the "aligned" result
+            # so assign_speakers can still attach speakers at the segment level
+            # (whisperx.assign_word_speakers handles non-aligned input). Without
+            # this, aligned_result stays absent, assign_speakers skips entirely,
+            # and an align failure silently discards diarization too — losing
+            # all speaker labels, not just word-level timing.
+            context["aligned_result"] = context.get("transcription_result")
             if on_progress:
                 on_progress(1.0, ALIGN_SKIPPED)
             return context

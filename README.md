@@ -4,7 +4,7 @@ Speech-to-text system using [faster-whisper](https://github.com/SYSTRAN/faster-w
 (large-v3, INT8) with speaker diarization via
 [pyannote-audio](https://github.com/pyannote/pyannote-audio),
 a [FastAPI](https://fastapi.tiangolo.com/) + [htmx](https://htmx.org/) + [Alpine.js](https://alpinejs.dev/) web interface,
-and Docker deployment (GPU / CPU).
+and Docker deployment (NVIDIA GPU / CPU / AMD ROCm).
 
 > **Note:** The UI is in Traditional Chinese (繁體中文).
 
@@ -17,7 +17,7 @@ and Docker deployment (GPU / CPU).
 - Real-time progress tracking via Redis
 - Export to SRT, VTT, TXT, JSON, DOCX
 - Batch download of results as ZIP
-- Docker Compose deployment with GPU and CPU profiles
+- Docker Compose deployment with NVIDIA GPU, CPU, and AMD ROCm profiles
 
 **Supported formats:** `.mp3`, `.wav`, `.m4a`, `.flac`, `.ogg`, `.wma`, `.aac`, `.opus`, `.mp4`, `.webm`, `.mkv`
 
@@ -550,7 +550,7 @@ uv run uvicorn whisper_ui.web.app:app --reload --reload-dir=src
 | Task Queue          | RQ + Redis                                   |
 | Frontend            | FastAPI + htmx + Alpine.js                   |
 | Storage             | SQLite + local filesystem                    |
-| Containerization    | Docker Compose (GPU / CPU profiles)          |
+| Containerization    | Docker Compose (NVIDIA GPU / CPU / AMD ROCm) |
 
 ## Project Structure
 

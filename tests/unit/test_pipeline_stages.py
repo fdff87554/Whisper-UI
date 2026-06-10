@@ -255,20 +255,25 @@ class TestAlignStage:
         ):
             stage.execute({"transcription_result": {"segments": []}, "whisperx_audio": "audio"})
 
-    def test_alignment_failure_returns_context_without_aligned_result(self):
+    def test_alignment_failure_falls_back_to_transcription_result(self):
+        """An align failure must keep speaker assignment possible: the
+        unaligned transcription becomes the aligned_result so assign_speakers
+        can still attach segment-level speakers instead of skipping entirely
+        (which would silently discard diarization too)."""
         stage = AlignStage(device="cpu")
         mock_whisperx = MagicMock()
         mock_whisperx.load_align_model.side_effect = ValueError("model not found")
+        transcription = {"segments": [{"text": "hi"}], "language": "ja"}
 
         with patch.dict("sys.modules", {"whisperx": mock_whisperx}):
             context = {
-                "transcription_result": {"segments": [], "language": "ja"},
+                "transcription_result": transcription,
                 "whisperx_audio": "audio",
                 "language": "ja",
             }
             result = stage.execute(context)
 
-        assert "aligned_result" not in result
+        assert result["aligned_result"] is transcription
 
     def test_alignment_failure_reports_skipped_progress(self):
         stage = AlignStage(device="cpu")
@@ -310,22 +315,23 @@ class TestAlignStage:
         assert "ja" in str(call_args)
         assert "model not found" in str(call_args)
 
-    def test_align_execution_failure_skips_without_partial_result(self):
+    def test_align_execution_failure_falls_back_to_transcription_result(self):
         stage = AlignStage(device="cpu")
         mock_whisperx = MagicMock()
         mock_whisperx.load_align_model.return_value = ("model", "metadata")
         mock_whisperx.align.side_effect = RuntimeError("alignment crashed")
+        transcription = {"segments": [{"text": "hello"}], "language": "ja"}
         progress_calls = []
 
         with patch.dict("sys.modules", {"whisperx": mock_whisperx}):
             context = {
-                "transcription_result": {"segments": [{"text": "hello"}], "language": "ja"},
+                "transcription_result": transcription,
                 "whisperx_audio": "audio",
                 "language": "ja",
             }
             result = stage.execute(context, on_progress=lambda p, m: progress_calls.append((p, m)))
 
-        assert "aligned_result" not in result
+        assert result["aligned_result"] is transcription
         assert progress_calls[-1] == (1.0, ALIGN_SKIPPED)
         assert stage._model is not None
         assert stage._metadata is not None

@@ -17,6 +17,7 @@ from whisper_ui.worker.context_store import PipelineContextStore
 from whisper_ui.worker.pipeline_dispatcher import (
     _current_generation,
     _load_subjob_ids,
+    adjust_subjob_timeouts,
     enqueue_pipeline,
 )
 from whisper_ui.worker.stage_tasks import (
@@ -122,6 +123,119 @@ def test_url_upload_dag_prepends_download(tmp_path):
 
     assert "run_download" in subs
     assert subs["run_preprocess"]._dependency_ids == [subs["run_download"].id]
+
+
+def test_url_job_subjobs_get_default_timeout_at_enqueue(tmp_path):
+    """A URL job has no duration when enqueued (media not downloaded yet), so
+    every sub-job falls back to job_timeout_default — the gap that
+    adjust_subjob_timeouts later closes."""
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(
+        id="job-url-timeout",
+        filename="video",
+        source_url="https://www.youtube.com/watch?v=abc",
+        status=JobStatus.QUEUED,
+        enable_diarization=True,
+    )
+
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    subs = _by_stage(_load_subjobs(redis, job.id))
+
+    assert subs["run_transcribe_align"].timeout == settings.job_timeout_default
+    assert subs["run_diarize"].timeout == settings.job_timeout_default
+
+
+def test_adjust_subjob_timeouts_rescales_gpu_stages_once_duration_known(tmp_path):
+    """After preprocess probes the duration, the deferred GPU stages get a
+    duration-scaled death-penalty; fixed-cost stages keep the default."""
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(
+        id="job-url-resize",
+        filename="video",
+        source_url="https://www.youtube.com/watch?v=abc",
+        status=JobStatus.QUEUED,
+        enable_diarization=True,
+    )
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    generation = _current_generation(redis, job.id)
+
+    # duration 2000s * multiplier 2.0 = 4000s, within [floor, max] and distinct
+    # from the 3600s default baked at enqueue.
+    adjust_subjob_timeouts(redis, job.id, generation, 2000.0, settings)
+
+    subs = _by_stage(_load_subjobs(redis, job.id))
+    assert subs["run_transcribe_align"].timeout == 4000
+    assert subs["run_diarize"].timeout == 4000
+    # Non-duration-scaled stages keep the enqueue-time default.
+    assert subs["run_download"].timeout == settings.job_timeout_default
+    assert subs["run_preprocess"].timeout == settings.job_timeout_default
+    assert subs["run_assign_speakers"].timeout == settings.job_timeout_default
+
+
+def test_adjust_subjob_timeouts_is_noop_without_duration(tmp_path):
+    """An unknown/zero duration must leave the enqueue-time timeouts intact."""
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(
+        id="job-url-noop",
+        filename="video",
+        source_url="https://www.youtube.com/watch?v=abc",
+        status=JobStatus.QUEUED,
+    )
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    generation = _current_generation(redis, job.id)
+
+    adjust_subjob_timeouts(redis, job.id, generation, None, settings)
+    adjust_subjob_timeouts(redis, job.id, generation, 0.0, settings)
+
+    subs = _by_stage(_load_subjobs(redis, job.id))
+    assert subs["run_transcribe_align"].timeout == settings.job_timeout_default
+
+
+def test_adjust_subjob_timeouts_swallows_subjob_load_failure(tmp_path, monkeypatch):
+    """A Redis failure while loading the sub-job set must not propagate: the
+    preprocess hook that calls this runs after the stage already persisted its
+    output, so a resize failure must never fail that preprocess job."""
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(id="job-load-fail", filename="video", source_url="https://youtu.be/abc", status=JobStatus.QUEUED)
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    generation = _current_generation(redis, job.id)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("redis smembers failed")
+
+    monkeypatch.setattr("whisper_ui.worker.pipeline_dispatcher._load_subjob_ids", _boom)
+
+    # Must not raise (the reviewer's regression).
+    adjust_subjob_timeouts(redis, job.id, generation, 2000.0, settings)
+
+
+def test_adjust_subjob_timeouts_swallows_timeout_calc_failure(tmp_path, monkeypatch):
+    """A failure computing the new timeout is also best-effort, not fatal."""
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(id="job-calc-fail", filename="video", source_url="https://youtu.be/abc", status=JobStatus.QUEUED)
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    generation = _current_generation(redis, job.id)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("timeout calc failed")
+
+    monkeypatch.setattr("whisper_ui.worker.pipeline_dispatcher.calculate_job_timeout", _boom)
+
+    adjust_subjob_timeouts(redis, job.id, generation, 2000.0, settings)
+
+    # Sub-jobs keep their enqueue-time default since the resize was abandoned.
+    subs = _by_stage(_load_subjobs(redis, job.id))
+    assert subs["run_transcribe_align"].timeout == settings.job_timeout_default
 
 
 def test_llm_enabled_dag_appends_llm_correction(tmp_path):
@@ -423,6 +537,49 @@ def test_finalize_success_marks_job_completed(monkeypatch, tmp_path):
     assert stored["result_path"] == str(tmp_path / "result.json")
     assert not preprocessed.exists(), "preprocessed WAV should be cleaned up"
     assert PipelineContextStore(redis, job.id).load() == {}
+
+
+def test_finalize_success_completes_even_if_cleanup_raises(monkeypatch, tmp_path):
+    """Cleanup in the completion finally is best-effort: a Redis failure
+    dropping the context hash must not surface as a callback error after the
+    job is already COMPLETED in the DB."""
+    from whisper_ui.core.models import TranscriptResult
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    job = Job(id="job-cleanup-fail", filename="m.mp3", filepath=str(tmp_path / "m.mp3"), status=JobStatus.PROCESSING)
+    transcript = TranscriptResult(language="zh", duration=10.0)
+    PipelineContextStore(redis, job.id).initialize({"transcript_result": transcript})
+
+    runtime = MagicMock()
+    runtime.redis = redis
+    runtime.db.get_job.return_value = job
+    runtime.filestore.save_result.return_value = tmp_path / "result.json"
+    runtime.settings.redis_processing_expiry = 7200
+
+    from contextlib import contextmanager
+
+    from whisper_ui.worker.progress import RedisProgressReporter
+
+    @contextmanager
+    def _fake_builder(job_id, *, generation=None):
+        runtime.reporter = RedisProgressReporter(redis, job_id, processing_ttl=7200, generation=generation)
+        yield runtime
+
+    monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
+    # Make the context-store cleanup blow up inside the finally.
+    monkeypatch.setattr(
+        PipelineContextStore, "delete", lambda self: (_ for _ in ()).throw(RuntimeError("redis delete failed"))
+    )
+
+    fake_rq_job = MagicMock()
+    fake_rq_job.meta = {"parent_job_id": job.id}
+
+    # Must not raise despite the cleanup failure.
+    pd.finalize_success(fake_rq_job, redis, None)
+
+    assert job.status == JobStatus.COMPLETED
+    assert job.result_path == str(tmp_path / "result.json")
 
 
 def test_finalize_success_skips_already_completed_job(monkeypatch, tmp_path):

@@ -796,38 +796,6 @@ def test_source_job_id_defaults_to_none_for_direct_uploads(db: JobDatabase):
     assert fetched.source_job_id is None
 
 
-def test_list_jobs_by_source_returns_versions_oldest_first(db: JobDatabase):
-    root = Job(filename="root.mp3", filepath="/tmp/root.mp3")
-    db.insert_job(root)
-    older = Job(filename="v1.mp3", filepath="/tmp/v1.mp3", source_job_id=root.id)
-    newer = Job(filename="v2.mp3", filepath="/tmp/v2.mp3", source_job_id=root.id)
-    db.insert_job(older)
-    db.insert_job(newer)
-    # created_at is set at construction; force a deterministic ordering.
-    older.created_at = "2024-01-01T00:00:00+00:00"
-    newer.created_at = "2024-02-01T00:00:00+00:00"
-    db.update_job(older)
-    db.update_job(newer)
-
-    versions = db.list_jobs_by_source(root.id)
-
-    # Only the version jobs are returned, not the root, and oldest first.
-    assert [j.id for j in versions] == [older.id, newer.id]
-
-
-def test_list_jobs_by_source_respects_owner_filter(db: JobDatabase):
-    root = Job(filename="root.mp3", filepath="/tmp/root.mp3", owner_id=1)
-    db.insert_job(root)
-    mine = Job(filename="mine.mp3", filepath="/tmp/mine.mp3", source_job_id=root.id, owner_id=1)
-    theirs = Job(filename="theirs.mp3", filepath="/tmp/theirs.mp3", source_job_id=root.id, owner_id=2)
-    db.insert_job(mine)
-    db.insert_job(theirs)
-
-    versions = db.list_jobs_by_source(root.id, owner_id=1)
-
-    assert [j.id for j in versions] == [mine.id]
-
-
 def test_legacy_db_without_source_job_id_column_upgrades(tmp_dir: Path):
     """A deployment predating versioning has no source_job_id column. After
     init_db migrates the schema, the column exists, legacy rows read as None,

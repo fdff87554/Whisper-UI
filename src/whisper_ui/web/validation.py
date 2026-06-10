@@ -6,7 +6,14 @@ import re
 
 from fastapi import HTTPException
 
+from whisper_ui.core.models import JobStatus
+
 _HEX32_RE = re.compile(r"^[0-9a-f]{32}$")
+
+# Valid values for the jobs-list ``status`` query filter: the empty string
+# ("all") plus every JobStatus value. Shared by the user and admin job routes
+# so they reject an unknown status identically.
+VALID_STATUS_FILTERS = frozenset({"", *JobStatus})
 
 # Upper bound mirrors the diarization UI control (``max="20"``). The server
 # clamps rather than trusting the form so a crafted request cannot push an
@@ -19,6 +26,16 @@ def validate_hex_id(value: str, name: str = "id") -> str:
     if not _HEX32_RE.match(value):
         raise HTTPException(status_code=400, detail=f"Invalid {name} format")
     return value
+
+
+def normalize_status_filter(status: str) -> str:
+    """Return ``status`` if it is a valid jobs-list filter, else ``""`` (all).
+
+    Resetting an unknown value to "all" (rather than 400-ing) keeps the page
+    rendering and stops a bogus filter from being baked into the polling
+    wrapper's hx-get URL.
+    """
+    return status if status in VALID_STATUS_FILTERS else ""
 
 
 def clamp_num_speakers(value: int) -> int:

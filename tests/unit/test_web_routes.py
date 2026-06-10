@@ -721,7 +721,7 @@ class TestJobsRoutes:
         # The original is untouched; only the new version flips to FAILED with a
         # generic, leak-free message.
         assert db.get_job(src.id).status == JobStatus.COMPLETED
-        new_versions = db.list_jobs_by_source(src.id)
+        new_versions = [j for j in db.list_jobs() if j.source_job_id == src.id]
         assert len(new_versions) == 1
         assert new_versions[0].status == JobStatus.FAILED
         assert "secret" not in (new_versions[0].error or "")
