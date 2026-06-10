@@ -141,6 +141,11 @@ async def jobs_list_fragment(
     status: str = "",
     page: int = 0,
 ):
+    # Mirror jobs_page / admin_jobs_list_fragment: reject an unknown status so
+    # the poll does not keep re-requesting with a bogus filter (and the
+    # wrapper's hx-get URL stays clean).
+    if status not in _VALID_STATUS_FILTERS:
+        status = ""
     ctx = build_list_context(db, redis, filestore, status, page, owner_filter(user))
     # Fragment-only: lets _job_list.html emit the OOB chip-count spans (the
     # full page renders the chips itself — duplicating the ids there breaks

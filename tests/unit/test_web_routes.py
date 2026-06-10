@@ -270,6 +270,16 @@ class TestJobsRoutes:
         assert swap_value.startswith("morph:")
         assert " " not in swap_value
 
+    def test_jobs_list_fragment_resets_invalid_status(self, client):
+        """Parity with jobs_page and admin_jobs_list_fragment: an unknown
+        status is reset to empty so the poll does not keep re-requesting with
+        a bogus filter baked into the wrapper's hx-get URL."""
+        resp = client.get("/jobs/list?status=bogus")
+        assert resp.status_code == 200
+        assert "status=bogus" not in resp.text
+        opening_tag = resp.text.split('id="job-list-wrapper"', 1)[1].split(">", 1)[0]
+        assert "?status=&page=0" in opening_tag
+
     def test_jobs_list_poll_wrapper_is_quiet(self, client):
         """Regression: the 3s poll must not animate the global page loader —
         users read the every-tick animation as the whole page reloading. The
