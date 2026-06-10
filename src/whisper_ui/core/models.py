@@ -76,6 +76,10 @@ class Job:
     result_path: str | None = None
     duration: float | None = None
     batch_id: str | None = None
+    # Human-readable batch name (e.g. the YouTube playlist title that was
+    # expanded into this batch). Denormalized onto every job in the batch —
+    # batches have no table of their own; readers take it from any member.
+    batch_title: str | None = None
     source_url: str | None = None
     owner_id: int | None = None
     # Points at the root job whose uploaded audio this job was created from
