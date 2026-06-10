@@ -56,6 +56,21 @@ def test_admin_users_page_has_v2_filter_and_reset_modal(app, db, test_admin, bob
     assert "resetPasswordDialog()" in resp.text
 
 
+def test_admin_reset_password_injects_username_via_dataset(app, db, test_admin, bob):
+    """Regression: |tojson wrapped the username in literal double quotes,
+    terminating the double-quoted @click attribute early and breaking the
+    reset-password dialog. The username must ride on a data attribute read
+    via dataset instead."""
+    client = authed_test_client(app, test_admin)
+
+    resp = client.get("/admin/users")
+
+    assert resp.status_code == 200
+    assert 'data-username="bob"' in resp.text
+    assert "username: $el.dataset.username" in resp.text
+    assert 'username: "' not in resp.text  # no inline |tojson interpolation
+
+
 def test_admin_users_page_uses_admin_users_active_value(app, test_admin):
     """The sidebar's Alpine :class binding compares activePage to the
     literal 'admin_users' (not 'admin'), so the route must set that
@@ -314,6 +329,32 @@ def test_admin_jobs_list_fragment_blocks_non_admin(app, test_user):
     resp = client.get("/admin/jobs/list")
 
     assert resp.status_code == 403
+
+
+def test_admin_jobs_list_fragment_emits_oob_status_counts(app, db, test_admin, test_user):
+    """The admin fragment must refresh the admin page's chip counts the same
+    way /jobs/list does — both render chips from _status_chips.html."""
+    db.insert_job(Job(filename="alices.mp3", status=JobStatus.COMPLETED, language="zh", owner_id=test_user.id))
+    client = authed_test_client(app, test_admin)
+
+    resp = client.get("/admin/jobs/list")
+
+    assert resp.status_code == 200
+    assert '<span id="status-count-all" class="badge badge-sm" hx-swap-oob="true">1</span>' in resp.text
+    assert '<span id="status-count-completed" class="badge badge-sm" hx-swap-oob="true">1</span>' in resp.text
+
+
+def test_admin_jobs_list_poll_wrapper_is_quiet(app, test_admin):
+    """The admin list reuses _job_list.html; guard against the admin route
+    ever switching to a template whose poll wrapper forgets the quiet
+    opt-out (data-quiet-poll keeps polls off the global page loader)."""
+    client = authed_test_client(app, test_admin)
+
+    resp = client.get("/admin/jobs/list")
+
+    assert resp.status_code == 200
+    opening_tag = resp.text.split('id="job-list-wrapper"', 1)[1].split(">", 1)[0]
+    assert "data-quiet-poll" in opening_tag
 
 
 def test_admin_bulk_delete_operates_across_owners(app, db, test_admin, test_user):

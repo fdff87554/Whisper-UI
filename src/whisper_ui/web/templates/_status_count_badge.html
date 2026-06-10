@@ -1,0 +1,10 @@
+{# Macro-only file (no body): both _status_chips.html and the OOB block in
+   _job_list.html import it, and a Jinja import executes the source template's
+   top-level body — chip markup here would blow up on the fragment routes'
+   context. The badge carries a stable id so the polled list fragment can
+   refresh the sticky-header counts via hx-swap-oob. #}
+{% macro count_badge(value, status_counts, oob=false) -%}
+<span id="status-count-{{ value or 'all' }}" class="badge badge-sm"{% if oob %} hx-swap-oob="true"{% endif %}>
+  {{- status_counts.values()|sum if value == '' else status_counts.get(value, 0) -}}
+</span>
+{%- endmacro %}

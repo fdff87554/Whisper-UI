@@ -20,7 +20,7 @@
   'correct': labels.DASHBOARD_STAGE_CORRECT,
   'export': labels.DASHBOARD_STAGE_EXPORT,
 } -%}
-<div id="dashboard-active"
+<div id="dashboard-active" data-quiet-poll
      hx-get="/dashboard/active"
      hx-trigger="every {% if active_jobs %}5s{% else %}30s{% endif %}"
      hx-swap="morph:outerHTML">
@@ -43,7 +43,12 @@
     <div id="dashboard-active-{{ job.id }}"
          class="card bg-base-200 border border-line mb-2"
          x-data="{
-           createdAt: {{ (job.created_at or '')|tojson }},
+           {# Single-quoted literal, not |tojson: tojson would wrap the
+              timestamp in literal double quotes and terminate this
+              double-quoted x-data attribute early. created_at is a
+              server-generated ISO string (quote-free); '' parses to NaN and
+              is handled by the etaText guard below. #}
+           createdAt: '{{ job.created_at or "" }}',
            progress: {{ progress_val }},
            etaTemplate: '{{ labels.DASHBOARD_HERO_ETA }}',
            etaUnknownLabel: '{{ labels.DASHBOARD_HERO_ETA_UNKNOWN }}',

@@ -1,11 +1,17 @@
 {# htmx fragment: job list with polling — Idiomorph morphs unchanged DOM in place,
    preserving collapse state, focus, and scroll between polls. The callbacks
    reference (defined in base.html) makes data-morph-skip-checked elements opt
-   out of `checked` syncing so user-toggled batch collapses are not reset. #}
-<div id="job-list-wrapper"
+   out of `checked` syncing so user-toggled batch collapses are not reset.
+   data-quiet-poll opts the wrapper's own background requests out of the
+   global page loader (see base.html) — a 3s poll is not a user action. #}
+{# The morph config must contain NO whitespace: htmx tokenizes hx-swap on
+   spaces, so "morph:{a, b}" truncates the swap style to "morph:{a," — the
+   extension never matches it and htmx silently falls back to innerHTML,
+   nesting a fresh wrapper inside the old one on every poll. #}
+<div id="job-list-wrapper" data-quiet-poll
      hx-get="{{ list_url|default('/jobs/list', true) }}?status={{ status|default('', true) }}&page={{ page }}"
      {% if has_active %}hx-trigger="every 3s, refreshJobList from:body"{% else %}hx-trigger="refreshJobList from:body"{% endif %}
-     hx-swap="morph:{morphStyle:'outerHTML', ignoreActiveValue:true, callbacks:window.__whisperUiMorphCallbacks}">
+     hx-swap="morph:{morphStyle:'outerHTML',ignoreActiveValue:true,callbacks:window.__whisperUiMorphCallbacks}">
 
 {% if total_count == 0 %}
   <div class="text-center py-12 opacity-60">
@@ -131,3 +137,16 @@
 
 {% endif %}
 </div>
+
+{% if oob_counts %}
+{# Out-of-band refresh of the sticky-header chip counts (rendered by
+   _status_chips.html), so a poll that changes job states updates the header
+   too. Gated on oob_counts — set only by the fragment routes: the full pages
+   render the chips themselves, and emitting these spans there would
+   duplicate the ids. htmx extracts hx-swap-oob elements before the main
+   morph swap, so they must sit top-level, outside #job-list-wrapper. #}
+{% from "_status_count_badge.html" import count_badge %}
+{% for value in [''] + labels.STATUS_LABELS.keys()|list %}
+{{ count_badge(value, status_counts, oob=true) }}
+{% endfor %}
+{% endif %}

@@ -139,6 +139,36 @@ class TestDashboardRoutes:
         assert 'id="dashboard-active"' in resp.text
         assert 'hx-trigger="every 5s"' in resp.text
 
+    def test_dashboard_active_poll_wrapper_is_quiet(self, client):
+        """Regression: a background poll tick is not a user action, so the
+        wrapper must opt out of the global page loader via data-quiet-poll
+        (the loader animating every tick read as constant page reloads)."""
+        resp = client.get("/dashboard/active")
+        assert resp.status_code == 200
+        opening_tag = resp.text.split('id="dashboard-active"', 1)[1].split(">", 1)[0]
+        assert "data-quiet-poll" in opening_tag
+
+    def test_dashboard_greeting_injects_username_via_dataset(self, client):
+        """Regression: |tojson wrapped the username in literal double quotes,
+        terminating the double-quoted x-data attribute early and breaking the
+        greeting heading. The username must ride on a data attribute read via
+        dataset instead."""
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert 'data-username="alice"' in resp.text
+        assert "const name = $el.dataset.username" in resp.text
+        assert 'const name = "' not in resp.text  # no inline tojson interpolation
+
+    def test_dashboard_active_created_at_is_valid_alpine(self, client, db):
+        """Regression: |tojson wrapped the ISO timestamp in literal double
+        quotes, terminating the double-quoted x-data attribute early. The
+        value must be a single-quoted JS literal instead."""
+        db.insert_job(Job(filename="active.mp3", status=JobStatus.PROCESSING, language="zh"))
+        resp = client.get("/dashboard/active")
+        assert resp.status_code == 200
+        assert "createdAt: '" in resp.text
+        assert 'createdAt: "' not in resp.text
+
 
 class TestUploadRoutes:
     def test_upload_page(self, client):
@@ -218,6 +248,80 @@ class TestJobsRoutes:
         assert resp.status_code == 200
         assert "job-list-wrapper" in resp.text
 
+    def test_status_chips_active_filter_is_valid_alpine(self, client):
+        """Regression: |tojson wraps the status in literal double quotes, which
+        terminate the double-quoted x-data attribute early and break Alpine.
+        The filter value must be a single-quoted JS literal instead."""
+        resp = client.get("/jobs?status=completed")
+        assert resp.status_code == 200
+        assert "activeFilter: 'completed'" in resp.text
+        assert 'activeFilter: "completed"' not in resp.text
+
+    def test_jobs_list_wrapper_morph_swap_spec_has_no_whitespace(self, client):
+        """Regression: htmx tokenizes hx-swap on whitespace, so a space inside
+        the morph config truncated the swap style — the morph extension never
+        matched it and htmx silently fell back to innerHTML, nesting a fresh
+        wrapper inside the old one and destroying every DOM state (open
+        dropdown, focus, scroll, text selection) on each 3s poll."""
+        resp = client.get("/jobs/list")
+        assert resp.status_code == 200
+        opening_tag = resp.text.split('id="job-list-wrapper"', 1)[1].split(">", 1)[0]
+        swap_value = opening_tag.split('hx-swap="', 1)[1].split('"', 1)[0]
+        assert swap_value.startswith("morph:")
+        assert " " not in swap_value
+
+    def test_jobs_list_fragment_resets_invalid_status(self, client):
+        """Parity with jobs_page and admin_jobs_list_fragment: an unknown
+        status is reset to empty so the poll does not keep re-requesting with
+        a bogus filter baked into the wrapper's hx-get URL."""
+        resp = client.get("/jobs/list?status=bogus")
+        assert resp.status_code == 200
+        assert "status=bogus" not in resp.text
+        opening_tag = resp.text.split('id="job-list-wrapper"', 1)[1].split(">", 1)[0]
+        assert "?status=&page=0" in opening_tag
+
+    def test_jobs_list_poll_wrapper_is_quiet(self, client):
+        """Regression: the 3s poll must not animate the global page loader —
+        users read the every-tick animation as the whole page reloading. The
+        wrapper opts out via data-quiet-poll (guard lives in base.html)."""
+        resp = client.get("/jobs/list")
+        assert resp.status_code == 200
+        opening_tag = resp.text.split('id="job-list-wrapper"', 1)[1].split(">", 1)[0]
+        assert "data-quiet-poll" in opening_tag
+        assert "hx-trigger=" in opening_tag
+
+    def test_jobs_pagination_buttons_do_not_carry_quiet_attr(self, client, db):
+        """User-initiated requests from *inside* the polling wrapper (the
+        pagination buttons) must keep loader feedback: the quiet opt-out is
+        matched on the requesting element itself, never inherited."""
+        for i in range(21):  # one over DEFAULT_JOBS_PER_PAGE so pagination renders
+            db.insert_job(Job(filename=f"page{i}.mp3", status=JobStatus.COMPLETED, language="zh"))
+        resp = client.get("/jobs/list")
+        assert resp.status_code == 200
+        button_tags = [seg.split(">", 1)[0] for seg in resp.text.split("<button")[1:]]
+        pagination_tags = [tag for tag in button_tags if 'hx-target="#job-list-wrapper"' in tag]
+        assert pagination_tags  # pagination actually rendered
+        assert all("data-quiet-poll" not in tag for tag in pagination_tags)
+
+    def test_page_loader_guards_quiet_poll(self, client):
+        """The base layout's loader listeners must skip quiet-poll requests;
+        without the guard the data-quiet-poll attribute is inert."""
+        resp = client.get("/jobs")
+        assert resp.status_code == 200
+        assert "function isQuietPoll(evt)" in resp.text
+        assert "hasAttribute('data-quiet-poll')" in resp.text
+
+    def test_error_toasts_guard_quiet_poll(self, client):
+        """A failed background poll retries on the next tick; toasting it
+        every 3s during a backend hiccup buries the user in error popups.
+        Both error handlers must skip quiet-poll requests."""
+        resp = client.get("/jobs")
+        assert resp.status_code == 200
+        send_error_handler = resp.text.split("htmx:sendError", 1)[1].split("});", 1)[0]
+        assert "if (isQuietPoll(evt)) return;" in send_error_handler
+        response_error_handler = resp.text.split("htmx:responseError", 1)[1].split("});", 1)[0]
+        assert "if (isQuietPoll(evt)) return;" in response_error_handler
+
     def test_jobs_all_chip_shows_unfiltered_total_when_filtered(self, client, db, filestore):
         """Finding F5: opening /jobs?status=failed must still show the true
         total on the 全部 chip, not the failed-only count."""
@@ -228,7 +332,33 @@ class TestJobsRoutes:
 
         assert resp.status_code == 200
         # The 全部 chip badge must reflect both jobs, not just the 1 failed.
-        assert '<span class="badge badge-sm">2</span>' in resp.text
+        assert '<span id="status-count-all" class="badge badge-sm">2</span>' in resp.text
+
+    def test_jobs_list_fragment_emits_oob_status_counts(self, client, db, filestore):
+        """A poll that changes job states must also refresh the sticky-header
+        chips: the fragment carries hx-swap-oob count badges keyed to the
+        ids rendered by _status_chips.html."""
+        _create_completed_job(db, filestore)
+        _create_failed_job(db)
+
+        resp = client.get("/jobs/list")
+
+        assert resp.status_code == 200
+        assert '<span id="status-count-all" class="badge badge-sm" hx-swap-oob="true">2</span>' in resp.text
+        assert '<span id="status-count-completed" class="badge badge-sm" hx-swap-oob="true">1</span>' in resp.text
+        assert '<span id="status-count-failed" class="badge badge-sm" hx-swap-oob="true">1</span>' in resp.text
+
+    def test_jobs_full_page_renders_chips_without_oob_duplicates(self, client, db, filestore):
+        """jobs.html renders the chips itself; the _job_list.html include must
+        not emit the OOB spans there, or the badge ids would duplicate and
+        break the out-of-band targeting."""
+        _create_completed_job(db, filestore)
+
+        resp = client.get("/jobs")
+
+        assert resp.status_code == 200
+        assert resp.text.count('id="status-count-all"') == 1
+        assert "hx-swap-oob" not in resp.text
 
     def test_jobs_list_fragment_emits_stable_id_for_single_job(self, client, db, filestore):
         """Without a stable wrapper id Idiomorph falls back to positional
@@ -264,6 +394,21 @@ class TestJobsRoutes:
 
         assert resp.status_code == 200
         assert "重新轉換版本" in resp.text
+
+    def test_export_dropdown_uses_focus_mechanism_only(self, client, db, filestore):
+        """Regression: the export dropdown must be driven by DaisyUI's
+        :focus-within CSS alone. A second Alpine x-show source of truth
+        desyncs whenever a swap or focus loss closes the menu while Alpine
+        still thinks it is open — reopening then takes two clicks."""
+        _create_completed_job(db, filestore)
+        resp = client.get("/jobs/list")
+        assert resp.status_code == 200
+        dropdown = resp.text.split('class="dropdown dropdown-end"', 1)[1].split("</ul>", 1)[0]
+        assert 'tabindex="0"' in dropdown
+        assert 'role="button"' in dropdown
+        assert "x-show" not in dropdown
+        assert "x-data" not in dropdown
+        assert "@click" not in dropdown
 
     def test_jobs_list_hides_download_media_when_reclaimed(self, client, db, filestore):
         """The inline export dropdown in _job_card.html must also gate

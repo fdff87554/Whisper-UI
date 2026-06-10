@@ -1,0 +1,22 @@
+{# Status filter chips shared by /jobs and /admin/jobs — `list_url` keeps the
+   filter requests in the caller's scope. total_count is filtered by the
+   active status, so the 全部 chip sums the per-status counts instead. The
+   count badges carry stable ids so the polled list fragment can refresh them
+   out-of-band (see _job_list.html); without that, a poll that changes job
+   states leaves the sticky-header counts stale until a full reload. #}
+{% from "_status_count_badge.html" import count_badge %}
+{# activeFilter uses a single-quoted JS literal, not |tojson: tojson wraps a
+   string in literal double quotes, which would terminate this double-quoted
+   x-data attribute early (the v2.3.1 breakage). status is validated to an
+   empty string or a JobStatus value, so it is always quote-free. #}
+<div class="flex flex-wrap gap-2 mb-3" x-data="{ activeFilter: '{{ status }}' }">
+  {% for value, label in [('', labels.JOBS_FILTER_ALL)] + labels.STATUS_LABELS.items()|list %}
+  <button class="btn btn-sm gap-1.5"
+          :class="activeFilter === '{{ value }}' ? 'btn-primary' : 'btn-ghost border border-line'"
+          hx-get="{{ list_url|default('/jobs/list', true) }}?status={{ value }}" hx-target="#job-list-wrapper" hx-swap="outerHTML"
+          @click="activeFilter = '{{ value }}'">
+    <span>{{ label }}</span>
+    {{ count_badge(value, status_counts) }}
+  </button>
+  {% endfor %}
+</div>

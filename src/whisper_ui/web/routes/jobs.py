@@ -84,6 +84,10 @@ def build_list_context(db: JobDatabase, redis, filestore, status: str, page: int
     progress_data = _get_progress_data(redis, jobs)
     media_available_map = _build_media_available_map(filestore, jobs)
     has_active = db.has_active_jobs(owner_id=owner_id)
+    # Chip counts ride along on every list render so the polled fragment can
+    # refresh the sticky-header badges out-of-band (_job_list.html); without
+    # this the header reads stale counts until a full page reload.
+    status_counts = db.get_status_counts(owner_id=owner_id)
 
     return {
         "groups": groups,
@@ -95,6 +99,7 @@ def build_list_context(db: JobDatabase, redis, filestore, status: str, page: int
         "page": page,
         "total_pages": total_pages,
         "total_count": total_count,
+        "status_counts": status_counts,
     }
 
 
@@ -114,7 +119,6 @@ async def jobs_page(
     owner_id = owner_filter(user)
     ctx = build_list_context(db, redis, filestore, status, page, owner_id)
     ctx["active_page"] = "jobs"
-    ctx["status_counts"] = db.get_status_counts(owner_id=owner_id)
     # The re-transcribe modal (full page only, not the /jobs/list fragment)
     # reuses the upload form's option choices.
     ctx["supported_languages"] = SUPPORTED_LANGUAGES
@@ -137,7 +141,16 @@ async def jobs_list_fragment(
     status: str = "",
     page: int = 0,
 ):
+    # Mirror jobs_page / admin_jobs_list_fragment: reject an unknown status so
+    # the poll does not keep re-requesting with a bogus filter (and the
+    # wrapper's hx-get URL stays clean).
+    if status not in _VALID_STATUS_FILTERS:
+        status = ""
     ctx = build_list_context(db, redis, filestore, status, page, owner_filter(user))
+    # Fragment-only: lets _job_list.html emit the OOB chip-count spans (the
+    # full page renders the chips itself — duplicating the ids there breaks
+    # the OOB targeting).
+    ctx["oob_counts"] = True
     return templates.TemplateResponse(request=request, name="_job_list.html", context=ctx)
 
 
