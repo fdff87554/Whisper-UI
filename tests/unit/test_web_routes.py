@@ -227,6 +227,19 @@ class TestJobsRoutes:
         assert resp.status_code == 200
         assert "job-list-wrapper" in resp.text
 
+    def test_jobs_list_wrapper_morph_swap_spec_has_no_whitespace(self, client):
+        """Regression: htmx tokenizes hx-swap on whitespace, so a space inside
+        the morph config truncated the swap style — the morph extension never
+        matched it and htmx silently fell back to innerHTML, nesting a fresh
+        wrapper inside the old one and destroying every DOM state (open
+        dropdown, focus, scroll, text selection) on each 3s poll."""
+        resp = client.get("/jobs/list")
+        assert resp.status_code == 200
+        opening_tag = resp.text.split('id="job-list-wrapper"', 1)[1].split(">", 1)[0]
+        swap_value = opening_tag.split('hx-swap="', 1)[1].split('"', 1)[0]
+        assert swap_value.startswith("morph:")
+        assert " " not in swap_value
+
     def test_jobs_list_poll_wrapper_is_quiet(self, client):
         """Regression: the 3s poll must not animate the global page loader —
         users read the every-tick animation as the whole page reloading. The
