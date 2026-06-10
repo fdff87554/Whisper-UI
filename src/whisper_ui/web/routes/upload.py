@@ -293,7 +293,13 @@ async def upload_submit(
         )
 
         try:
-            enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+            # Offload the synchronous Redis/RQ enqueue so a large batch (up to
+            # MAX_BATCH_SIZE) does not monopolise the event loop and stall
+            # other requests (e.g. the /jobs poll). enqueue_pipeline touches
+            # only Redis/RQ/filestore (the redis client is thread-safe); the
+            # SQLite insert_job above stays on the loop per the single-
+            # connection design.
+            await asyncio.to_thread(enqueue_pipeline, job, redis=redis, settings=settings, filestore=filestore)
             submitted_count += 1
         except Exception:
             logger.exception("Failed to enqueue job %s", job.id)
@@ -488,7 +494,9 @@ async def upload_url_submit(
         )
 
         try:
-            enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+            # See upload_submit: offload the sync enqueue so a large URL batch
+            # does not block the event loop. insert_job stays on the loop.
+            await asyncio.to_thread(enqueue_pipeline, job, redis=redis, settings=settings, filestore=filestore)
             submitted_count += 1
         except Exception:
             logger.exception("Failed to enqueue URL job %s", job.id)
