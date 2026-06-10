@@ -14,6 +14,10 @@ class PlaylistURLError(YouTubeURLError):
     pass
 
 
+class UnsupportedPlaylistTypeError(YouTubeURLError):
+    pass
+
+
 class GoogleDriveURLError(ValueError):
     pass
 
@@ -25,6 +29,16 @@ class TwitterURLError(ValueError):
 _YOUTUBE_HOSTS = {"www.youtube.com", "youtube.com", "m.youtube.com", "youtu.be", "www.youtu.be"}
 
 _VIDEO_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
+
+# Public, enumerable playlist IDs (user playlists PL*, channel uploads UU*,
+# albums OLAK5uy_*, favourites FL*). The 13-42 length window covers all of
+# them while excluding the 2-char login-bound IDs below.
+_PLAYLIST_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{13,42}$")
+# RD*/UL* are auto-generated Mixes (endless, per-viewer); WL/LL/LM are Watch
+# Later / Liked videos / Liked music, which require a signed-in account. None
+# of them can be enumerated by an anonymous yt-dlp extraction.
+_UNSUPPORTED_PLAYLIST_PREFIXES = ("RD", "UL")
+_UNSUPPORTED_PLAYLIST_IDS = frozenset({"WL", "LL", "LM"})
 
 _GDRIVE_HOSTS = {"drive.google.com", "docs.google.com"}
 _GDRIVE_FILE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{10,}$")
@@ -73,8 +87,11 @@ def validate_youtube_url(url: str) -> str:
 
     qs = parse_qs(parsed.query)
 
-    # Reject playlist-only URLs
-    if parsed.path == "/playlist" or (qs.get("list") and not qs.get("v")):
+    # Reject playlist-only URLs. A link that names a specific video (watch?v=,
+    # youtu.be/<id>, shorts, embed) resolves to that single video even when a
+    # list= parameter tags along, matching the share links YouTube emits while
+    # a playlist is playing.
+    if parsed.path == "/playlist" or (qs.get("list") and not _extract_video_id(host, parsed.path, qs)):
         raise PlaylistURLError("Playlist URLs are not supported.")
 
     video_id = _extract_video_id(host, parsed.path, qs)
@@ -108,6 +125,43 @@ def _extract_video_id(host: str, path: str, qs: dict[str, list[str]]) -> str | N
         return parts[2] if len(parts) > 2 else None
 
     return None
+
+
+def validate_youtube_playlist_url(url: str) -> str:
+    """Validate a YouTube playlist URL and return a canonical playlist URL.
+
+    Accepts /playlist?list={ID} links and watch links whose only content
+    reference is a list= parameter. Raises UnsupportedPlaylistTypeError for
+    auto-generated or login-bound lists (Mixes, Watch Later, Liked videos)
+    and YouTubeURLError for anything else that is not a valid playlist link.
+
+    Returns a canonical URL: https://www.youtube.com/playlist?list={ID}
+    """
+    url = url.strip()
+    if not url:
+        raise YouTubeURLError("URL is empty.")
+
+    parsed = _parse_with_scheme(url)
+
+    if parsed.scheme not in ("http", "https"):
+        raise YouTubeURLError("Invalid URL scheme.")
+
+    host = parsed.hostname or ""
+    if host not in _YOUTUBE_HOSTS:
+        raise YouTubeURLError("Not a YouTube URL.")
+
+    list_ids = parse_qs(parsed.query).get("list")
+    if not list_ids:
+        raise YouTubeURLError("Could not extract a playlist ID.")
+
+    playlist_id = list_ids[0]
+    if playlist_id in _UNSUPPORTED_PLAYLIST_IDS or playlist_id.startswith(_UNSUPPORTED_PLAYLIST_PREFIXES):
+        raise UnsupportedPlaylistTypeError("Auto-generated and login-bound playlists are not supported.")
+    if not _PLAYLIST_ID_RE.match(playlist_id):
+        raise YouTubeURLError("Could not extract a valid playlist ID.")
+
+    clean_qs = urlencode({"list": playlist_id})
+    return urlunparse(("https", "www.youtube.com", "/playlist", "", clean_qs, ""))
 
 
 def validate_google_drive_url(url: str) -> str:
@@ -214,6 +268,26 @@ def _extract_tweet_id(path: str) -> str | None:
         if seg in ("status", "statuses") and i + 1 < len(parts) and parts[i + 1].isdigit():
             return parts[i + 1]
     return None
+
+
+def is_youtube_playlist_url(url: str) -> bool:
+    """Quick check whether a URL is a playlist-only YouTube link.
+
+    True only when no specific video is identifiable (the /playlist path, or a
+    list= parameter without a video ID); mirrors the rejection condition in
+    validate_youtube_url so routing and validation can never disagree.
+    """
+    try:
+        parsed = _parse_with_scheme(url.strip())
+    except Exception:
+        return False
+    host = parsed.hostname or ""
+    if host not in _YOUTUBE_HOSTS:
+        return False
+    if parsed.path == "/playlist":
+        return True
+    qs = parse_qs(parsed.query)
+    return bool(qs.get("list")) and not _extract_video_id(host, parsed.path, qs)
 
 
 def is_google_drive_url(url: str) -> bool:
