@@ -22,14 +22,21 @@ echo "Model cache directory: ${MODEL_DIR}"
 
 WORKER_QUEUES="${WORKER_QUEUES:-whisper:gpu whisper:io whisper:cpu whisper:llm default}"
 
-# CUDA cannot be re-initialised in a forked subprocess. When the device is
-# set to cuda, use SimpleWorker which runs jobs in the main process instead
-# of forking.
+# A GPU context cannot be re-initialised in a forked subprocess, so GPU
+# workers must run jobs in the main process via SimpleWorker (no per-job
+# fork) instead of RQ's default forking Worker. This applies to both cuda
+# and rocm: ROCm's PyTorch is a HIP build that still uses the torch.cuda API,
+# so it hits the identical "Cannot re-initialize CUDA in forked subprocess"
+# error (align/diarize fail). CPU workers keep the default forking Worker.
+# DEVICE is always set explicitly per worker in compose; "auto" is treated as
+# non-GPU here (no deployed worker uses it).
 WORKER_CLASS_ARG=""
-if [ "${DEVICE:-auto}" = "cuda" ]; then
+case "${DEVICE:-auto}" in
+cuda | rocm)
 	WORKER_CLASS_ARG="--worker-class rq.SimpleWorker"
-	echo "Using SimpleWorker to avoid CUDA fork issues"
-fi
+	echo "Using SimpleWorker (DEVICE=${DEVICE}) to avoid GPU fork-initialization errors"
+	;;
+esac
 
 echo "Starting RQ worker on queues: ${WORKER_QUEUES}"
 # shellcheck disable=SC2086
