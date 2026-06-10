@@ -68,6 +68,7 @@ def expand_playlist(playlist_url: str, *, limit: int) -> PlaylistInfo:
     try:
         import yt_dlp  # Lazy: only deployments with the frontend extra ship yt-dlp; tests inject a fake module.
     except ImportError as err:
+        logger.exception("yt-dlp is not installed; playlist expansion requires the frontend extra")
         raise PlaylistFetchError("yt-dlp is not installed.") from err
 
     ydl_opts: dict[str, Any] = {
@@ -91,7 +92,12 @@ def expand_playlist(playlist_url: str, *, limit: int) -> PlaylistInfo:
     except Exception as e:
         msg = str(e).lower()
         if any(m in msg for m in _UNAVAILABLE_MARKERS):
+            # One line, no traceback: an inaccessible playlist is routine user
+            # data, but the original message is kept visible so a blocked
+            # egress that happens to match a marker can still be diagnosed.
+            logger.warning("Playlist not accessible: %s (url=%s)", e, playlist_url)
             raise PlaylistUnavailableError(f"Playlist is not accessible: {e}") from e
+        logger.exception("Failed to fetch playlist metadata for %s", playlist_url)
         raise PlaylistFetchError(f"Failed to fetch playlist metadata: {e}") from e
 
     if info is None:

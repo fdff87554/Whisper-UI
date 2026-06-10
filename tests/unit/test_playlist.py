@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -163,3 +164,43 @@ class TestExpandPlaylistErrors:
             pytest.raises(PlaylistFetchError, match="not installed"),
         ):
             expand_playlist(PLAYLIST_URL, limit=50)
+
+
+class TestExpandPlaylistLogging:
+    """Expansion failures must leave a server-side trail: the route turns
+    them into generic UI messages, so the log is the only place a missing
+    dependency or blocked egress is diagnosable."""
+
+    def test_fetch_error_logs_error_with_traceback(self, caplog):
+        with (
+            caplog.at_level(logging.ERROR, logger="whisper_ui.web.playlist"),
+            patch.dict("sys.modules", {"yt_dlp": _make_mock_module(error=Exception("urlopen error timed out"))}),
+            pytest.raises(PlaylistFetchError),
+        ):
+            expand_playlist(PLAYLIST_URL, limit=50)
+
+        record = next(r for r in caplog.records if "Failed to fetch playlist metadata" in r.getMessage())
+        assert record.exc_info is not None
+
+    def test_missing_yt_dlp_logs_error(self, caplog):
+        with (
+            caplog.at_level(logging.ERROR, logger="whisper_ui.web.playlist"),
+            patch.dict("sys.modules", {"yt_dlp": None}),
+            pytest.raises(PlaylistFetchError),
+        ):
+            expand_playlist(PLAYLIST_URL, limit=50)
+
+        assert any("yt-dlp is not installed" in r.getMessage() for r in caplog.records)
+
+    def test_inaccessible_playlist_logs_warning_without_error(self, caplog):
+        error = Exception("ERROR: [youtube:tab] This playlist is private")
+        with (
+            caplog.at_level(logging.WARNING, logger="whisper_ui.web.playlist"),
+            patch.dict("sys.modules", {"yt_dlp": _make_mock_module(error=error)}),
+            pytest.raises(PlaylistUnavailableError),
+        ):
+            expand_playlist(PLAYLIST_URL, limit=50)
+
+        warning = next(r for r in caplog.records if "Playlist not accessible" in r.getMessage())
+        assert warning.levelno == logging.WARNING
+        assert not any(r.levelno >= logging.ERROR for r in caplog.records)
