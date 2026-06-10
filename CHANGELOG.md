@@ -7,6 +7,27 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- The jobs list poll now actually morphs the DOM instead of replacing it:
+  whitespace inside the `morph:{...}` swap config broke htmx's swap-spec
+  tokenization, so the idiomorph extension (introduced in v1.10.0) never ran
+  on `#job-list-wrapper` and every 3s poll silently fell back to an innerHTML
+  swap — nesting a fresh wrapper inside the old one and destroying open
+  dropdowns, focus, scroll position, and text selection on each tick. This
+  was the root cause of the jobs page feeling like it constantly reloads.
+- Background polls no longer animate the global top loading bar, and a failed
+  background tick no longer pops a network-error toast every 3 seconds during
+  a backend hiccup. Polling wrappers opt out via `data-quiet-poll`;
+  user-initiated requests (pagination, filters, actions) keep both behaviors.
+- The export dropdown on job cards is driven by DaisyUI's focus mechanism
+  alone. Mixing Alpine `x-show` with the `:focus-within` CSS left two sources
+  of truth that could desync, producing a menu that needs two clicks to
+  reopen.
+- The sticky-header status chip counts refresh during polling via
+  out-of-band swaps instead of going stale until a full page reload; the
+  chip markup is now shared between `/jobs` and `/admin/jobs`.
+
 ## [2.11.0] - 2026-06-10
 
 ### Added
