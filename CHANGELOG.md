@@ -7,6 +7,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.12.1] - 2026-06-10
+
+### Fixed
+
+- Speaker diarization on AMD ROCm hosts failed with "Cannot re-initialize CUDA
+  in forked subprocess". The worker entrypoint only switched to RQ's
+  non-forking SimpleWorker for `DEVICE=cuda`, so the ROCm worker (`DEVICE=rocm`)
+  ran the default forking worker; because ROCm's PyTorch uses the `torch.cuda`
+  (HIP) API, GPU stages in a forked work-horse could not initialize the GPU
+  context. The guard now covers `cuda` and `rocm`. (Pre-existing since the
+  ROCm profile was added; not specific to a release.)
+
 ## [2.12.0] - 2026-06-10
 
 ### Fixed
