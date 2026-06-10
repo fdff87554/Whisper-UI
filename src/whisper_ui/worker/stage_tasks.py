@@ -301,7 +301,10 @@ def _run_single_stage(
     without duplicating the runtime setup. ``post_persist`` runs after the
     stage outputs are persisted, with the updated context, for stages that
     need to act on a freshly-computed value (e.g. preprocess resizing
-    downstream sub-job timeouts once the audio duration is known).
+    downstream sub-job timeouts once the audio duration is known). It is
+    best-effort: it runs only after the stage's real output is already
+    durable, so its failure is logged but never re-raised — a side effect
+    must not turn a successful, persisted stage into a failed RQ job.
     """
     with build_worker_runtime(parent_job_id, generation=_current_generation()) as runtime:
         job = _load_job(runtime, parent_job_id)
@@ -328,7 +331,17 @@ def _run_single_stage(
             updated = _execute_stage(stage, context.copy(), on_progress, stage_name=stage_name)
             _persist_outputs(ctx_store, updated, output_keys, stage_name=stage_name)
             if post_persist is not None:
-                post_persist(job, runtime, updated)
+                try:
+                    post_persist(job, runtime, updated)
+                except Exception:
+                    # The stage output is already persisted; a post-persist
+                    # side effect must never fail the stage. Log and continue.
+                    logger.warning(
+                        "post_persist hook failed for stage %s (job %s); stage output already persisted",
+                        stage_name,
+                        parent_job_id,
+                        exc_info=True,
+                    )
         finally:
             _log_stage_finish(stage_name, parent_job_id, start_ns)
         return f"{stage_name}:{parent_job_id}"

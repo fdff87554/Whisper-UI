@@ -14,6 +14,7 @@ from whisper_ui.worker.runtime import WorkerRuntime
 from whisper_ui.worker.stage_tasks import (
     _banded_progress,
     _execute_stage,
+    _run_single_stage,
     pick_stage_weights,
     run_diarize,
     run_postprocess,
@@ -181,6 +182,32 @@ def test_run_diarize_only_persists_declared_output_keys(monkeypatch):
     assert stored["diarize_result"] == [("SPK0", 0.0, 1.0)]
     assert "stray_field" not in stored
     assert stored["audio_path"] == "/tmp/16k.wav"
+
+
+def test_run_single_stage_swallows_post_persist_failure(monkeypatch):
+    """A post_persist hook runs after the stage output is already persisted, so
+    its failure must be logged but never re-raised — otherwise a side effect
+    (e.g. resizing downstream timeouts) could fail an already-succeeded stage."""
+    fake_redis = fakeredis.FakeRedis()
+    job = Job(id="job-pp", status=JobStatus.PROCESSING, filepath="/tmp/a.mp3")
+    _install_fake_runtime(monkeypatch, fake_redis, job)
+    PipelineContextStore(fake_redis, "job-pp").initialize({})
+
+    def _boom(job, runtime, context):
+        raise RuntimeError("post_persist exploded")
+
+    fake_stage = _RecordingStage({"audio_path": "/tmp/16k.wav"})
+    result = _run_single_stage(
+        "job-pp",
+        stage_name="fake",
+        build_stage=lambda job, runtime: fake_stage,
+        output_keys=("audio_path",),
+        post_persist=_boom,
+    )
+
+    # The stage still completed and its output is persisted despite the hook.
+    assert result == "fake:job-pp"
+    assert PipelineContextStore(fake_redis, "job-pp").load()["audio_path"] == "/tmp/16k.wav"
 
 
 def test_run_preprocess_logs_stage_start_and_finish(monkeypatch, caplog):
