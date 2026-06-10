@@ -33,8 +33,11 @@ PROGRESS_WRITE_MIN_INTERVAL_SEC = 0.5
 # consistent with the dynamic job_timeout bounds.
 STALE_JOB_CHECK_INTERVAL = 60  # seconds
 
-# Batch upload limits
-MAX_BATCH_SIZE = 50
+# Batch upload limits. Shared by file uploads, URL submissions, and playlist
+# expansion. Sized so a typical playlist fits in one submission; jobs beyond
+# the configured worker throughput simply wait in the queue (the liveness-aware
+# stale reaper spares queued work and re-arms its state TTL while it waits).
+MAX_BATCH_SIZE = 100
 
 # Viewer client-side search becomes O(n) per keystroke; very large transcripts
 # (multi-hour multi-speaker recordings) will lock up the browser tab. Above
