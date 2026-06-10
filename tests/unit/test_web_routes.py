@@ -316,6 +316,21 @@ class TestJobsRoutes:
         assert resp.status_code == 200
         assert "重新轉換版本" in resp.text
 
+    def test_export_dropdown_uses_focus_mechanism_only(self, client, db, filestore):
+        """Regression: the export dropdown must be driven by DaisyUI's
+        :focus-within CSS alone. A second Alpine x-show source of truth
+        desyncs whenever a swap or focus loss closes the menu while Alpine
+        still thinks it is open — reopening then takes two clicks."""
+        _create_completed_job(db, filestore)
+        resp = client.get("/jobs/list")
+        assert resp.status_code == 200
+        dropdown = resp.text.split('class="dropdown dropdown-end"', 1)[1].split("</ul>", 1)[0]
+        assert 'tabindex="0"' in dropdown
+        assert 'role="button"' in dropdown
+        assert "x-show" not in dropdown
+        assert "x-data" not in dropdown
+        assert "@click" not in dropdown
+
     def test_jobs_list_hides_download_media_when_reclaimed(self, client, db, filestore):
         """The inline export dropdown in _job_card.html must also gate
         Download Media on media availability — same regression as the

@@ -52,10 +52,16 @@
   <div class="flex gap-1 flex-shrink-0">
     {% if job.status.value == 'completed' %}
     <a href="/viewer/{{ job.id }}" class="btn btn-primary btn-xs">{{ labels.JOBS_VIEW }}</a>
-    {# Inline export dropdown #}
-    <div class="dropdown dropdown-end" x-data="{ open: false }" @click.away="open = false">
-      <button class="btn btn-ghost btn-xs" @click="open = !open">{{ labels.JOBS_INLINE_EXPORT }}</button>
-      <ul class="dropdown-content menu bg-base-100 rounded-box shadow-lg z-10 w-36 p-1 border border-line" x-show="open" x-transition>
+    {# Inline export dropdown. Visibility is driven by DaisyUI's
+       :focus-within CSS alone — an Alpine x-show here would be a second
+       source of truth that desyncs whenever a swap or focus loss closes
+       the menu while Alpine still thinks it is open (reopening then takes
+       two clicks). The trigger is a div[role=button], not <button>,
+       because Safari does not focus buttons on click (DaisyUI's
+       documented pattern). #}
+    <div class="dropdown dropdown-end">
+      <div tabindex="0" role="button" class="btn btn-ghost btn-xs">{{ labels.JOBS_INLINE_EXPORT }}</div>
+      <ul tabindex="0" class="dropdown-content menu bg-base-100 rounded-box shadow-lg z-10 w-36 p-1 border border-line">
         {% for fmt in export_formats %}
         <li><a href="/viewer/{{ job.id }}/export/{{ fmt }}" download class="text-xs">{{ fmt|upper }}</a></li>
         {% endfor %}
