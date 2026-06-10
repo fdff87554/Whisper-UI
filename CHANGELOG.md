@@ -7,6 +7,39 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-06-10
+
+### Added
+
+- YouTube playlist URLs are now accepted on the URL upload form and expanded
+  at submit time into one transcription job per video, grouped as a batch.
+  Expansion is a metadata-only yt-dlp flat extraction in the web layer (no
+  media download); the per-video download pipeline is unchanged. Auto-generated
+  Mixes (`RD*`/`UL*`) and login-bound lists (Watch Later, Liked videos) are
+  rejected with a dedicated message, as are playlists that are private,
+  deleted, empty, or larger than the batch limit — nothing is persisted on a
+  failed expansion. Private/deleted entries inside an otherwise-valid playlist
+  are skipped and reported in the toast. yt-dlp is now part of the `frontend`
+  extra.
+- Playlist batches show the playlist title in the job list batch header
+  (new nullable `batch_title` column on `jobs`, migrated automatically) and
+  the title is searchable in the client-side job filter.
+- `youtu.be/<id>?list=` share links now resolve to their single video instead
+  of being rejected as playlists, matching the existing `watch?v=<id>&list=`
+  behavior.
+
+### Changed
+
+- `MAX_BATCH_SIZE` raised from 50 to 100 (shared by file uploads, URL
+  submissions, and playlist expansion).
+
+### Fixed
+
+- The liveness-aware stale reaper now re-arms the pipeline state TTL each time
+  it spares a queued job, so a batch backlog deeper than 7 days can no longer
+  expire the generation keys and reap a still-healthy pipeline on a later
+  round.
+
 ## [2.10.1] - 2026-06-09
 
 ### Fixed
