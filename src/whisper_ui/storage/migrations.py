@@ -66,12 +66,10 @@ _MIGRATIONS: list[str] = [
     # never matches NULL).
     "ALTER TABLE jobs ADD COLUMN owner_id INTEGER",
     "CREATE INDEX IF NOT EXISTS idx_jobs_owner_id ON jobs(owner_id)",
-    # source_job_id links re-transcribe versions back to their root job so the
-    # UI can group transcript versions of the same audio. Indexed because the
-    # version-grouping lookup runs whenever the viewer renders a version's
-    # sibling list.
+    # source_job_id links a re-transcribe version back to the root job it was
+    # re-run from. Used by the job card to show a "version" badge; there is no
+    # sibling-list query, so the column is left unindexed.
     "ALTER TABLE jobs ADD COLUMN source_job_id TEXT",
-    "CREATE INDEX IF NOT EXISTS idx_jobs_source_job_id ON jobs(source_job_id)",
     # Denormalized batch display name (e.g. an expanded playlist's title).
     # Nullable: file-upload batches and pre-existing rows have none.
     "ALTER TABLE jobs ADD COLUMN batch_title TEXT",
