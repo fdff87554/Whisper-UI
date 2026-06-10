@@ -73,6 +73,12 @@ _STAGE_QUEUES = {
     run_postprocess.__name__: WORKER_QUEUE_CPU,
 }
 
+# Stages whose runtime scales with audio duration. Their death-penalty is
+# resized once preprocess knows the real duration (see adjust_subjob_timeouts).
+# The other stages have ~fixed cost (download already done, preprocess running,
+# assign/postprocess are quick), so they keep their enqueue-time timeout.
+_DURATION_SCALED_STAGES = frozenset({run_transcribe_align.__name__, run_diarize.__name__})
+
 if TYPE_CHECKING:
     from redis import Redis
     from rq.job import Job as RQJob
@@ -152,6 +158,67 @@ def _refresh_pipeline_state_ttl(redis: Redis, parent_job_id: str) -> None:
         return
     redis.expire(_generation_key(parent_job_id), PIPELINE_STATE_TTL_SECONDS)
     redis.expire(_subjobs_key(parent_job_id, generation), PIPELINE_STATE_TTL_SECONDS)
+
+
+def adjust_subjob_timeouts(
+    redis: Redis,
+    parent_job_id: str,
+    generation: int,
+    duration_seconds: float | None,
+    settings: Settings,
+) -> None:
+    """Resize the death-penalty of not-yet-started, duration-scaled sub-jobs.
+
+    URL jobs are enqueued before their media is downloaded, so
+    :func:`enqueue_pipeline` sizes every sub-job's ``job_timeout`` from a
+    ``None`` duration and they all fall back to ``job_timeout_default``. Once
+    preprocess has probed the real duration, this re-applies
+    :func:`calculate_job_timeout` to the still-deferred GPU stages
+    (transcribe/align, diarize), giving a URL job the same duration-scaled
+    death-penalty a file upload already gets at enqueue time. No-op when the
+    duration is unknown, so a failed probe simply keeps the default.
+
+    Safe against the retry race: those stages ``depends_on`` preprocess, so
+    while this runs inside the preprocess task they are still DEFERRED and
+    cannot have started. Scoped to ``generation`` so a stale attempt's
+    sub-jobs are never touched. Best-effort: a resize failure is logged, never
+    raised, so it cannot fail a preprocess that already produced its output.
+    """
+    if not duration_seconds or duration_seconds <= 0:
+        return
+    from rq.exceptions import NoSuchJobError
+    from rq.job import Job as RQJob
+    from rq.job import JobStatus as RQJobStatus
+
+    new_timeout = calculate_job_timeout(duration_seconds, settings)
+    resizable = {RQJobStatus.DEFERRED, RQJobStatus.QUEUED, RQJobStatus.SCHEDULED}
+    resized = 0
+    for sub_id in _load_subjob_ids(redis, parent_job_id, generation):
+        try:
+            sub = RQJob.fetch(sub_id, connection=redis)
+            if sub.meta.get("stage") not in _DURATION_SCALED_STAGES:
+                continue
+            if sub.get_status(refresh=True) not in resizable:
+                continue
+            if sub.timeout != new_timeout:
+                sub.timeout = new_timeout
+                sub.save()
+                resized += 1
+        except NoSuchJobError:
+            continue
+        except Exception:
+            # Best-effort optimisation: a resize failure must never fail a
+            # preprocess that already produced its output. Log and move on.
+            logger.warning("Could not resize timeout for sub-job %s of %s", sub_id, parent_job_id, exc_info=True)
+    if resized:
+        logger.info(
+            "Resized %d duration-scaled sub-job timeout(s) for job %s to %ss (duration=%.0fs gen=%d)",
+            resized,
+            parent_job_id,
+            new_timeout,
+            duration_seconds,
+            generation,
+        )
 
 
 def enqueue_pipeline(
@@ -654,6 +721,7 @@ def recover_stale_pipeline_jobs(
 
 
 __all__ = [
+    "adjust_subjob_timeouts",
     "enqueue_pipeline",
     "finalize_failure",
     "finalize_success",

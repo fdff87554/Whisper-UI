@@ -292,12 +292,16 @@ def _run_single_stage(
     build_stage: Callable[[Job, WorkerRuntime], PipelineStage],
     output_keys: tuple[str, ...],
     pre_context_update: Callable[[Job, WorkerRuntime, dict[str, Any]], None] | None = None,
+    post_persist: Callable[[Job, WorkerRuntime, dict[str, Any]], None] | None = None,
 ) -> str:
     """Shared driver used by every ``run_*`` entry below.
 
     ``pre_context_update`` lets stages that need to seed context fields from
     the live ``Job`` record (e.g. download preparing ``download_dir``) do so
-    without duplicating the runtime setup.
+    without duplicating the runtime setup. ``post_persist`` runs after the
+    stage outputs are persisted, with the updated context, for stages that
+    need to act on a freshly-computed value (e.g. preprocess resizing
+    downstream sub-job timeouts once the audio duration is known).
     """
     with build_worker_runtime(parent_job_id, generation=_current_generation()) as runtime:
         job = _load_job(runtime, parent_job_id)
@@ -323,6 +327,8 @@ def _run_single_stage(
         try:
             updated = _execute_stage(stage, context.copy(), on_progress, stage_name=stage_name)
             _persist_outputs(ctx_store, updated, output_keys, stage_name=stage_name)
+            if post_persist is not None:
+                post_persist(job, runtime, updated)
         finally:
             _log_stage_finish(stage_name, parent_job_id, start_ns)
         return f"{stage_name}:{parent_job_id}"
@@ -373,12 +379,26 @@ def run_preprocess(parent_job_id: str) -> str:
             context["input_path"] = job.filepath
             PipelineContextStore(runtime.redis, job.id).update({"input_path": job.filepath})
 
+    def _resize_downstream_timeouts(job: Job, runtime: WorkerRuntime, context: dict[str, Any]) -> None:
+        # URL jobs were enqueued before their media existed, so every sub-job
+        # got job_timeout_default. Now that preprocess knows the real audio
+        # duration, give the still-deferred GPU stages a duration-scaled
+        # death-penalty (what a file upload already gets at enqueue time).
+        # Lazy import: pipeline_dispatcher imports this module at load time.
+        from whisper_ui.worker.pipeline_dispatcher import adjust_subjob_timeouts
+
+        generation = _current_generation()
+        if generation is None:
+            return
+        adjust_subjob_timeouts(runtime.redis, parent_job_id, generation, context.get("duration"), runtime.settings)
+
     return _run_single_stage(
         parent_job_id,
         stage_name="preprocess",
         build_stage=lambda job, runtime: PreprocessStage(),
         output_keys=("audio_path", "duration"),
         pre_context_update=_seed_file_input,
+        post_persist=_resize_downstream_timeouts,
     )
 
 

@@ -17,6 +17,7 @@ from whisper_ui.worker.context_store import PipelineContextStore
 from whisper_ui.worker.pipeline_dispatcher import (
     _current_generation,
     _load_subjob_ids,
+    adjust_subjob_timeouts,
     enqueue_pipeline,
 )
 from whisper_ui.worker.stage_tasks import (
@@ -122,6 +123,78 @@ def test_url_upload_dag_prepends_download(tmp_path):
 
     assert "run_download" in subs
     assert subs["run_preprocess"]._dependency_ids == [subs["run_download"].id]
+
+
+def test_url_job_subjobs_get_default_timeout_at_enqueue(tmp_path):
+    """A URL job has no duration when enqueued (media not downloaded yet), so
+    every sub-job falls back to job_timeout_default — the gap that
+    adjust_subjob_timeouts later closes."""
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(
+        id="job-url-timeout",
+        filename="video",
+        source_url="https://www.youtube.com/watch?v=abc",
+        status=JobStatus.QUEUED,
+        enable_diarization=True,
+    )
+
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    subs = _by_stage(_load_subjobs(redis, job.id))
+
+    assert subs["run_transcribe_align"].timeout == settings.job_timeout_default
+    assert subs["run_diarize"].timeout == settings.job_timeout_default
+
+
+def test_adjust_subjob_timeouts_rescales_gpu_stages_once_duration_known(tmp_path):
+    """After preprocess probes the duration, the deferred GPU stages get a
+    duration-scaled death-penalty; fixed-cost stages keep the default."""
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(
+        id="job-url-resize",
+        filename="video",
+        source_url="https://www.youtube.com/watch?v=abc",
+        status=JobStatus.QUEUED,
+        enable_diarization=True,
+    )
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    generation = _current_generation(redis, job.id)
+
+    # duration 2000s * multiplier 2.0 = 4000s, within [floor, max] and distinct
+    # from the 3600s default baked at enqueue.
+    adjust_subjob_timeouts(redis, job.id, generation, 2000.0, settings)
+
+    subs = _by_stage(_load_subjobs(redis, job.id))
+    assert subs["run_transcribe_align"].timeout == 4000
+    assert subs["run_diarize"].timeout == 4000
+    # Non-duration-scaled stages keep the enqueue-time default.
+    assert subs["run_download"].timeout == settings.job_timeout_default
+    assert subs["run_preprocess"].timeout == settings.job_timeout_default
+    assert subs["run_assign_speakers"].timeout == settings.job_timeout_default
+
+
+def test_adjust_subjob_timeouts_is_noop_without_duration(tmp_path):
+    """An unknown/zero duration must leave the enqueue-time timeouts intact."""
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(
+        id="job-url-noop",
+        filename="video",
+        source_url="https://www.youtube.com/watch?v=abc",
+        status=JobStatus.QUEUED,
+    )
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    generation = _current_generation(redis, job.id)
+
+    adjust_subjob_timeouts(redis, job.id, generation, None, settings)
+    adjust_subjob_timeouts(redis, job.id, generation, 0.0, settings)
+
+    subs = _by_stage(_load_subjobs(redis, job.id))
+    assert subs["run_transcribe_align"].timeout == settings.job_timeout_default
 
 
 def test_llm_enabled_dag_appends_llm_correction(tmp_path):
