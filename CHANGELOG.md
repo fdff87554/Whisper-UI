@@ -36,6 +36,24 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - The `/jobs/list` polling fragment now resets an unknown `status` filter to
   empty, matching `/jobs` and `/admin/jobs/list`, so a bogus value no longer
   stays baked into the poll URL.
+- URL (YouTube/Twitter/Drive) transcription jobs now get a death-penalty
+  scaled to the real audio duration. They are enqueued before the media is
+  downloaded, so every stage previously fell back to the default timeout and a
+  long video could be killed mid-transcription; once preprocess probes the
+  duration the GPU stages are resized to match what a file upload already gets.
+- A failed word-level alignment no longer discards speaker labels. The
+  unaligned transcription is now carried forward so speaker diarization is
+  still applied at the segment level; only word-level timestamps are lost.
+- Submitting a large batch of files or URLs no longer blocks the web server
+  while each job is enqueued; the synchronous enqueue is offloaded so the
+  jobs poll and other requests stay responsive during submission.
+
+### Changed
+
+- Removed the unused `list_jobs_by_source` query and its index (no view ever
+  listed a job's re-transcribe siblings); the `source_job_id` column and its
+  version badge are unchanged. Consolidated the duplicated jobs status-filter
+  validation into a single shared helper.
 
 ## [2.11.0] - 2026-06-10
 
