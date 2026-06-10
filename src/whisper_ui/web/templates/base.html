@@ -120,13 +120,26 @@
     const loader = document.getElementById('page-loader');
     let loaderTimeout;
 
-    document.body.addEventListener('htmx:beforeRequest', function() {
+    // Background pollers (hx-trigger="every ...") mark their wrapper with
+    // data-quiet-poll: a poll tick is not a user action, so it must not
+    // animate the global loader — that reads as "the page keeps reloading".
+    // detail.elt is matched directly (no closest()) so user-initiated
+    // requests from elements *inside* a polling wrapper, like the
+    // pagination buttons, still get loader feedback.
+    function isQuietPoll(evt) {
+      const elt = evt.detail && evt.detail.elt;
+      return !!(elt && elt.hasAttribute && elt.hasAttribute('data-quiet-poll'));
+    }
+
+    document.body.addEventListener('htmx:beforeRequest', function(evt) {
+      if (isQuietPoll(evt)) return;
       clearTimeout(loaderTimeout);
       loader.style.width = '0';
       loader.style.opacity = '1';
       requestAnimationFrame(() => { loader.style.width = '80%'; });
     });
-    document.body.addEventListener('htmx:afterRequest', function() {
+    document.body.addEventListener('htmx:afterRequest', function(evt) {
+      if (isQuietPoll(evt)) return;
       loader.style.width = '100%';
       loaderTimeout = setTimeout(() => {
         loader.style.opacity = '0';

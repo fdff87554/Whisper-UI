@@ -1,8 +1,10 @@
 {# htmx fragment: job list with polling — Idiomorph morphs unchanged DOM in place,
    preserving collapse state, focus, and scroll between polls. The callbacks
    reference (defined in base.html) makes data-morph-skip-checked elements opt
-   out of `checked` syncing so user-toggled batch collapses are not reset. #}
-<div id="job-list-wrapper"
+   out of `checked` syncing so user-toggled batch collapses are not reset.
+   data-quiet-poll opts the wrapper's own background requests out of the
+   global page loader (see base.html) — a 3s poll is not a user action. #}
+<div id="job-list-wrapper" data-quiet-poll
      hx-get="{{ list_url|default('/jobs/list', true) }}?status={{ status|default('', true) }}&page={{ page }}"
      {% if has_active %}hx-trigger="every 3s, refreshJobList from:body"{% else %}hx-trigger="refreshJobList from:body"{% endif %}
      hx-swap="morph:{morphStyle:'outerHTML', ignoreActiveValue:true, callbacks:window.__whisperUiMorphCallbacks}">

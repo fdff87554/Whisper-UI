@@ -139,6 +139,15 @@ class TestDashboardRoutes:
         assert 'id="dashboard-active"' in resp.text
         assert 'hx-trigger="every 5s"' in resp.text
 
+    def test_dashboard_active_poll_wrapper_is_quiet(self, client):
+        """Regression: a background poll tick is not a user action, so the
+        wrapper must opt out of the global page loader via data-quiet-poll
+        (the loader animating every tick read as constant page reloads)."""
+        resp = client.get("/dashboard/active")
+        assert resp.status_code == 200
+        opening_tag = resp.text.split('id="dashboard-active"', 1)[1].split(">", 1)[0]
+        assert "data-quiet-poll" in opening_tag
+
 
 class TestUploadRoutes:
     def test_upload_page(self, client):
@@ -217,6 +226,37 @@ class TestJobsRoutes:
         resp = client.get("/jobs/list")
         assert resp.status_code == 200
         assert "job-list-wrapper" in resp.text
+
+    def test_jobs_list_poll_wrapper_is_quiet(self, client):
+        """Regression: the 3s poll must not animate the global page loader —
+        users read the every-tick animation as the whole page reloading. The
+        wrapper opts out via data-quiet-poll (guard lives in base.html)."""
+        resp = client.get("/jobs/list")
+        assert resp.status_code == 200
+        opening_tag = resp.text.split('id="job-list-wrapper"', 1)[1].split(">", 1)[0]
+        assert "data-quiet-poll" in opening_tag
+        assert "hx-trigger=" in opening_tag
+
+    def test_jobs_pagination_buttons_do_not_carry_quiet_attr(self, client, db):
+        """User-initiated requests from *inside* the polling wrapper (the
+        pagination buttons) must keep loader feedback: the quiet opt-out is
+        matched on the requesting element itself, never inherited."""
+        for i in range(21):  # one over DEFAULT_JOBS_PER_PAGE so pagination renders
+            db.insert_job(Job(filename=f"page{i}.mp3", status=JobStatus.COMPLETED, language="zh"))
+        resp = client.get("/jobs/list")
+        assert resp.status_code == 200
+        button_tags = [seg.split(">", 1)[0] for seg in resp.text.split("<button")[1:]]
+        pagination_tags = [tag for tag in button_tags if 'hx-target="#job-list-wrapper"' in tag]
+        assert pagination_tags  # pagination actually rendered
+        assert all("data-quiet-poll" not in tag for tag in pagination_tags)
+
+    def test_page_loader_guards_quiet_poll(self, client):
+        """The base layout's loader listeners must skip quiet-poll requests;
+        without the guard the data-quiet-poll attribute is inert."""
+        resp = client.get("/jobs")
+        assert resp.status_code == 200
+        assert "function isQuietPoll(evt)" in resp.text
+        assert "hasAttribute('data-quiet-poll')" in resp.text
 
     def test_jobs_all_chip_shows_unfiltered_total_when_filtered(self, client, db, filestore):
         """Finding F5: opening /jobs?status=failed must still show the true

@@ -20,7 +20,7 @@
   'correct': labels.DASHBOARD_STAGE_CORRECT,
   'export': labels.DASHBOARD_STAGE_EXPORT,
 } -%}
-<div id="dashboard-active"
+<div id="dashboard-active" data-quiet-poll
      hx-get="/dashboard/active"
      hx-trigger="every {% if active_jobs %}5s{% else %}30s{% endif %}"
      hx-swap="morph:outerHTML">

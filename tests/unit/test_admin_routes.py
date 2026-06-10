@@ -316,6 +316,19 @@ def test_admin_jobs_list_fragment_blocks_non_admin(app, test_user):
     assert resp.status_code == 403
 
 
+def test_admin_jobs_list_poll_wrapper_is_quiet(app, test_admin):
+    """The admin list reuses _job_list.html; guard against the admin route
+    ever switching to a template whose poll wrapper forgets the quiet
+    opt-out (data-quiet-poll keeps polls off the global page loader)."""
+    client = authed_test_client(app, test_admin)
+
+    resp = client.get("/admin/jobs/list")
+
+    assert resp.status_code == 200
+    opening_tag = resp.text.split('id="job-list-wrapper"', 1)[1].split(">", 1)[0]
+    assert "data-quiet-poll" in opening_tag
+
+
 def test_admin_bulk_delete_operates_across_owners(app, db, test_admin, test_user):
     """Admin bulk actions reuse /jobs/bulk/* — owner_filter is None for admins,
     so they act on jobs owned by other users."""
