@@ -1296,6 +1296,42 @@ def test_recover_stale_pipeline_jobs_spares_live_and_fails_dead(tmp_path):
         db.close()
 
 
+def test_recover_stale_pipeline_jobs_refreshes_ttl_of_spared_candidates(tmp_path):
+    """A spared candidate's generation/subjobs keys get their TTL re-armed so a
+    backlog deeper than PIPELINE_STATE_TTL_SECONDS cannot expire them and flip
+    a later liveness probe to a false 'dead' verdict."""
+    from whisper_ui.storage.database import JobDatabase
+    from whisper_ui.ui.labels import JOBS_STALE_ERROR
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    db = JobDatabase(tmp_path / "stale.db")
+    try:
+        job = Job(id="spared", filename="m.mp3", filepath=str(tmp_path / "m.mp3"), status=JobStatus.PROCESSING)
+        db.insert_job(job)
+        enqueue_pipeline(job, redis=redis, settings=_build_settings(ollama=""), filestore=_build_filestore(tmp_path))
+        db._conn.execute(
+            "UPDATE jobs SET updated_at = '2000-01-01T00:00:00+00:00' WHERE status = ?",
+            (JobStatus.PROCESSING.value,),
+        )
+        db._conn.commit()
+
+        gen_key = pd._generation_key(job.id)
+        sub_key = pd._subjobs_key(job.id, int(redis.get(gen_key)))
+        # Simulate keys nearing expiry after a long wait in a deep backlog.
+        redis.expire(gen_key, 60)
+        redis.expire(sub_key, 60)
+
+        recovered = pd.recover_stale_pipeline_jobs(db, redis, timeout_seconds=60, error_message=JOBS_STALE_ERROR)
+
+        assert recovered == 0
+        assert db.get_job(job.id).status == JobStatus.PROCESSING
+        assert redis.ttl(gen_key) > 60, "spared candidate's generation key TTL must be re-armed"
+        assert redis.ttl(sub_key) > 60, "spared candidate's subjobs key TTL must be re-armed"
+    finally:
+        db.close()
+
+
 def test_recover_stale_pipeline_jobs_propagates_redis_error_without_reaping(tmp_path, monkeypatch):
     """PR #95 review #1: a transient RedisError during the liveness probe must
     PROPAGATE (so the stale checker logs it and skips the round), not be
