@@ -26,7 +26,7 @@ from whisper_ui.web.deps import (
     make_content_disposition,
     templates,
 )
-from whisper_ui.web.validation import clamp_num_speakers, validate_hex_id
+from whisper_ui.web.validation import clamp_num_speakers, normalize_status_filter, validate_hex_id
 from whisper_ui.worker.pipeline_dispatcher import enqueue_pipeline
 from whisper_ui.worker.progress import RedisProgressReporter
 
@@ -35,8 +35,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-_VALID_STATUS_FILTERS = frozenset({"", *JobStatus})
 
 
 def _group_jobs_by_batch(jobs: list[Job]) -> list[tuple[str, list[Job]]]:
@@ -114,8 +112,7 @@ async def jobs_page(
     status: str = "",
     page: int = 0,
 ):
-    if status not in _VALID_STATUS_FILTERS:
-        status = ""
+    status = normalize_status_filter(status)
     owner_id = owner_filter(user)
     ctx = build_list_context(db, redis, filestore, status, page, owner_id)
     ctx["active_page"] = "jobs"
@@ -141,11 +138,10 @@ async def jobs_list_fragment(
     status: str = "",
     page: int = 0,
 ):
-    # Mirror jobs_page / admin_jobs_list_fragment: reject an unknown status so
+    # Mirror jobs_page / admin_jobs_list_fragment: reset an unknown status so
     # the poll does not keep re-requesting with a bogus filter (and the
     # wrapper's hx-get URL stays clean).
-    if status not in _VALID_STATUS_FILTERS:
-        status = ""
+    status = normalize_status_filter(status)
     ctx = build_list_context(db, redis, filestore, status, page, owner_filter(user))
     # Fragment-only: lets _job_list.html emit the OOB chip-count spans (the
     # full page renders the chips itself — duplicating the ids there breaks

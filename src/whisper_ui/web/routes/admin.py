@@ -34,13 +34,13 @@ from fastapi import APIRouter, Form, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from whisper_ui.core.constants import DEFAULT_JOBS_PER_PAGE
-from whisper_ui.core.models import JobStatus
 from whisper_ui.storage import users_repo
 from whisper_ui.storage.users_repo import LastAdminError
 from whisper_ui.ui import labels as ui_labels
 from whisper_ui.web.deps import AdminUserDep, DbDep, FileStoreDep, RedisDep, templates
 from whisper_ui.web.routes.auth_routes import MIN_PASSWORD_LENGTH, USERNAME_PATTERN
 from whisper_ui.web.routes.jobs import build_list_context
+from whisper_ui.web.validation import normalize_status_filter
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin")
@@ -230,9 +230,7 @@ async def admin_jobs_page(
     page: int = 0,
 ):
     """Render the global jobs list (every owner, plus legacy NULL rows)."""
-    valid_statuses = {"", *JobStatus}
-    if status not in valid_statuses:
-        status = ""
+    status = normalize_status_filter(status)
     # owner_id=None → no owner filter; admin sees everything.
     ctx = build_list_context(db, redis, filestore, status, page, owner_id=None)
     ctx["active_page"] = "admin_jobs"
@@ -254,9 +252,7 @@ async def admin_jobs_list_fragment(
     """Admin counterpart of ``/jobs/list``: the htmx-polled list fragment with
     no owner filter, so it stays in the ``/admin/jobs`` context (owner badges,
     admin filter/pagination URLs)."""
-    valid_statuses = {"", *JobStatus}
-    if status not in valid_statuses:
-        status = ""
+    status = normalize_status_filter(status)
     ctx = build_list_context(db, redis, filestore, status, page, owner_id=None)
     _add_admin_list_context(ctx, db)
     # Fragment-only OOB chip-count spans — same contract as /jobs/list.

@@ -5,7 +5,23 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
-from whisper_ui.web.validation import MAX_NUM_SPEAKERS, clamp_num_speakers, validate_hex_id
+from whisper_ui.core.models import JobStatus
+from whisper_ui.web.validation import (
+    MAX_NUM_SPEAKERS,
+    clamp_num_speakers,
+    normalize_status_filter,
+    validate_hex_id,
+)
+
+
+@pytest.mark.parametrize("valid", ["", *(s.value for s in JobStatus)])
+def test_normalize_status_filter_keeps_valid_values(valid):
+    assert normalize_status_filter(valid) == valid
+
+
+@pytest.mark.parametrize("bad", ["bogus", "COMPLETED", "queued ", "'; DROP TABLE jobs;--"])
+def test_normalize_status_filter_resets_unknown_to_all(bad):
+    assert normalize_status_filter(bad) == ""
 
 
 def test_validate_hex_id_accepts_32_lowercase_hex():
