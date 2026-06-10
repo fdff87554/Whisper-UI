@@ -1546,6 +1546,26 @@ class TestBatchRoutes:
             jobs.append(job)
         return jobs
 
+    def test_job_list_batch_header_shows_batch_title(self, client, db, filestore):
+        batch_id = "e" * 32
+        for name in ["ep1.mp4", "ep2.mp4"]:
+            db.insert_job(
+                Job(filename=name, status=JobStatus.COMPLETED, batch_id=batch_id, batch_title="會議錄影 2026Q2")
+            )
+
+        resp = client.get("/jobs/list")
+
+        assert resp.status_code == 200
+        assert ui_labels.JOBS_BATCH_LABEL_TITLED.format(title="會議錄影 2026Q2", count=2) in resp.text
+
+    def test_job_list_batch_header_without_title_falls_back_to_count_label(self, client, db, filestore):
+        self._create_batch(db, filestore)
+
+        resp = client.get("/jobs/list")
+
+        assert resp.status_code == 200
+        assert ui_labels.JOBS_BATCH_LABEL.format(count=2) in resp.text
+
     def test_batch_download_success(self, client, db, filestore):
         self._create_batch(db, filestore)
         resp = client.get(f"/jobs/batch/{self._BATCH_ID}/download?format_name=txt")

@@ -26,7 +26,8 @@
   {% if is_batch %}
   {# Batch group #}
   {% set bi = batch_info[group_key] %}
-  {%- set _batch_search = (group_jobs|map(attribute='filename')|join(' ')) + ' ' + (group_jobs|map(attribute='source_url')|select|join(' ')) -%}
+  {% set batch_title = group_jobs[0].batch_title if group_jobs else none %}
+  {%- set _batch_search = (group_jobs|map(attribute='filename')|join(' ')) + ' ' + (group_jobs|map(attribute='source_url')|select|join(' ')) + ' ' + (batch_title or '') -%}
   <div id="job-group-{{ group_key }}"
        class="collapse collapse-arrow bg-base-200 border border-line"
        data-job-name="{{ group_jobs[0].filename if group_jobs else '' }}"
@@ -42,7 +43,10 @@
            @change="$store.batchCollapse.set(groupKey, $event.target.checked)">
     <div class="collapse-title">
       <div class="flex flex-wrap items-center gap-2 mb-1">
-        <span class="font-medium">{{ labels.JOBS_BATCH_LABEL.format(count=bi.total) }}</span>
+        <span class="font-medium">
+          {%- if batch_title %}{{ labels.JOBS_BATCH_LABEL_TITLED.format(title=batch_title, count=bi.total) }}
+          {%- else %}{{ labels.JOBS_BATCH_LABEL.format(count=bi.total) }}{% endif -%}
+        </span>
         <span class="text-sm opacity-50">{{ labels.JOBS_BATCH_PROGRESS.format(completed=bi.completed, total=bi.total) }}</span>
         {% if bi.failed > 0 %}
         <span class="badge badge-error badge-sm">{{ bi.failed }} {{ labels.STATUS_LABELS['failed'] }}</span>
