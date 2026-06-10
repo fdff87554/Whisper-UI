@@ -420,6 +420,10 @@ async def upload_url_submit(
         msg = ui_labels.UPLOAD_URL_PLAYLIST_FETCH_FAILED
         return _error_redirect_or_fragment(request, "/upload?error=playlist_fetch_failed", msg)
 
+    # Counted once per unique playlist, mirroring how the playable videos of a
+    # twice-pasted playlist become one job + a deduped count rather than two
+    # jobs: the toast reports the deduplicated submission, so multiplying the
+    # same skipped videos by paste count would overstate them.
     unavailable_count = sum(info.unavailable_count for info in expanded.values())
 
     if len(valid_urls) > MAX_BATCH_SIZE:
@@ -435,8 +439,11 @@ async def upload_url_submit(
 
     # The batch carries the playlist's title only for a pure single-playlist
     # submission; mixed or multi-playlist batches have no one obvious name.
+    # Checked via token kinds, not token count: the same playlist pasted twice
+    # collapses to one entry in `expanded` yet is still a pure single-playlist
+    # submission and keeps its title.
     batch_title = None
-    if batch_id and len(expanded) == 1 and len(expanded) == len(valid_tokens):
+    if batch_id and len(expanded) == 1 and all(kind == "playlist" for kind, _ in valid_tokens):
         batch_title = next(iter(expanded.values())).title or None
 
     submitted_count = 0

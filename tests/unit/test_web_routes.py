@@ -1421,6 +1421,33 @@ class TestUploadPlaylistPost:
         assert jobs[0].batch_id is None
         assert jobs[0].batch_title is None
 
+    def test_upload_duplicate_playlist_lines_still_carry_title(self, client, app, db):
+        """The same playlist pasted twice is still a pure single-playlist
+        submission: one expansion, one set of jobs, title kept, and the
+        unavailable count reported once (not multiplied by paste count)."""
+        doubled = f"{self._PLAYLIST_URL}\n{self._PLAYLIST_URL}"
+        with (
+            patch("whisper_ui.web.routes.upload.enqueue_pipeline"),
+            patch(
+                "whisper_ui.web.routes.upload.expand_playlist",
+                return_value=self._info(unavailable_count=2),
+            ) as mock_expand,
+        ):
+            resp = self._post_url(client, url=doubled)
+
+        assert resp.status_code == 303
+        mock_expand.assert_called_once()
+        jobs = db.list_jobs()
+        assert sorted(j.source_url for j in jobs) == self._VIDEO_URLS
+        assert {j.batch_title for j in jobs} == {"Team Meetings 2026Q2"}
+        page = client.get("/jobs")
+        expected = (
+            ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", "3")
+            + ui_labels.TOAST_URL_SKIPPED.replace("{count}", "2")
+            + ui_labels.TOAST_URL_DEDUPED.replace("{count}", "3")
+        )
+        assert flash_messages(page.text) == [expected]
+
     def test_upload_playlist_mixed_with_video_shares_batch_without_title(self, client, app, db):
         mixed = f"{self._PLAYLIST_URL}\nhttps://www.youtube.com/watch?v=dQw4w9WgXcQ"
         info = self._info(video_urls=self._VIDEO_URLS[:2])
