@@ -1284,8 +1284,10 @@ class TestUploadURLPost:
         assert resp.status_code == 303
         assert "error=all_invalid_urls" in resp.headers["location"]
 
-    def test_upload_playlist_url_redirects(self, client):
-        resp = self._post_url(client, url="https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf")
+    def test_upload_unsupported_playlist_url_redirects(self, client):
+        """Login-bound lists (Watch Later) cannot be expanded anonymously and
+        are rejected with the playlist error, not silently dropped."""
+        resp = self._post_url(client, url="https://www.youtube.com/playlist?list=WL")
         assert resp.status_code == 303
         assert "error=playlist" in resp.headers["location"]
 
@@ -1370,6 +1372,159 @@ class TestUploadURLPost:
         jobs = db.list_jobs()
         assert len(jobs) == 1
         assert jobs[0].status == JobStatus.FAILED
+
+
+class TestUploadPlaylistPost:
+    _PLAYLIST_URL = "https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"
+    _VIDEO_URLS = [
+        "https://www.youtube.com/watch?v=aaaaaaaaaaa",
+        "https://www.youtube.com/watch?v=bbbbbbbbbbb",
+        "https://www.youtube.com/watch?v=ccccccccccc",
+    ]
+
+    def _post_url(self, client, url):
+        data = {"url": url, "language": "zh", "model_name": "large-v3", "num_speakers": "0"}
+        return client.post("/upload/url", data=data, follow_redirects=False)
+
+    def _info(self, video_urls=None, title="Team Meetings 2026Q2", unavailable_count=0):
+        from whisper_ui.web.playlist import PlaylistInfo
+
+        return PlaylistInfo(
+            title=title, video_urls=video_urls or list(self._VIDEO_URLS), unavailable_count=unavailable_count
+        )
+
+    def test_upload_playlist_expands_to_batch_with_shared_id_and_title(self, client, app, db):
+        with (
+            patch("whisper_ui.web.routes.upload.enqueue_pipeline"),
+            patch("whisper_ui.web.routes.upload.expand_playlist", return_value=self._info()),
+        ):
+            resp = self._post_url(client, url=self._PLAYLIST_URL)
+
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/jobs"
+        jobs = db.list_jobs()
+        assert sorted(j.source_url for j in jobs) == self._VIDEO_URLS
+        assert len({j.batch_id for j in jobs}) == 1
+        assert jobs[0].batch_id is not None
+        assert {j.batch_title for j in jobs} == {"Team Meetings 2026Q2"}
+
+    def test_upload_playlist_with_single_video_creates_plain_job(self, client, app, db):
+        info = self._info(video_urls=self._VIDEO_URLS[:1])
+        with (
+            patch("whisper_ui.web.routes.upload.enqueue_pipeline"),
+            patch("whisper_ui.web.routes.upload.expand_playlist", return_value=info),
+        ):
+            self._post_url(client, url=self._PLAYLIST_URL)
+
+        jobs = db.list_jobs()
+        assert len(jobs) == 1
+        assert jobs[0].batch_id is None
+        assert jobs[0].batch_title is None
+
+    def test_upload_playlist_mixed_with_video_shares_batch_without_title(self, client, app, db):
+        mixed = f"{self._PLAYLIST_URL}\nhttps://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        info = self._info(video_urls=self._VIDEO_URLS[:2])
+        with (
+            patch("whisper_ui.web.routes.upload.enqueue_pipeline"),
+            patch("whisper_ui.web.routes.upload.expand_playlist", return_value=info),
+        ):
+            self._post_url(client, url=mixed)
+
+        jobs = db.list_jobs()
+        assert len(jobs) == 3
+        assert len({j.batch_id for j in jobs}) == 1
+        assert jobs[0].batch_id is not None
+        assert {j.batch_title for j in jobs} == {None}
+
+    def test_upload_playlist_overlapping_explicit_video_dedupes(self, client, app, db):
+        mixed = f"{self._PLAYLIST_URL}\n{self._VIDEO_URLS[0]}"
+        with (
+            patch("whisper_ui.web.routes.upload.enqueue_pipeline"),
+            patch("whisper_ui.web.routes.upload.expand_playlist", return_value=self._info()),
+        ):
+            resp = self._post_url(client, url=mixed)
+
+        assert resp.status_code == 303
+        assert len(db.list_jobs()) == 3
+        page = client.get("/jobs")
+        expected = ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", "3") + ui_labels.TOAST_URL_DEDUPED.replace(
+            "{count}", "1"
+        )
+        assert flash_messages(page.text) == [expected]
+
+    def test_upload_playlist_unavailable_entries_reported_as_skipped(self, client, app, db):
+        info = self._info(unavailable_count=2)
+        with (
+            patch("whisper_ui.web.routes.upload.enqueue_pipeline"),
+            patch("whisper_ui.web.routes.upload.expand_playlist", return_value=info),
+        ):
+            self._post_url(client, url=self._PLAYLIST_URL)
+
+        page = client.get("/jobs")
+        expected = ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", "3") + ui_labels.TOAST_URL_SKIPPED.replace(
+            "{count}", "2"
+        )
+        assert flash_messages(page.text) == [expected]
+
+    def test_upload_playlist_too_large_redirects_with_count(self, client):
+        from whisper_ui.core.constants import MAX_BATCH_SIZE
+        from whisper_ui.web.playlist import PlaylistTooLargeError
+
+        with patch(
+            "whisper_ui.web.routes.upload.expand_playlist",
+            side_effect=PlaylistTooLargeError(250, MAX_BATCH_SIZE),
+        ):
+            resp = self._post_url(client, url=self._PLAYLIST_URL)
+
+        assert resp.status_code == 303
+        assert "error=playlist_too_large" in resp.headers["location"]
+        assert "count=250" in resp.headers["location"]
+
+    def test_upload_playlist_too_large_without_count_omits_count_param(self, client):
+        from whisper_ui.core.constants import MAX_BATCH_SIZE
+        from whisper_ui.web.playlist import PlaylistTooLargeError
+
+        with patch(
+            "whisper_ui.web.routes.upload.expand_playlist",
+            side_effect=PlaylistTooLargeError(None, MAX_BATCH_SIZE),
+        ):
+            resp = self._post_url(client, url=self._PLAYLIST_URL)
+
+        assert resp.status_code == 303
+        assert "error=playlist_too_large" in resp.headers["location"]
+        assert "count=" not in resp.headers["location"]
+
+    @pytest.mark.parametrize(
+        "exc_name,error_code",
+        [
+            ("PlaylistEmptyError", "playlist_empty"),
+            ("PlaylistUnavailableError", "playlist_unavailable"),
+            ("PlaylistFetchError", "playlist_fetch_failed"),
+        ],
+    )
+    def test_upload_playlist_expansion_failures_map_to_error_codes(self, client, db, exc_name, error_code):
+        from whisper_ui.web import playlist as playlist_mod
+
+        exc_cls = getattr(playlist_mod, exc_name)
+        with patch("whisper_ui.web.routes.upload.expand_playlist", side_effect=exc_cls("boom")):
+            resp = self._post_url(client, url=self._PLAYLIST_URL)
+
+        assert resp.status_code == 303
+        assert f"error={error_code}" in resp.headers["location"]
+        assert db.list_jobs() == [], "a failed expansion must not persist any job"
+
+    def test_upload_playlist_pushing_total_over_limit_rejected(self, client, db):
+        from whisper_ui.core.constants import MAX_BATCH_SIZE
+
+        full = [f"https://www.youtube.com/watch?v=vid{i:08d}" for i in range(MAX_BATCH_SIZE)]
+        mixed = f"{self._PLAYLIST_URL}\nhttps://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        with patch("whisper_ui.web.routes.upload.expand_playlist", return_value=self._info(video_urls=full)):
+            resp = self._post_url(client, url=mixed)
+
+        assert resp.status_code == 303
+        assert "error=too_many_urls" in resp.headers["location"]
+        assert f"count={MAX_BATCH_SIZE + 1}" in resp.headers["location"]
+        assert db.list_jobs() == []
 
 
 class TestBatchRoutes:

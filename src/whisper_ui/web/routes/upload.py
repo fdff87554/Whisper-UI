@@ -19,15 +19,25 @@ from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
 from whisper_ui.ui import labels as ui_labels
 from whisper_ui.web.deps import CurrentUserDep, DbDep, FileStoreDep, RedisDep, SettingsDep, templates
 from whisper_ui.web.flash import set_flash
+from whisper_ui.web.playlist import (
+    PlaylistEmptyError,
+    PlaylistFetchError,
+    PlaylistInfo,
+    PlaylistTooLargeError,
+    PlaylistUnavailableError,
+    expand_playlist,
+)
 from whisper_ui.web.url_validation import (
     GoogleDriveURLError,
-    PlaylistURLError,
     TwitterURLError,
+    UnsupportedPlaylistTypeError,
     YouTubeURLError,
     is_google_drive_url,
     is_twitter_url,
+    is_youtube_playlist_url,
     validate_google_drive_url,
     validate_twitter_url,
+    validate_youtube_playlist_url,
     validate_youtube_url,
 )
 from whisper_ui.web.validation import clamp_num_speakers
@@ -352,31 +362,69 @@ async def upload_url_submit(
         msg = ui_labels.UPLOAD_URL_EXCEEDS_LIMIT.format(limit=MAX_BATCH_SIZE, count=len(lines))
         return _error_redirect_or_fragment(request, f"/upload?error=too_many_urls&count={len(lines)}", msg)
 
-    # Validate each URL, separating valid from invalid
-    valid_urls: list[str] = []
+    # Validate each URL, separating valid from invalid. Playlist links are
+    # kept as ("playlist", url) tokens so expansion can splice their videos
+    # back in at the same position, preserving the submitted order.
+    valid_tokens: list[tuple[str, str]] = []
     invalid_line_nums: list[int] = []
-    has_playlist_error = False
+    has_unsupported_playlist = False
     for line_num, raw_url in lines:
         try:
             if is_google_drive_url(raw_url):
-                clean_url = validate_google_drive_url(raw_url)
+                valid_tokens.append(("url", validate_google_drive_url(raw_url)))
             elif is_twitter_url(raw_url):
-                clean_url = validate_twitter_url(raw_url)
+                valid_tokens.append(("url", validate_twitter_url(raw_url)))
+            elif is_youtube_playlist_url(raw_url):
+                valid_tokens.append(("playlist", validate_youtube_playlist_url(raw_url)))
             else:
-                clean_url = validate_youtube_url(raw_url)
-            valid_urls.append(clean_url)
-        except PlaylistURLError:
+                valid_tokens.append(("url", validate_youtube_url(raw_url)))
+        except UnsupportedPlaylistTypeError:
             invalid_line_nums.append(line_num)
-            has_playlist_error = True
+            has_unsupported_playlist = True
         except (YouTubeURLError, GoogleDriveURLError, TwitterURLError):
             invalid_line_nums.append(line_num)
 
-    if not valid_urls:
-        if has_playlist_error:
+    if not valid_tokens:
+        if has_unsupported_playlist:
             msg = ui_labels.UPLOAD_URL_PLAYLIST_NOT_SUPPORTED
             return _error_redirect_or_fragment(request, "/upload?error=playlist", msg)
         msg = ui_labels.UPLOAD_URL_ALL_INVALID
         return _error_redirect_or_fragment(request, "/upload?error=all_invalid_urls", msg)
+
+    # Expand playlists into their videos' watch URLs. Any playlist failure
+    # rejects the whole submission: nothing has been persisted yet, so the
+    # user can fix the input and resubmit without leftover jobs.
+    valid_urls: list[str] = []
+    expanded: dict[str, PlaylistInfo] = {}
+    try:
+        for kind, value in valid_tokens:
+            if kind != "playlist":
+                valid_urls.append(value)
+                continue
+            if value not in expanded:
+                expanded[value] = await asyncio.to_thread(expand_playlist, value, limit=MAX_BATCH_SIZE)
+            valid_urls.extend(expanded[value].video_urls)
+    except PlaylistTooLargeError as e:
+        if e.count:
+            msg = ui_labels.UPLOAD_URL_PLAYLIST_TOO_LARGE.format(count=e.count, limit=e.limit)
+            return _error_redirect_or_fragment(request, f"/upload?error=playlist_too_large&count={e.count}", msg)
+        msg = ui_labels.UPLOAD_URL_PLAYLIST_TOO_LARGE_UNKNOWN.format(limit=e.limit)
+        return _error_redirect_or_fragment(request, "/upload?error=playlist_too_large", msg)
+    except PlaylistEmptyError:
+        msg = ui_labels.UPLOAD_URL_PLAYLIST_EMPTY
+        return _error_redirect_or_fragment(request, "/upload?error=playlist_empty", msg)
+    except PlaylistUnavailableError:
+        msg = ui_labels.UPLOAD_URL_PLAYLIST_UNAVAILABLE
+        return _error_redirect_or_fragment(request, "/upload?error=playlist_unavailable", msg)
+    except PlaylistFetchError:
+        msg = ui_labels.UPLOAD_URL_PLAYLIST_FETCH_FAILED
+        return _error_redirect_or_fragment(request, "/upload?error=playlist_fetch_failed", msg)
+
+    unavailable_count = sum(info.unavailable_count for info in expanded.values())
+
+    if len(valid_urls) > MAX_BATCH_SIZE:
+        msg = ui_labels.UPLOAD_URL_EXCEEDS_LIMIT.format(limit=MAX_BATCH_SIZE, count=len(valid_urls))
+        return _error_redirect_or_fragment(request, f"/upload?error=too_many_urls&count={len(valid_urls)}", msg)
 
     # Deduplicate while preserving order
     unique_urls = list(dict.fromkeys(valid_urls))
@@ -385,12 +433,20 @@ async def upload_url_submit(
     # Batch ID only when multiple URLs
     batch_id = uuid.uuid4().hex if len(unique_urls) > 1 else None
 
+    # The batch carries the playlist's title only for a pure single-playlist
+    # submission; mixed or multi-playlist batches have no one obvious name.
+    batch_title = None
+    if batch_id and len(expanded) == 1 and len(expanded) == len(valid_tokens):
+        batch_title = next(iter(expanded.values())).title or None
+
     submitted_count = 0
     failed_count = 0
     logger.info(
-        "url upload batch starting: user_id=%s urls=%d skipped=%d deduped=%d batch_id=%s",
+        "url upload batch starting: user_id=%s urls=%d playlists=%d unavailable=%d skipped=%d deduped=%d batch_id=%s",
         user.id,
         len(unique_urls),
+        len(expanded),
+        unavailable_count,
         len(invalid_line_nums),
         duplicates_removed,
         batch_id or "-",
@@ -407,6 +463,7 @@ async def upload_url_submit(
             convert_to_traditional=convert_to_traditional,
             llm_correction_enabled=llm_correction_enabled and settings.llm_correction_available,
             batch_id=batch_id,
+            batch_title=batch_title,
             owner_id=user.id,
         )
 
@@ -450,7 +507,9 @@ async def upload_url_submit(
     message, category = _build_upload_toast(
         submitted_count,
         failed=failed_count,
-        skipped=len(invalid_line_nums),
+        # Unavailable playlist entries (private/deleted videos) count as
+        # skipped: they were part of the submission but produced no job.
+        skipped=len(invalid_line_nums) + unavailable_count,
         deduped=duplicates_removed,
     )
     set_flash(request, message, category)

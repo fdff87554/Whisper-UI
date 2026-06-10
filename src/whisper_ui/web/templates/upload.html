@@ -29,6 +29,18 @@
   {{ labels.UPLOAD_INVALID_URL }}
   {% elif error == 'playlist' %}
   {{ labels.UPLOAD_URL_PLAYLIST_NOT_SUPPORTED }}
+  {% elif error == 'playlist_too_large' %}
+  {% if request.query_params.get('count') %}
+  {{ labels.UPLOAD_URL_PLAYLIST_TOO_LARGE.format(count=request.query_params.get('count'), limit=MAX_BATCH_SIZE) }}
+  {% else %}
+  {{ labels.UPLOAD_URL_PLAYLIST_TOO_LARGE_UNKNOWN.format(limit=MAX_BATCH_SIZE) }}
+  {% endif %}
+  {% elif error == 'playlist_empty' %}
+  {{ labels.UPLOAD_URL_PLAYLIST_EMPTY }}
+  {% elif error == 'playlist_unavailable' %}
+  {{ labels.UPLOAD_URL_PLAYLIST_UNAVAILABLE }}
+  {% elif error == 'playlist_fetch_failed' %}
+  {{ labels.UPLOAD_URL_PLAYLIST_FETCH_FAILED }}
   {% elif error == 'no_url' %}
   {{ labels.UPLOAD_URL_NO_INPUT }}
   {% elif error == 'too_many_urls' %}
