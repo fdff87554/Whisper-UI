@@ -148,6 +148,27 @@ class TestDashboardRoutes:
         opening_tag = resp.text.split('id="dashboard-active"', 1)[1].split(">", 1)[0]
         assert "data-quiet-poll" in opening_tag
 
+    def test_dashboard_greeting_injects_username_via_dataset(self, client):
+        """Regression: |tojson wrapped the username in literal double quotes,
+        terminating the double-quoted x-data attribute early and breaking the
+        greeting heading. The username must ride on a data attribute read via
+        dataset instead."""
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert 'data-username="alice"' in resp.text
+        assert "const name = $el.dataset.username" in resp.text
+        assert 'const name = "' not in resp.text  # no inline tojson interpolation
+
+    def test_dashboard_active_created_at_is_valid_alpine(self, client, db):
+        """Regression: |tojson wrapped the ISO timestamp in literal double
+        quotes, terminating the double-quoted x-data attribute early. The
+        value must be a single-quoted JS literal instead."""
+        db.insert_job(Job(filename="active.mp3", status=JobStatus.PROCESSING, language="zh"))
+        resp = client.get("/dashboard/active")
+        assert resp.status_code == 200
+        assert "createdAt: '" in resp.text
+        assert 'createdAt: "' not in resp.text
+
 
 class TestUploadRoutes:
     def test_upload_page(self, client):
@@ -226,6 +247,15 @@ class TestJobsRoutes:
         resp = client.get("/jobs/list")
         assert resp.status_code == 200
         assert "job-list-wrapper" in resp.text
+
+    def test_status_chips_active_filter_is_valid_alpine(self, client):
+        """Regression: |tojson wraps the status in literal double quotes, which
+        terminate the double-quoted x-data attribute early and break Alpine.
+        The filter value must be a single-quoted JS literal instead."""
+        resp = client.get("/jobs?status=completed")
+        assert resp.status_code == 200
+        assert "activeFilter: 'completed'" in resp.text
+        assert 'activeFilter: "completed"' not in resp.text
 
     def test_jobs_list_wrapper_morph_swap_spec_has_no_whitespace(self, client):
         """Regression: htmx tokenizes hx-swap on whitespace, so a space inside

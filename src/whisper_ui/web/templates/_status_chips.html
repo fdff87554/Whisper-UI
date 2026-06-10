@@ -5,7 +5,11 @@
    out-of-band (see _job_list.html); without that, a poll that changes job
    states leaves the sticky-header counts stale until a full reload. #}
 {% from "_status_count_badge.html" import count_badge %}
-<div class="flex flex-wrap gap-2 mb-3" x-data="{ activeFilter: {{ status|tojson }} }">
+{# activeFilter uses a single-quoted JS literal, not |tojson: tojson wraps a
+   string in literal double quotes, which would terminate this double-quoted
+   x-data attribute early (the v2.3.1 breakage). status is validated to an
+   empty string or a JobStatus value, so it is always quote-free. #}
+<div class="flex flex-wrap gap-2 mb-3" x-data="{ activeFilter: '{{ status }}' }">
   {% for value, label in [('', labels.JOBS_FILTER_ALL)] + labels.STATUS_LABELS.items()|list %}
   <button class="btn btn-sm gap-1.5"
           :class="activeFilter === '{{ value }}' ? 'btn-primary' : 'btn-ghost border border-line'"

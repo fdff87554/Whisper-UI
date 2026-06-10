@@ -56,6 +56,21 @@ def test_admin_users_page_has_v2_filter_and_reset_modal(app, db, test_admin, bob
     assert "resetPasswordDialog()" in resp.text
 
 
+def test_admin_reset_password_injects_username_via_dataset(app, db, test_admin, bob):
+    """Regression: |tojson wrapped the username in literal double quotes,
+    terminating the double-quoted @click attribute early and breaking the
+    reset-password dialog. The username must ride on a data attribute read
+    via dataset instead."""
+    client = authed_test_client(app, test_admin)
+
+    resp = client.get("/admin/users")
+
+    assert resp.status_code == 200
+    assert 'data-username="bob"' in resp.text
+    assert "username: $el.dataset.username" in resp.text
+    assert 'username: "' not in resp.text  # no inline |tojson interpolation
+
+
 def test_admin_users_page_uses_admin_users_active_value(app, test_admin):
     """The sidebar's Alpine :class binding compares activePage to the
     literal 'admin_users' (not 'admin'), so the route must set that

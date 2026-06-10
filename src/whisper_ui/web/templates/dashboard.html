@@ -3,7 +3,11 @@
 
 {% block content %}
 {# Time-aware greeting — hour is read on the client so the user's local
-   timezone is respected without a server-side TZ assumption. #}
+   timezone is respected without a server-side TZ assumption. The username is
+   passed through a data attribute (HTML-autoescaped) and read via dataset,
+   not interpolated with |tojson: tojson would wrap it in literal double
+   quotes and terminate this double-quoted x-data attribute early. This
+   mirrors the data-raw pattern in viewer.html. #}
 <div x-data="{
        greetingHour: new Date().getHours(),
        morningLabel: '{{ labels.DASHBOARD_GREETING_MORNING }}',
@@ -15,13 +19,14 @@
          return this.eveningLabel;
        },
        get heading() {
-         const name = {{ (request.state.user.username if request.state and request.state.user else '')|tojson }};
+         const name = $el.dataset.username || '';
          const template = name
            ? '{{ labels.DASHBOARD_GREETING_WITH_NAME }}'
            : '{{ labels.DASHBOARD_GREETING_GUEST }}';
          return template.replace('{greeting}', this.greeting).replace('{name}', name);
        }
      }"
+     data-username="{{ request.state.user.username if request.state and request.state.user else '' }}"
      class="mb-6">
   <h1 class="text-2xl font-medium" x-text="heading">{{ labels.DASHBOARD_HEADER }}</h1>
 </div>

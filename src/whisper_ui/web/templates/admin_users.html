@@ -84,8 +84,13 @@
                 </button>
               </form>
 
+              {# username comes from a data attribute (HTML-autoescaped) read
+                 via dataset, not |tojson: tojson would wrap it in literal
+                 double quotes and terminate this double-quoted @click
+                 attribute early. userId is an integer, so it stays inline. #}
               <button type="button" class="btn btn-xs"
-                      @click="$dispatch('open-reset-pw', { userId: {{ user.id }}, username: {{ user.username|tojson }} })">
+                      data-username="{{ user.username }}"
+                      @click="$dispatch('open-reset-pw', { userId: {{ user.id }}, username: $el.dataset.username })">
                 {{ labels.ADMIN_ACTION_RESET_PASSWORD }}
               </button>
             </div>
