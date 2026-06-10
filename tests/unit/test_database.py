@@ -880,3 +880,58 @@ def test_legacy_db_without_source_job_id_column_upgrades(tmp_dir: Path):
         assert fetched.source_job_id == "legacy-3"
     finally:
         database.close()
+
+
+def test_legacy_db_without_batch_title_column_upgrades(tmp_dir: Path):
+    """A deployment predating playlist batches has no batch_title column.
+    After init_db migrates the schema, legacy rows read as None and new
+    inserts persist the value.
+    """
+    db_path = tmp_dir / "legacy_batch_title.db"
+    legacy_schema = """
+    CREATE TABLE IF NOT EXISTS jobs (
+        id TEXT PRIMARY KEY,
+        filename TEXT NOT NULL,
+        filepath TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        progress REAL NOT NULL DEFAULT 0.0,
+        progress_message TEXT DEFAULT '',
+        language TEXT NOT NULL DEFAULT 'zh',
+        model_name TEXT NOT NULL DEFAULT 'large-v3',
+        num_speakers INTEGER,
+        enable_diarization INTEGER NOT NULL DEFAULT 1,
+        convert_to_traditional INTEGER NOT NULL DEFAULT 1,
+        llm_correction_enabled INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        error TEXT,
+        result_path TEXT,
+        duration REAL,
+        batch_id TEXT,
+        source_url TEXT,
+        owner_id INTEGER,
+        source_job_id TEXT
+    );
+    """
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(legacy_schema)
+    conn.execute(
+        "INSERT INTO jobs (id, filename, filepath, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        ("legacy-4", "old.mp3", "/tmp/old.mp3", "2024-01-01T00:00:00+00:00", "2024-01-01T00:00:00+00:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    database = JobDatabase(db_path)
+    try:
+        legacy = database.get_job("legacy-4")
+        assert legacy is not None
+        assert legacy.batch_title is None
+
+        titled = Job(filename="ep1.mp4", filepath="/tmp/ep1.mp4", batch_id="b1", batch_title="Team Meetings 2026Q2")
+        database.insert_job(titled)
+        fetched = database.get_job(titled.id)
+        assert fetched is not None
+        assert fetched.batch_title == "Team Meetings 2026Q2"
+    finally:
+        database.close()

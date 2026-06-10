@@ -6,11 +6,14 @@ from whisper_ui.web.url_validation import (
     GoogleDriveURLError,
     PlaylistURLError,
     TwitterURLError,
+    UnsupportedPlaylistTypeError,
     YouTubeURLError,
     is_google_drive_url,
     is_twitter_url,
+    is_youtube_playlist_url,
     validate_google_drive_url,
     validate_twitter_url,
+    validate_youtube_playlist_url,
     validate_youtube_url,
 )
 
@@ -79,6 +82,95 @@ class TestPlaylistURLs:
         """A URL with both v= and list= should be accepted (single video from playlist)."""
         result = validate_youtube_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLxyz")
         assert "v=dQw4w9WgXcQ" in result
+
+    def test_short_link_with_list_param_accepted(self):
+        """A youtu.be share link carrying a list= parameter still names a video."""
+        result = validate_youtube_url("https://youtu.be/dQw4w9WgXcQ?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf")
+        assert result == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+
+class TestIsYouTubePlaylistURL:
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf",
+            "https://m.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf",
+            "https://www.youtube.com/watch?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf",
+            "www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf",
+            "https://youtu.be/?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf",
+        ],
+    )
+    def test_playlist_only_urls_detected(self, url):
+        assert is_youtube_playlist_url(url) is True
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLxyz",
+            "https://youtu.be/dQw4w9WgXcQ?list=PLxyz",
+            "https://www.youtube.com/shorts/dQw4w9WgXcQ?list=PLxyz",
+            "https://drive.google.com/file/d/abc123/view",
+            "https://example.com/playlist?list=PLxyz",
+            "",
+        ],
+    )
+    def test_video_and_foreign_urls_not_detected(self, url):
+        assert is_youtube_playlist_url(url) is False
+
+
+class TestValidateYouTubePlaylistURL:
+    _PLAYLIST_ID = "PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://www.youtube.com/playlist?list={pid}",
+            "https://youtube.com/playlist?list={pid}",
+            "https://m.youtube.com/playlist?list={pid}",
+            "www.youtube.com/playlist?list={pid}",
+            "https://www.youtube.com/playlist?list={pid}&si=tracking",
+            "https://www.youtube.com/watch?list={pid}",
+        ],
+    )
+    def test_valid_urls_canonicalize(self, url):
+        result = validate_youtube_playlist_url(url.format(pid=self._PLAYLIST_ID))
+        assert result == f"https://www.youtube.com/playlist?list={self._PLAYLIST_ID}"
+
+    def test_strips_whitespace(self):
+        result = validate_youtube_playlist_url(f"  https://www.youtube.com/playlist?list={self._PLAYLIST_ID}  ")
+        assert result == f"https://www.youtube.com/playlist?list={self._PLAYLIST_ID}"
+
+    @pytest.mark.parametrize(
+        "playlist_id",
+        [
+            "WL",  # Watch Later (login-bound)
+            "LL",  # Liked videos (login-bound)
+            "LM",  # Liked music (login-bound)
+            "RDdQw4w9WgXcQ",  # Mix/Radio (auto-generated, endless)
+            "RDMMdQw4w9WgXcQ",
+            "ULdQw4w9WgXcQabcdefg",
+        ],
+    )
+    def test_unsupported_playlist_types_raise(self, playlist_id):
+        with pytest.raises(UnsupportedPlaylistTypeError):
+            validate_youtube_playlist_url(f"https://www.youtube.com/playlist?list={playlist_id}")
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "",
+            "https://www.youtube.com/playlist",
+            "https://www.youtube.com/playlist?list=",
+            "https://www.youtube.com/playlist?list=short",
+            "https://www.youtube.com/playlist?list=PL%24%24invalid%24chars%24%24",
+            "https://example.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf",
+            "ftp://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf",
+        ],
+    )
+    def test_invalid_urls_raise(self, url):
+        with pytest.raises(YouTubeURLError):
+            validate_youtube_playlist_url(url)
 
 
 class TestValidGoogleDriveURLs:

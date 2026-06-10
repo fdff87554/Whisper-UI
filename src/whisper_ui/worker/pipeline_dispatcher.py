@@ -137,6 +137,23 @@ def _clear_subjob_set(redis: Redis, parent_job_id: str, generation: int) -> None
     redis.delete(_subjobs_key(parent_job_id, generation))
 
 
+def _refresh_pipeline_state_ttl(redis: Redis, parent_job_id: str) -> None:
+    """Re-arm the TTL on a live pipeline's generation and subjobs keys.
+
+    A spared stale candidate has already been PROCESSING longer than the
+    stale threshold; behind a deep enough backlog its state keys could
+    outlive PIPELINE_STATE_TTL_SECONDS and expire, after which the next
+    liveness probe would misread the still-queued pipeline as dead and reap
+    it. Refreshing on every spare keeps the keys alive exactly as long as
+    the job is.
+    """
+    generation = _current_generation(redis, parent_job_id)
+    if generation is None:
+        return
+    redis.expire(_generation_key(parent_job_id), PIPELINE_STATE_TTL_SECONDS)
+    redis.expire(_subjobs_key(parent_job_id, generation), PIPELINE_STATE_TTL_SECONDS)
+
+
 def enqueue_pipeline(
     job: Job,
     *,
@@ -607,12 +624,19 @@ def recover_stale_pipeline_jobs(
 
     For each job it does fail, the generation counter is bumped so any zombie
     sub-job that later resurfaces drops its writes through the existing
-    generation gate.
+    generation gate. Spared jobs get their pipeline state keys' TTL re-armed
+    so a backlog deeper than PIPELINE_STATE_TTL_SECONDS cannot expire them
+    into a false "dead" verdict on a later round.
     """
     candidates = db.list_stale_processing_job_ids(timeout_seconds)
     if not candidates:
         return 0
-    dead = [job_id for job_id in candidates if is_pipeline_dead(redis, job_id)]
+    dead: list[str] = []
+    for job_id in candidates:
+        if is_pipeline_dead(redis, job_id):
+            dead.append(job_id)
+        else:
+            _refresh_pipeline_state_ttl(redis, job_id)
     spared = len(candidates) - len(dead)
     if spared:
         logger.info(

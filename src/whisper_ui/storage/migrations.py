@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     result_path TEXT,
     duration REAL,
     batch_id TEXT,
+    batch_title TEXT,
     source_url TEXT,
     owner_id INTEGER,
     source_job_id TEXT
@@ -71,6 +72,9 @@ _MIGRATIONS: list[str] = [
     # sibling list.
     "ALTER TABLE jobs ADD COLUMN source_job_id TEXT",
     "CREATE INDEX IF NOT EXISTS idx_jobs_source_job_id ON jobs(source_job_id)",
+    # Denormalized batch display name (e.g. an expanded playlist's title).
+    # Nullable: file-upload batches and pre-existing rows have none.
+    "ALTER TABLE jobs ADD COLUMN batch_title TEXT",
 ]
 
 

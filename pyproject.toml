@@ -21,6 +21,10 @@ frontend = [
   "itsdangerous>=2.0,<3",
   # /metrics endpoint (Prometheus exposition).
   "prometheus-client>=0.21,<1",
+  # Submit-time playlist flat-extraction (web/playlist.py): metadata only,
+  # media downloads stay in the worker. Version floor mirrors the worker
+  # extra so both resolve to the same release.
+  "yt-dlp>=2024.5.26",
 ]
 worker = [
   # whisperx is installed separately in Dockerfile (--no-deps) to avoid its
