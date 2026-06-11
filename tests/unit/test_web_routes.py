@@ -2089,3 +2089,20 @@ class TestFormatRelativeTime:
         now = datetime.now(UTC).isoformat()
         result = _format_relative_time(now)
         assert result == "剛剛"
+
+
+class TestFormatSizeHelper:
+    def test_gigabytes_have_one_decimal(self):
+        from whisper_ui.web.routes.upload import _format_size
+
+        assert _format_size(2 * 1024**3) == "2.0 GB"
+
+    def test_megabytes_are_whole(self):
+        from whisper_ui.web.routes.upload import _format_size
+
+        assert _format_size(500 * 1024**2) == "500 MB"
+
+    def test_sub_megabyte_shows_kilobytes_not_zero_mb(self):
+        from whisper_ui.web.routes.upload import _format_size
+
+        assert _format_size(512 * 1024) == "512 KB"

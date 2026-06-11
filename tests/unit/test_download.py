@@ -413,6 +413,22 @@ class TestGoogleDriveDownload:
                 stage.execute(context)
         assert not (download_dir / "audio.mp3").exists()
 
+    def test_gdrive_size_cap_message_uses_fractional_megabytes(self, context, download_dir):
+        # Integer division understated both numbers (a sub-MB file read
+        # "0 MB"); the message must carry one decimal place.
+        def mock_download(url, output, quiet=True, fuzzy=False):
+            out_path = Path(output) / "audio.mp3"
+            out_path.write_bytes(b"x" * int(1.5 * 1024 * 1024))
+            return str(out_path)
+
+        mock_gdown = MagicMock()
+        mock_gdown.download = mock_download
+
+        with patch.dict("sys.modules", {"gdown": mock_gdown}):
+            stage = DownloadStage(max_file_size=1024 * 1024)
+            with pytest.raises(DownloadError, match=r"1\.5 MB.*1\.0 MB"):
+                stage.execute(context)
+
     def test_gdrive_file_within_size_cap_succeeds(self, context, download_dir):
         def mock_download(url, output, quiet=True, fuzzy=False):
             out_path = Path(output) / "audio.mp3"

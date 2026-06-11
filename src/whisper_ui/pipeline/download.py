@@ -165,10 +165,10 @@ class DownloadStage:
             raise DownloadError("Download completed but the file was empty or not found.")
 
         if self._max_file_size and downloaded.stat().st_size > self._max_file_size:
-            size_mb = downloaded.stat().st_size // (1024 * 1024)
-            limit_mb = self._max_file_size // (1024 * 1024)
+            size_mb = downloaded.stat().st_size / (1024 * 1024)
+            limit_mb = self._max_file_size / (1024 * 1024)
             downloaded.unlink(missing_ok=True)
-            raise DownloadError(f"Downloaded file ({size_mb} MB) exceeds the maximum allowed ({limit_mb} MB).")
+            raise DownloadError(f"Downloaded file ({size_mb:.1f} MB) exceeds the maximum allowed ({limit_mb:.1f} MB).")
 
         from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
 
@@ -326,8 +326,11 @@ class DownloadStage:
 
             duration = info.get("duration") or 0
             if duration > self._max_duration:
-                hours = self._max_duration // 3600
-                raise DownloadError(f"Video duration ({duration}s) exceeds the maximum allowed ({hours}h).")
+                # :g keeps whole hours bare (4h) and fractional ones exact
+                # (1.5h) so a custom non-hour-aligned cap is not understated.
+                raise DownloadError(
+                    f"Video duration ({duration}s) exceeds the maximum allowed ({self._max_duration / 3600:g}h)."
+                )
 
             info = ydl.extract_info(source_url, download=True)
             if info is None:

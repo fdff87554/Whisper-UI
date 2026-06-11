@@ -566,3 +566,13 @@ def test_change_password_invalidates_existing_session(app, db, test_user):
     second = client.get("/", follow_redirects=False)
     assert second.status_code == 302
     assert second.headers["location"].startswith("/login?next=")
+
+
+def test_rate_limited_message_rounds_wait_minutes_up():
+    """Floor understated the wait (90s showed "1 分鐘"), inviting an early
+    retry that gets rejected again; the wait must round up."""
+    from whisper_ui.web.routes.auth_routes import _login_error_message
+
+    assert "2 分鐘" in _login_error_message("rate_limited", 90)
+    assert "15 分鐘" in _login_error_message("rate_limited", 900)
+    assert "1 分鐘" in _login_error_message("rate_limited", 30)

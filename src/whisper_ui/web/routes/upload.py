@@ -75,7 +75,10 @@ def _build_upload_toast(
 def _format_size(size_bytes: int) -> str:
     if size_bytes >= 1024 * 1024 * 1024:
         return f"{size_bytes / (1024**3):.1f} GB"
-    return f"{size_bytes / (1024**2):.0f} MB"
+    if size_bytes >= 1024 * 1024:
+        return f"{size_bytes / (1024**2):.0f} MB"
+    # Sub-MB limits would otherwise round to "0 MB" in the rejection toast.
+    return f"{size_bytes / 1024:.0f} KB"
 
 
 def _is_htmx(request: Request) -> bool:
