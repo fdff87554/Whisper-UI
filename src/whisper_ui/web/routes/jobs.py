@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
+from markupsafe import escape
 
 from whisper_ui.core.constants import DEFAULT_JOBS_PER_PAGE
 from whisper_ui.core.languages import DEFAULT_WHISPER_MODEL, LANGUAGE_CHOICES, WHISPER_MODELS
@@ -378,10 +379,12 @@ async def re_transcribe_job(
     if src is None or src.status != JobStatus.COMPLETED:
         return Response(status_code=404)
 
+    # escape(): these labels reflect the raw form value back in a text/html
+    # response, same convention as upload.py's _htmx_error.
     if language not in LANGUAGE_CHOICES:
-        return HTMLResponse(ui_labels.UPLOAD_INVALID_LANGUAGE.format(value=language), status_code=400)
+        return HTMLResponse(escape(ui_labels.UPLOAD_INVALID_LANGUAGE.format(value=language)), status_code=400)
     if model_name not in WHISPER_MODELS:
-        return HTMLResponse(ui_labels.UPLOAD_INVALID_MODEL.format(value=model_name), status_code=400)
+        return HTMLResponse(escape(ui_labels.UPLOAD_INVALID_MODEL.format(value=model_name)), status_code=400)
 
     # Flat chain: every version points at the original root so grouping is a
     # single lookup. Re-transcribing a version re-roots to the same source.

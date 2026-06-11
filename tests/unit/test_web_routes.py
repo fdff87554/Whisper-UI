@@ -645,6 +645,29 @@ class TestJobsRoutes:
         assert resp.status_code == 204
         assert mock_enqueue.call_args[0][0].language == "auto"
 
+    def test_re_transcribe_invalid_language_is_escaped_in_response(self, client, db, filestore):
+        # The 400 reflects the form value back as text/html; markup in the
+        # rejected value must come back escaped, never verbatim.
+        src = _completed_upload_job_with_audio(db, filestore)
+        resp = client.post(
+            f"/jobs/{src.id}/re-transcribe",
+            data={"language": "<script>alert(1)</script>", "model_name": "large-v3"},
+        )
+
+        assert resp.status_code == 400
+        assert "<script>" not in resp.text
+        assert "&lt;script&gt;" in resp.text
+
+    def test_re_transcribe_invalid_model_is_escaped_in_response(self, client, db, filestore):
+        src = _completed_upload_job_with_audio(db, filestore)
+        resp = client.post(
+            f"/jobs/{src.id}/re-transcribe",
+            data={"language": "zh", "model_name": "<img src=x>"},
+        )
+
+        assert resp.status_code == 400
+        assert "<img" not in resp.text
+
     def test_re_transcribe_clamps_diarization_when_hf_token_absent(self, client, db, filestore, app):
         # Force no hf_token so a posted diarization flag must be clamped to
         # False (honest persisted flag, no no-op sub-job).
