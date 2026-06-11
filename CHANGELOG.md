@@ -7,6 +7,52 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.13.1] - 2026-06-11
+
+Full-codebase review remediation (PR #115). Highlights below; the PR
+description carries the complete list.
+
+### Fixed
+
+- Live and upcoming stream URLs are rejected at submission instead of
+  downloading until the job timeout kills the worker (live streams report no
+  duration, which slipped past the duration cap as 0).
+- Google Drive downloads are now capped like direct file uploads, and
+  `MAX_UPLOAD_SIZE` actually reaches the workers under compose (it was
+  frontend-only, so the cap silently ran at the 2 GB default).
+- A failed pipeline now bumps the generation counter, so a still-running
+  sibling stage (which SimpleWorker cannot stop mid-run) can no longer
+  resurrect deleted progress/context keys as orphans.
+- whisper.cpp results that omit the detected language no longer disable the
+  Chinese-only postprocess conversion and LLM-correction gates on
+  explicitly-Chinese jobs.
+- Downloaded media paths resolve from yt-dlp's reported filepath; a retry
+  after a killed attempt can no longer pick up a stale `.part` fragment.
+- Job retry / re-transcribe routes no longer block the event loop while
+  enqueuing; bulk actions cap the accepted id count.
+- Subtitle exports escape structural characters (`&`, `<`, `-->`) so LLM
+  correction output cannot break SRT/VTT parsing.
+- The viewer's copy shortcut ignores Ctrl/Cmd+C; bulk export downloads get
+  their intended filename back (Content-Disposition ASCII fallback).
+- Size, duration, and login-lockout messages report precise values instead
+  of floor-rounded ones; failed ffmpeg conversions clean up partial WAVs.
+- `DEVICE=cuda` on an AMD machine now falls back to rocm instead of CPU.
+- Schema migrations stop re-logging index entries as freshly applied on
+  every worker task; the stray v2.10-era `idx_jobs_source_job_id` index is
+  dropped; `WHISPERCPP_BINARY` is documented and passed to the rocm worker.
+
+### Changed
+
+- Docker images now install dependencies pinned to `uv.lock` (the shipped
+  versions match what CI tested) and cache the dependency layer so source
+  edits no longer trigger full rebuilds; the CPU worker pins torch 2.10.
+- `compose.yml` worker configuration is deduplicated via YAML anchors
+  (562 to 400 lines, behaviour verified identical for every profile).
+- README documents the URL ingestion feature line and the whisper.cpp
+  hallucination-guard settings; outdated troubleshooting entries refreshed.
+- Dead labels, constants, icon macros and test-only helpers removed from
+  the production API surface; duplicated and vacuous tests dropped.
+
 ## [2.13.0] - 2026-06-11
 
 ### Fixed
