@@ -490,6 +490,10 @@ def test_finalize_success_marks_job_completed(monkeypatch, tmp_path):
         filename="m.mp3",
         filepath=str(tmp_path / "m.mp3"),
         status=JobStatus.PROCESSING,
+        # Simulate a retry of a previously degenerate attempt: the clean run
+        # must clear this, and starting non-None keeps the assertion below
+        # from passing vacuously off the dataclass default.
+        quality_warning="舊的品質警告",
     )
 
     # Seed the context store as if postprocess just wrote its result.
