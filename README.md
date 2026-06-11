@@ -11,6 +11,8 @@ and Docker deployment (NVIDIA GPU / CPU / AMD ROCm).
 ## Features
 
 - Upload audio/video files for transcription
+- Transcribe directly from a URL: YouTube videos and playlists, X (Twitter)
+  posts, and Google Drive files are downloaded by the worker
 - Batch upload with automatic filtering of unsupported files
 - Speaker diarization with pyannote speaker-diarization-3.1 (optional)
 - Optional LLM text correction via Ollama (a Gemma model, per-job toggle)
@@ -98,6 +100,20 @@ GGML model (`ggml-large-v3.bin`), so allow extra time. On gfx1151 the worker
 disables the MIOpen backend (falls back to native HIP kernels) to avoid a known
 `miopenStatusUnknownError` in pyannote's segmentation model.
 
+The whisper.cpp backend ships with hallucination guards enabled: Silero VAD
+pre-segmentation skips non-speech (silence / music that otherwise produces
+looping subtitle-style hallucinations) and cross-window text conditioning is
+disabled so a bad window cannot contaminate the rest of the transcript.
+Settings specific to this backend:
+
+| Variable                 | Default                  | Description                                                              |
+| ------------------------ | ------------------------ | ------------------------------------------------------------------------ |
+| `WHISPERCPP_BINARY`      | `whisper-cli`            | whisper.cpp CLI binary name or path inside the worker image              |
+| `WHISPERCPP_THREADS`     | `0`                      | CPU threads for whisper-cli (`0` = let it decide)                        |
+| `WHISPERCPP_VAD`         | `true`                   | Silero VAD pre-segmentation (the main anti-hallucination guard)          |
+| `WHISPERCPP_VAD_MODEL`   | `ggml-silero-v5.1.2.bin` | VAD model file; auto-downloaded and cached on the model-cache volume     |
+| `WHISPERCPP_MAX_CONTEXT` | `0`                      | Text-context tokens carried across windows (`0` = off, `-1` = unlimited) |
+
 Open <http://localhost:8080> in your browser.
 
 > **Production note:** the bundled Redis starts without authentication
@@ -138,17 +154,21 @@ docker compose --profile gpu build
 
 All settings are configured via environment variables (`.env` file):
 
-| Variable             | Default                             | Description                                                                                   |
-| -------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------- |
-| `WHISPER_MODEL`      | `large-v3`                          | Whisper model variant (see model list below)                                                  |
-| `COMPUTE_TYPE`       | `int8_float16` (GPU) / `int8` (CPU) | CTranslate2 compute type                                                                      |
-| `DEVICE`             | `auto`                              | Inference device; compose profiles set `cuda` (GPU) / `rocm` (AMD) / `cpu` (CPU)              |
-| `TRANSCRIBE_BACKEND` | `whisperx`                          | `whisperx` (CTranslate2, CUDA/CPU) or `whispercpp` (whisper.cpp HIP; set by the rocm profile) |
-| `BATCH_SIZE`         | `4`                                 | Transcription batch size (whisperx backend only)                                              |
-| `LANGUAGE`           | `zh`                                | Default language code                                                                         |
-| `HF_TOKEN`           | (empty)                             | HuggingFace token for speaker diarization                                                     |
-| `PIP_INDEX_URL`      | (empty)                             | Custom PyPI mirror for Docker builds                                                          |
-| `WHISPER_UI_VERSION` | `latest`                            | Docker image version tag to pull                                                              |
+| Variable               | Default                             | Description                                                                                   |
+| ---------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------- |
+| `WHISPER_MODEL`        | `large-v3`                          | Whisper model variant (see model list below)                                                  |
+| `COMPUTE_TYPE`         | `int8_float16` (GPU) / `int8` (CPU) | CTranslate2 compute type                                                                      |
+| `DEVICE`               | `auto`                              | Inference device; compose profiles set `cuda` (GPU) / `rocm` (AMD) / `cpu` (CPU)              |
+| `TRANSCRIBE_BACKEND`   | `whisperx`                          | `whisperx` (CTranslate2, CUDA/CPU) or `whispercpp` (whisper.cpp HIP; set by the rocm profile) |
+| `BATCH_SIZE`           | `4`                                 | Transcription batch size (whisperx backend only)                                              |
+| `LANGUAGE`             | `zh`                                | Default language code                                                                         |
+| `HF_TOKEN`             | (empty)                             | HuggingFace token for speaker diarization                                                     |
+| `MAX_UPLOAD_SIZE`      | `2147483648`                        | Per-file upload cap in bytes (2 GB); also caps Google Drive downloads                         |
+| `YOUTUBE_MAX_DURATION` | `14400`                             | Longest accepted YouTube video in seconds (4 h); live streams are always rejected             |
+| `TWITTER_MAX_DURATION` | `14400`                             | Longest accepted X (Twitter) video in seconds                                                 |
+| `TWITTER_COOKIES_FILE` | (empty)                             | Container path to a cookies.txt for login-walled X posts (see `.env.example`)                 |
+| `PIP_INDEX_URL`        | (empty)                             | Custom PyPI mirror for Docker builds                                                          |
+| `WHISPER_UI_VERSION`   | `latest`                            | Docker image version tag to pull                                                              |
 
 **Whisper models:** `tiny`, `tiny.en`, `base`, `base.en`, `small`, `small.en`, `medium`, `medium.en`, `large-v1`, `large-v2`, `large-v3`, `large-v3-turbo`
 
