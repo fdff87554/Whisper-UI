@@ -136,7 +136,7 @@ class WhisperCppTranscribeStage:
         filename = f"ggml-{self._model_name}.bin"
         if self._model_dir is not None:
             candidate = self._model_dir / filename
-            if candidate.exists():
+            if candidate.is_file():
                 return str(candidate)
         from huggingface_hub import hf_hub_download
 
@@ -153,7 +153,7 @@ class WhisperCppTranscribeStage:
         """
         if self._model_dir is not None:
             candidate = self._model_dir / self._vad_model
-            if candidate.exists():
+            if candidate.is_file():
                 return str(candidate)
         from huggingface_hub import hf_hub_download
 
@@ -206,7 +206,7 @@ class WhisperCppTranscribeStage:
                 raise TranscriptionError(f"whisper-cli failed (exit {proc.returncode}): {detail[:500]}")
 
             json_path = Path(f"{out_prefix}.json")
-            if not json_path.exists():
+            if not json_path.is_file():
                 raise TranscriptionError("whisper-cli produced no JSON output")
             return json.loads(json_path.read_text(encoding="utf-8"))
 

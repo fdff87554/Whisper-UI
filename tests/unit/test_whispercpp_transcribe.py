@@ -209,6 +209,16 @@ class TestModelResolution:
             assert stage._resolve_model_path() == "/cache/ggml-large-v3.bin"
         mock_hf.hf_hub_download.assert_called_once_with(repo_id="ggerganov/whisper.cpp", filename="ggml-large-v3.bin")
 
+    def test_ignores_directory_named_like_model(self, tmp_path):
+        """A same-named directory under model_dir is not a usable model; fall
+        through to the hub download instead of handing whisper-cli a dir."""
+        (tmp_path / "ggml-large-v3.bin").mkdir()
+        stage = WhisperCppTranscribeStage(model_name="large-v3", model_dir=tmp_path)
+        mock_hf = MagicMock()
+        mock_hf.hf_hub_download.return_value = "/cache/ggml-large-v3.bin"
+        with patch.dict("sys.modules", {"huggingface_hub": mock_hf}):
+            assert stage._resolve_model_path() == "/cache/ggml-large-v3.bin"
+
 
 class TestVadModelResolution:
     def test_prefers_existing_local_vad_model(self, tmp_path):
@@ -226,6 +236,14 @@ class TestVadModelResolution:
         mock_hf.hf_hub_download.assert_called_once_with(
             repo_id="ggml-org/whisper-vad", filename="ggml-silero-v5.1.2.bin"
         )
+
+    def test_ignores_directory_named_like_vad_model(self, tmp_path):
+        (tmp_path / "ggml-silero-v5.1.2.bin").mkdir()
+        stage = WhisperCppTranscribeStage(model_dir=tmp_path)
+        mock_hf = MagicMock()
+        mock_hf.hf_hub_download.return_value = "/cache/ggml-silero-v5.1.2.bin"
+        with patch.dict("sys.modules", {"huggingface_hub": mock_hf}):
+            assert stage._resolve_vad_model_path() == "/cache/ggml-silero-v5.1.2.bin"
 
 
 class TestBackendSelection:

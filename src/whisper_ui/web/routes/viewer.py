@@ -133,7 +133,7 @@ async def media_download(job_id: str, db: DbDep, filestore: FileStoreDep, user: 
         raise HTTPException(status_code=404)
 
     media_path = filestore.get_source_media_path(job_id)
-    if media_path is None or not media_path.exists():
+    if media_path is None or not media_path.is_file():
         raise HTTPException(status_code=404)
 
     ext = media_path.suffix.lower()
