@@ -56,19 +56,27 @@ ENV PIP_INDEX_URL=${PIP_INDEX_URL}
 
 # Dependency layer: only project metadata plus a stub package, so editing
 # src/ does not invalidate the expensive torch-rocm install below.
-COPY pyproject.toml ./
+COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /usr/local/bin/uv
+COPY pyproject.toml uv.lock ./
 RUN mkdir -p src/whisper_ui && touch src/whisper_ui/__init__.py
 
 # AMD's manylinux wheel index. torch 2.10.0+rocm7.2.0 matches the cuda
 # worker's torch 2.10.0 and the ROCm 7.2 runtime in the base image; it pins
 # triton==3.6.0+rocm7.2.0 (hosted here, not on PyPI), hence --find-links.
+# Everything else is pinned to uv.lock via an exported constraints file, so
+# the shipped image runs the same versions CI tested; the torch family is
+# excluded from the constraints because its versions are owned by the
+# explicit rocm wheels above.
 ARG ROCM_WHEEL_INDEX=https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2
-RUN pip install --no-cache-dir --break-system-packages --find-links "${ROCM_WHEEL_INDEX}/" \
+RUN uv export --frozen --no-emit-project --no-hashes \
+        --no-emit-package torch --no-emit-package torchaudio --no-emit-package triton \
+        --extra worker --extra worker-llm -o /tmp/constraints.txt && \
+    pip install --no-cache-dir --break-system-packages --find-links "${ROCM_WHEEL_INDEX}/" \
     "${ROCM_WHEEL_INDEX}/torch-2.10.0%2Brocm7.2.0.lw.gitb6ee5fde-cp312-cp312-linux_x86_64.whl" \
     "${ROCM_WHEEL_INDEX}/torchaudio-2.10.0%2Brocm7.2.0.git5047768f-cp312-cp312-linux_x86_64.whl" \
     "${ROCM_WHEEL_INDEX}/triton-3.6.0%2Brocm7.2.0.gitba5c1517-cp312-cp312-linux_x86_64.whl" && \
     pip install --no-cache-dir --break-system-packages --no-deps "whisperx>=3.8,<3.9" && \
-    pip install --no-cache-dir --break-system-packages ".[worker,worker-llm]"
+    pip install --no-cache-dir --break-system-packages -c /tmp/constraints.txt ".[worker,worker-llm]"
 
 # Project layer: cheap to rebuild on every code change. --force-reinstall
 # replaces the stub install of whisper-ui itself; --no-deps keeps it from

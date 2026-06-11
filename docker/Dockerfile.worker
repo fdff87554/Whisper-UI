@@ -13,17 +13,24 @@ ENV PIP_INDEX_URL=${PIP_INDEX_URL}
 
 # Dependency layer: only project metadata plus a stub package, so editing
 # src/ does not invalidate the expensive ML-dependency install below.
-COPY pyproject.toml ./
+COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /usr/local/bin/uv
+COPY pyproject.toml uv.lock ./
 RUN mkdir -p src/whisper_ui && touch src/whisper_ui/__init__.py
 
 # torch/torchaudio are pre-installed by the base image (2.10.0+cu128).
 # Install whisperx without deps first to avoid its torch~=2.8.0 constraint
 # triggering a downgrade; torch 2.10.0 is backward-compatible.
-# Then install the remaining worker dependencies normally. The worker-llm
-# extra adds httpx for the optional Ollama-backed correction stage; the
-# stage is still gated by OLLAMA_BASE_URL at runtime.
-RUN pip install --no-cache-dir --break-system-packages --no-deps "whisperx>=3.8,<3.9" && \
-    pip install --no-cache-dir --break-system-packages ".[worker,worker-llm]"
+# Then install the remaining worker dependencies pinned to uv.lock via an
+# exported constraints file, so the shipped image runs the same versions CI
+# tested. The torch family is excluded from the constraints: its versions
+# are owned by the base image here, not by the lock. The worker-llm extra
+# adds httpx for the optional Ollama-backed correction stage; the stage is
+# still gated by OLLAMA_BASE_URL at runtime.
+RUN uv export --frozen --no-emit-project --no-hashes \
+        --no-emit-package torch --no-emit-package torchaudio --no-emit-package triton \
+        --extra worker --extra worker-llm -o /tmp/constraints.txt && \
+    pip install --no-cache-dir --break-system-packages --no-deps "whisperx>=3.8,<3.9" && \
+    pip install --no-cache-dir --break-system-packages -c /tmp/constraints.txt ".[worker,worker-llm]"
 
 # Project layer: cheap to rebuild on every code change. --force-reinstall
 # replaces the stub install of whisper-ui itself; --no-deps keeps it from
