@@ -32,11 +32,14 @@ def _format_time(seconds: float) -> str:
 def make_content_disposition(filename: str, disposition: str = "attachment") -> str:
     """Build a Content-Disposition header value safe for non-ASCII filenames.
 
-    Uses RFC 6266 ``filename*=UTF-8''...`` so the header value stays ASCII-safe
-    while preserving the original Unicode filename for modern browsers.
+    Emits both RFC 6266 forms: the plain ``filename="..."`` ASCII fallback
+    (non-ASCII replaced with ``_``) for older tools and the client-side bulk
+    export parser, plus ``filename*=UTF-8''...`` which modern browsers prefer
+    and which preserves the original Unicode name.
     """
+    ascii_fallback = "".join(c if c.isascii() and c.isprintable() and c not in '"\\' else "_" for c in filename)
     encoded = quote(filename, safe="")
-    return f"{disposition}; filename*=UTF-8''{encoded}"
+    return f"{disposition}; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded}"
 
 
 def _format_relative_time(iso_str: str) -> str:

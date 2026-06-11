@@ -1996,12 +1996,24 @@ class TestRetentionSweep:
 class TestContentDispositionHelper:
     def test_ascii_filename(self):
         result = make_content_disposition("report.pdf")
-        assert result == "attachment; filename*=UTF-8''report.pdf"
+        assert result == "attachment; filename=\"report.pdf\"; filename*=UTF-8''report.pdf"
 
     def test_non_ascii_filename(self):
         result = make_content_disposition("\u6e2c\u8a66.srt")
         assert "filename*=UTF-8''" in result
         assert "%E6%B8%AC%E8%A9%A6" in result
+
+    def test_ascii_fallback_replaces_non_ascii_and_quotes(self):
+        # The plain filename= form must stay a valid quoted-string: no raw
+        # Unicode, no embedded quotes or backslashes.
+        result = make_content_disposition('\u6e2c\u8a66"a\\b.srt')
+        assert 'filename="___a_b.srt"' in result
+
+    def test_plain_filename_form_present_for_client_regex(self):
+        # The bulk export client parses filename="..." from this header; the
+        # filename* form alone would never match.
+        result = make_content_disposition("selection_srt.zip")
+        assert 'filename="selection_srt.zip"' in result
 
     def test_inline_disposition(self):
         result = make_content_disposition("file.txt", disposition="inline")
