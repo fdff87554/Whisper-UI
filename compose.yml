@@ -25,6 +25,10 @@ x-core-env: &core-env
   UPLOAD_DIR: /app/data/uploads
   OUTPUT_DIR: /app/data/outputs
   LANGUAGE: ${LANGUAGE:-zh}
+  # One cap, two consumers: the web tier enforces it on file uploads, the
+  # download workers on Google Drive files (which carry no duration metadata
+  # for the duration cap to act on).
+  MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-2147483648}
 # Queue / job timeouts — see README "Queue / Timeout tuning".
 # When changing any of these, keep the invariants:
 #   0 < JOB_TIMEOUT_FLOOR <= JOB_TIMEOUT_DEFAULT <= JOB_TIMEOUT_MAX
@@ -88,9 +92,8 @@ services:
       MAX_LOGIN_ATTEMPTS_PER_IP: ${MAX_LOGIN_ATTEMPTS_PER_IP:-20}
       LOGIN_LOCKOUT_SECONDS: ${LOGIN_LOCKOUT_SECONDS:-900}
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
-      # Registration gate + per-file upload cap (frontend-only).
+      # Registration gate (frontend-only).
       ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
-      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-2147483648}
     volumes:
       - app-data:/app/data
     depends_on:
@@ -224,6 +227,7 @@ services:
       DEVICE: rocm
       # CTranslate2 has no ROCm backend; transcribe via whisper.cpp (HIP).
       TRANSCRIBE_BACKEND: whispercpp
+      WHISPERCPP_BINARY: ${WHISPERCPP_BINARY:-whisper-cli}
       WHISPERCPP_THREADS: ${WHISPERCPP_THREADS:-0}
       # Hallucination guards: Silero VAD pre-segmentation (model cached on the
       # model-cache volume via HF_HOME) + no cross-window text conditioning.
