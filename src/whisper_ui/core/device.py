@@ -33,6 +33,11 @@ def detect_device(preferred: str = "auto") -> str:
     if preferred == "cuda":
         if _cuda_available():
             return "cuda"
+        if _rocm_available():
+            # DEVICE=cuda on an AMD box is almost certainly a config slip;
+            # falling back to CPU would silently waste the GPU.
+            logger.warning("CUDA requested but this is a ROCm GPU. Using rocm; set DEVICE=rocm or auto to silence.")
+            return "rocm"
         logger.warning("CUDA requested but not available. Falling back to CPU.")
         return "cpu"
 
