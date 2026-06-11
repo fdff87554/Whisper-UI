@@ -50,22 +50,31 @@ class TestAdapter:
             "result": {"language": "zh"},
             "transcription": [{"offsets": {"from": 1200, "to": 2500}, "text": "  hi  "}],
         }
-        assert WhisperCppTranscribeStage._to_whisperx_result(data) == {
+        assert WhisperCppTranscribeStage._to_whisperx_result(data, "zh") == {
             "language": "zh",
             "segments": [{"start": 1.2, "end": 2.5, "text": "hi"}],
         }
 
-    def test_handles_missing_fields(self):
-        assert WhisperCppTranscribeStage._to_whisperx_result({}) == {"language": "unknown", "segments": []}
+    def test_missing_language_falls_back_to_requested(self):
+        # A truthy "unknown" would silently disable the zh-only postprocess
+        # and LLM gates; the explicitly requested language must win instead.
+        assert WhisperCppTranscribeStage._to_whisperx_result({}, "zh") == {"language": "zh", "segments": []}
+
+    def test_missing_language_with_auto_request_stays_unknown(self):
+        assert WhisperCppTranscribeStage._to_whisperx_result({}, "auto") == {"language": "unknown", "segments": []}
+
+    def test_detected_language_wins_over_requested(self):
+        data = {"result": {"language": "en"}, "transcription": []}
+        assert WhisperCppTranscribeStage._to_whisperx_result(data, "auto") == {"language": "en", "segments": []}
 
     def test_null_offsets_do_not_crash(self):
         # An explicit JSON null offset must not raise (None / 1000.0 -> TypeError).
         data = {"transcription": [{"offsets": {"from": None, "to": None}, "text": "x"}]}
-        out = WhisperCppTranscribeStage._to_whisperx_result(data)
-        assert out == {"language": "unknown", "segments": [{"start": 0.0, "end": 0.0, "text": "x"}]}
+        out = WhisperCppTranscribeStage._to_whisperx_result(data, "zh")
+        assert out == {"language": "zh", "segments": [{"start": 0.0, "end": 0.0, "text": "x"}]}
 
     def test_non_dict_payload_is_safe(self):
-        assert WhisperCppTranscribeStage._to_whisperx_result([1, 2, 3]) == {"language": "unknown", "segments": []}
+        assert WhisperCppTranscribeStage._to_whisperx_result([1, 2, 3], "zh") == {"language": "zh", "segments": []}
 
 
 class TestExecute:
