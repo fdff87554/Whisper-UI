@@ -283,6 +283,11 @@ services:
       # CTranslate2 has no ROCm backend; transcribe via whisper.cpp (HIP).
       - TRANSCRIBE_BACKEND=whispercpp
       - WHISPERCPP_THREADS=${WHISPERCPP_THREADS:-0}
+      # Hallucination guards: Silero VAD pre-segmentation (model cached on the
+      # model-cache volume via HF_HOME) + no cross-window text conditioning.
+      - WHISPERCPP_VAD=${WHISPERCPP_VAD:-true}
+      - WHISPERCPP_VAD_MODEL=${WHISPERCPP_VAD_MODEL:-ggml-silero-v5.1.2.bin}
+      - WHISPERCPP_MAX_CONTEXT=${WHISPERCPP_MAX_CONTEXT:-0}
       - LANGUAGE=${LANGUAGE:-zh}
       - HF_TOKEN=${HF_TOKEN:-}
       - YOUTUBE_MAX_DURATION=${YOUTUBE_MAX_DURATION:-14400}

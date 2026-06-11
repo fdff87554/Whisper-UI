@@ -7,6 +7,32 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- whisper.cpp transcriptions (ROCm profile) of recordings with long silence
+  or music collapsed into hallucination loops covering the entire transcript
+  (observed in production: 1,673 of 1,679 segments were one repeated
+  subscription-plea line, triggered by a 20-minute silent stream intro). The
+  `whisper-cli` invocation now enables Silero VAD pre-segmentation
+  (`WHISPERCPP_VAD`, default on; model fetched from the ggml-org/whisper-vad
+  HF repo) and disables cross-window text conditioning
+  (`WHISPERCPP_MAX_CONTEXT=0`), matching the protection the whisperx (CUDA)
+  path already gets from its built-in VAD batching.
+
+### Added
+
+- "自動偵測 (auto)" language option on the upload, URL and re-transcribe
+  forms. Both backends detect the spoken language (whisperx via
+  `language=None`, whisper.cpp via `-l auto`); the detected code flows into
+  the transcript, the Traditional-Chinese conversion gate and the (zh-only)
+  LLM correction stage. The default selection is unchanged (zh).
+- Transcript quality gate: when one normalized segment text dominates a
+  completed transcript (≥ 50% of 20+ segments — the signature of a
+  hallucination loop), the job completes with a persisted quality warning
+  (`jobs.quality_warning`), shows a 品質警告 badge on the job card and a
+  banner in the viewer, and the LLM correction stage is skipped instead of
+  spending hours "correcting" degenerate output.
+
 ## [2.12.1] - 2026-06-10
 
 ### Fixed
