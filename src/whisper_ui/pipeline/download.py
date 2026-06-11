@@ -73,8 +73,18 @@ _RETRY_BACKOFF_SECONDS = 2
 
 
 class DownloadStage:
-    def __init__(self, *, max_duration: int = 14400, twitter_cookies_file: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        max_duration: int = 14400,
+        max_file_size: int = 0,
+        twitter_cookies_file: str | None = None,
+    ) -> None:
+        # max_file_size guards the Google Drive path, which has no duration
+        # metadata to enforce the cap on; 0 disables the check. The dispatcher
+        # passes the same limit as direct file uploads (max_upload_size).
         self._max_duration = max_duration
+        self._max_file_size = max_file_size
         self._twitter_cookies_file = twitter_cookies_file
 
     @property
@@ -153,6 +163,12 @@ class DownloadStage:
         downloaded = Path(result)
         if not downloaded.is_file() or downloaded.stat().st_size == 0:
             raise DownloadError("Download completed but the file was empty or not found.")
+
+        if self._max_file_size and downloaded.stat().st_size > self._max_file_size:
+            size_mb = downloaded.stat().st_size // (1024 * 1024)
+            limit_mb = self._max_file_size // (1024 * 1024)
+            downloaded.unlink(missing_ok=True)
+            raise DownloadError(f"Downloaded file ({size_mb} MB) exceeds the maximum allowed ({limit_mb} MB).")
 
         from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
 

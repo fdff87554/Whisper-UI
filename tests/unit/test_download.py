@@ -328,6 +328,53 @@ class TestGoogleDriveDownload:
             with pytest.raises(DownloadError, match="empty or not found"):
                 stage.execute(context)
 
+    def test_gdrive_file_exceeding_size_cap_raises_and_deletes(self, context, download_dir):
+        # Drive files carry no duration metadata, so the byte cap is the only
+        # guard against an oversized file filling the disk.
+        def mock_download(url, output, quiet=True, fuzzy=False):
+            out_path = Path(output) / "audio.mp3"
+            out_path.write_bytes(b"x" * 100)
+            return str(out_path)
+
+        mock_gdown = MagicMock()
+        mock_gdown.download = mock_download
+
+        with patch.dict("sys.modules", {"gdown": mock_gdown}):
+            stage = DownloadStage(max_file_size=10)
+            with pytest.raises(DownloadError, match="exceeds the maximum allowed"):
+                stage.execute(context)
+        assert not (download_dir / "audio.mp3").exists()
+
+    def test_gdrive_file_within_size_cap_succeeds(self, context, download_dir):
+        def mock_download(url, output, quiet=True, fuzzy=False):
+            out_path = Path(output) / "audio.mp3"
+            out_path.write_bytes(b"x" * 100)
+            return str(out_path)
+
+        mock_gdown = MagicMock()
+        mock_gdown.download = mock_download
+
+        with patch.dict("sys.modules", {"gdown": mock_gdown}):
+            stage = DownloadStage(max_file_size=1024)
+            result = stage.execute(context)
+
+        assert result["input_path"] == str(download_dir / "audio.mp3")
+
+    def test_gdrive_size_cap_disabled_by_default(self, context, download_dir):
+        def mock_download(url, output, quiet=True, fuzzy=False):
+            out_path = Path(output) / "audio.mp3"
+            out_path.write_bytes(b"x" * 100)
+            return str(out_path)
+
+        mock_gdown = MagicMock()
+        mock_gdown.download = mock_download
+
+        with patch.dict("sys.modules", {"gdown": mock_gdown}):
+            stage = DownloadStage()
+            result = stage.execute(context)
+
+        assert result["input_path"] == str(download_dir / "audio.mp3")
+
     def test_gdrive_unsupported_extension_raises(self, context, download_dir):
         def mock_download(url, output, quiet=True, fuzzy=False):
             out_path = Path(output) / "document.txt"
