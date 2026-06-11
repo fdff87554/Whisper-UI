@@ -646,6 +646,12 @@ def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> No
                     exclude=rq_job.id,
                 )
             mark_failed(job, runtime.db, reporter, error_msg)
+            # FAILED is terminal for this attempt: bump the generation so a
+            # zombie sibling that survives the best-effort cancel above (a
+            # SimpleWorker stage cannot be stopped mid-run) has its gated
+            # writes rejected instead of resurrecting the context/progress
+            # keys deleted below as orphans.
+            _bump_generation(runtime.redis, parent_job_id)
         finally:
             cleanup_preprocessed_audio(context)
             ctx_store.delete()
