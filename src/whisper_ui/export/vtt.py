@@ -17,10 +17,6 @@ def _format_text(segment: Segment) -> str:
 
 class VttExporter:
     @property
-    def format_name(self) -> str:
-        return "VTT"
-
-    @property
     def file_extension(self) -> str:
         return ".vtt"
 

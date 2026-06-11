@@ -13,7 +13,6 @@ class TestJsonExporter:
         self.exporter = JsonExporter()
 
     def test_properties(self):
-        assert self.exporter.format_name == "JSON"
         assert self.exporter.file_extension == ".json"
         assert self.exporter.mime_type == "application/json"
 

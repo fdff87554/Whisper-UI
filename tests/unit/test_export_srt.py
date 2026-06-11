@@ -25,7 +25,6 @@ def test_srt_export():
 
 def test_srt_format_metadata():
     exporter = SrtExporter()
-    assert exporter.format_name == "SRT"
     assert exporter.file_extension == ".srt"
     assert exporter.mime_type == "text/plain"
 

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tests.helpers.store import list_jobs
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.storage.database import JobDatabase
 
@@ -54,7 +55,7 @@ def test_get_nonexistent(db: JobDatabase):
 def test_list_jobs(db: JobDatabase):
     for i in range(3):
         db.insert_job(Job(filename=f"file{i}.mp3", filepath=f"/tmp/file{i}.mp3"))
-    jobs = db.list_jobs()
+    jobs = list_jobs(db)
     assert len(jobs) == 3
 
 
@@ -82,7 +83,7 @@ def test_delete_job(db: JobDatabase):
 def test_list_jobs_with_limit(db: JobDatabase):
     for i in range(5):
         db.insert_job(Job(filename=f"file{i}.mp3", filepath=f"/tmp/file{i}.mp3"))
-    jobs = db.list_jobs(limit=2)
+    jobs = list_jobs(db, limit=2)
     assert len(jobs) == 2
 
 
@@ -110,7 +111,7 @@ def test_list_jobs_ignores_unknown_db_fields(db: JobDatabase):
     db._conn.execute("ALTER TABLE jobs ADD COLUMN future_field TEXT DEFAULT 'x'")
     db._conn.commit()
 
-    jobs = db.list_jobs()
+    jobs = list_jobs(db)
     assert len(jobs) == 2
     assert all(j.filename in ("a.mp3", "b.mp3") for j in jobs)
 

@@ -15,10 +15,6 @@ def _format_text(segment: Segment) -> str:
 
 class SrtExporter:
     @property
-    def format_name(self) -> str:
-        return "SRT"
-
-    @property
     def file_extension(self) -> str:
         return ".srt"
 

@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tests.conftest import authed_test_client, flash_messages
+from tests.helpers.store import list_jobs, save_upload
 from whisper_ui.core.models import Job, JobStatus, Segment, TranscriptResult
 from whisper_ui.ui import labels as ui_labels
 from whisper_ui.web.app import create_app
@@ -75,7 +76,7 @@ def _completed_upload_job_with_audio(db, filestore, *, filename: str = "meeting.
     """A COMPLETED upload job with both its source audio and result on disk."""
     result = TranscriptResult(segments=[], language="zh", duration=60.0)
     job = Job(filename=filename, status=JobStatus.COMPLETED, language="zh", model_name="large-v3")
-    filestore.save_upload(job.id, filename, b"original audio bytes")
+    save_upload(filestore, job.id, filename, b"original audio bytes")
     job.filepath = str(filestore.get_upload_path(job.id, filename))
     job.result_path = str(filestore.save_result(job.id, result))
     db.insert_job(job)
@@ -386,8 +387,8 @@ class TestJobsRoutes:
             language="en",
             source_job_id=root.id,
         )
-        filestore.save_result(version.id, TranscriptResult(segments=[], language="en", duration=1.0))
-        version.result_path = str(filestore.get_output_dir(version.id) / "result.json")
+        result_path = filestore.save_result(version.id, TranscriptResult(segments=[], language="en", duration=1.0))
+        version.result_path = str(result_path)
         db.insert_job(version)
 
         resp = client.get("/jobs")
@@ -758,7 +759,7 @@ class TestJobsRoutes:
         # The original is untouched; only the new version flips to FAILED with a
         # generic, leak-free message.
         assert db.get_job(src.id).status == JobStatus.COMPLETED
-        new_versions = [j for j in db.list_jobs() if j.source_job_id == src.id]
+        new_versions = [j for j in list_jobs(db) if j.source_job_id == src.id]
         assert len(new_versions) == 1
         assert new_versions[0].status == JobStatus.FAILED
         assert "secret" not in (new_versions[0].error or "")
@@ -1240,7 +1241,7 @@ class TestUploadPost:
         assert resp.status_code == 303
         assert resp.headers["location"] == "/jobs"
         assert mock_enqueue.call_count == 1
-        jobs = db.list_jobs()
+        jobs = list_jobs(db)
         assert len(jobs) == 1 and jobs[0].filename == "good.mp3"
         # The toast reports the skipped file.
         page = client.get("/jobs")
@@ -1428,7 +1429,7 @@ class TestUploadPost:
             "{count}", "1"
         )
         assert flash_messages(page.text) == [expected]
-        statuses = sorted(j.status for j in db.list_jobs())
+        statuses = sorted(j.status for j in list_jobs(db))
         assert statuses == sorted([JobStatus.QUEUED, JobStatus.FAILED])
 
     def test_upload_htmx_error_escapes_html(self, client, app):
@@ -1466,7 +1467,7 @@ class TestUploadURLPost:
     def test_upload_url_creates_job_with_source_url(self, client, app, db):
         with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
             self._post_url(client)
-        jobs = db.list_jobs()
+        jobs = list_jobs(db)
         assert len(jobs) == 1
         assert jobs[0].source_url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
@@ -1479,14 +1480,14 @@ class TestUploadURLPost:
     def test_upload_x_url_creates_job_with_canonical_source_url(self, client, app, db):
         with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
             self._post_url(client, url="https://x.com/jack/status/20?s=20")
-        jobs = db.list_jobs()
+        jobs = list_jobs(db)
         assert len(jobs) == 1
         assert jobs[0].source_url == "https://x.com/i/status/20"
 
     def test_upload_twitter_com_url_accepted(self, client, app, db):
         with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
             self._post_url(client, url="https://twitter.com/jack/status/20")
-        jobs = db.list_jobs()
+        jobs = list_jobs(db)
         assert len(jobs) == 1
         assert jobs[0].source_url == "https://x.com/i/status/20"
 
@@ -1560,7 +1561,7 @@ class TestUploadURLPost:
             ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", "0")
             + ui_labels.TOAST_UPLOAD_FAILED.replace("{count}", "1")
         ]
-        jobs = db.list_jobs()
+        jobs = list_jobs(db)
         assert len(jobs) == 1
         assert jobs[0].status == JobStatus.FAILED
 
@@ -1585,7 +1586,7 @@ class TestUploadURLPost:
             )
         assert resp.status_code == 204
         assert resp.headers.get("HX-Redirect") == "/jobs"
-        jobs = db.list_jobs()
+        jobs = list_jobs(db)
         assert len(jobs) == 1
         assert jobs[0].status == JobStatus.FAILED
 
@@ -1618,7 +1619,7 @@ class TestUploadPlaylistPost:
 
         assert resp.status_code == 303
         assert resp.headers["location"] == "/jobs"
-        jobs = db.list_jobs()
+        jobs = list_jobs(db)
         assert sorted(j.source_url for j in jobs) == self._VIDEO_URLS
         assert len({j.batch_id for j in jobs}) == 1
         assert jobs[0].batch_id is not None
@@ -1632,7 +1633,7 @@ class TestUploadPlaylistPost:
         ):
             self._post_url(client, url=self._PLAYLIST_URL)
 
-        jobs = db.list_jobs()
+        jobs = list_jobs(db)
         assert len(jobs) == 1
         assert jobs[0].batch_id is None
         assert jobs[0].batch_title is None
@@ -1653,7 +1654,7 @@ class TestUploadPlaylistPost:
 
         assert resp.status_code == 303
         mock_expand.assert_called_once()
-        jobs = db.list_jobs()
+        jobs = list_jobs(db)
         assert sorted(j.source_url for j in jobs) == self._VIDEO_URLS
         assert {j.batch_title for j in jobs} == {"Team Meetings 2026Q2"}
         page = client.get("/jobs")
@@ -1673,7 +1674,7 @@ class TestUploadPlaylistPost:
         ):
             self._post_url(client, url=mixed)
 
-        jobs = db.list_jobs()
+        jobs = list_jobs(db)
         assert len(jobs) == 3
         assert len({j.batch_id for j in jobs}) == 1
         assert jobs[0].batch_id is not None
@@ -1688,7 +1689,7 @@ class TestUploadPlaylistPost:
             resp = self._post_url(client, url=mixed)
 
         assert resp.status_code == 303
-        assert len(db.list_jobs()) == 3
+        assert len(list_jobs(db)) == 3
         page = client.get("/jobs")
         expected = ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", "3") + ui_labels.TOAST_URL_DEDUPED.replace(
             "{count}", "1"
@@ -1754,7 +1755,7 @@ class TestUploadPlaylistPost:
 
         assert resp.status_code == 303
         assert f"error={error_code}" in resp.headers["location"]
-        assert db.list_jobs() == [], "a failed expansion must not persist any job"
+        assert list_jobs(db) == [], "a failed expansion must not persist any job"
 
     def test_upload_playlist_pushing_total_over_limit_rejected(self, client, db):
         from whisper_ui.core.constants import MAX_BATCH_SIZE
@@ -1767,7 +1768,7 @@ class TestUploadPlaylistPost:
         assert resp.status_code == 303
         assert "error=too_many_urls" in resp.headers["location"]
         assert f"count={MAX_BATCH_SIZE + 1}" in resp.headers["location"]
-        assert db.list_jobs() == []
+        assert list_jobs(db) == []
 
 
 class TestBatchRoutes:

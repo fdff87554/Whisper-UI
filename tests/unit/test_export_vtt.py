@@ -21,7 +21,6 @@ def test_vtt_export():
 
 def test_vtt_format_metadata():
     exporter = VttExporter()
-    assert exporter.format_name == "VTT"
     assert exporter.file_extension == ".vtt"
     assert exporter.mime_type == "text/vtt"
 

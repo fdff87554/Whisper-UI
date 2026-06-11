@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from whisper_ui.core.constants import (
-    DEFAULT_JOB_LIST_LIMIT,
     ERROR_DISPLAY_LENGTH,
     ERROR_MAX_LENGTH,
     FFMPEG_CONVERT_TIMEOUT,
@@ -22,10 +21,6 @@ def test_string_lengths_positive():
 
 def test_display_lengths_positive():
     assert TIMESTAMP_DISPLAY_LENGTH > 0
-
-
-def test_default_job_list_limit_positive():
-    assert DEFAULT_JOB_LIST_LIMIT > 0
 
 
 def test_timeouts_positive():

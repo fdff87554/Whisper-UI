@@ -8,9 +8,6 @@ if TYPE_CHECKING:
 
 class Exporter(Protocol):
     @property
-    def format_name(self) -> str: ...
-
-    @property
     def file_extension(self) -> str: ...
 
     @property

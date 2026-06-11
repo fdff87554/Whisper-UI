@@ -8,10 +8,6 @@ if TYPE_CHECKING:
 
 class TxtExporter:
     @property
-    def format_name(self) -> str:
-        return "TXT"
-
-    @property
     def file_extension(self) -> str:
         return ".txt"
 
