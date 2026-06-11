@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 # under HF_HOME (the worker mounts that on the model-cache volume).
 _GGML_HF_REPO = "ggerganov/whisper.cpp"
 
+# Silero VAD models in GGML format live in a separate ggml-org repo; resolved
+# and cached exactly like the main model above.
+_VAD_HF_REPO = "ggml-org/whisper-vad"
+
 # Local progress band for the CLI run. We cannot stream whisper.cpp progress
 # without parsing stderr, so we report load -> running -> done coarsely; the
 # 0.0-0.1 slice covers model resolution to match the whisperx stage's feel.
@@ -49,6 +53,9 @@ class WhisperCppTranscribeStage:
         model_dir: str | Path | None = None,
         threads: int = 0,
         device: str = "rocm",
+        vad: bool = True,
+        vad_model: str = "ggml-silero-v5.1.2.bin",
+        max_context: int = 0,
     ) -> None:
         # ``device`` is accepted for interface symmetry with TranscribeStage;
         # whisper.cpp selects the GPU itself (HIP_VISIBLE_DEVICES env), so it is
@@ -58,6 +65,9 @@ class WhisperCppTranscribeStage:
         self._model_dir = Path(model_dir) if model_dir else None
         self._threads = threads
         self._device = device
+        self._vad = vad
+        self._vad_model = vad_model
+        self._max_context = max_context
 
     @property
     def name(self) -> str:
@@ -72,11 +82,12 @@ class WhisperCppTranscribeStage:
 
         try:
             model_path = self._resolve_model_path()
+            vad_model_path = self._resolve_vad_model_path() if self._vad else None
 
             if on_progress:
                 on_progress(_RUN_PROGRESS_START, TRANSCRIBE_RUNNING)
 
-            data = self._run_whisper_cli(model_path, audio_path, language)
+            data = self._run_whisper_cli(model_path, audio_path, language, vad_model_path)
             transcription = self._to_whisperx_result(data)
 
             # AlignStage consumes ``whisperx_audio`` (the decoded 16 kHz array);
@@ -131,7 +142,26 @@ class WhisperCppTranscribeStage:
 
         return hf_hub_download(repo_id=_GGML_HF_REPO, filename=filename)
 
-    def _run_whisper_cli(self, model_path: str, audio_path: str, language: str) -> dict[str, Any]:
+    def _resolve_vad_model_path(self) -> str:
+        """Return a path to the GGML VAD model file, downloading it if needed.
+
+        Resolution mirrors :meth:`_resolve_model_path`. A failure here fails
+        the stage rather than silently falling back to a no-VAD run: a run
+        without VAD can complete "successfully" with a hallucinated transcript,
+        which is exactly the failure mode VAD exists to prevent. Offline
+        deployments can pre-bake the file under ``model_dir``.
+        """
+        if self._model_dir is not None:
+            candidate = self._model_dir / self._vad_model
+            if candidate.exists():
+                return str(candidate)
+        from huggingface_hub import hf_hub_download
+
+        return hf_hub_download(repo_id=_VAD_HF_REPO, filename=self._vad_model)
+
+    def _run_whisper_cli(
+        self, model_path: str, audio_path: str, language: str, vad_model_path: str | None = None
+    ) -> dict[str, Any]:
         """Run whisper-cli with JSON output and return the parsed document."""
         with tempfile.TemporaryDirectory() as tmp:
             out_prefix = str(Path(tmp) / "out")
@@ -149,6 +179,23 @@ class WhisperCppTranscribeStage:
             ]
             if self._threads and self._threads > 0:
                 cmd += ["-t", str(self._threads)]
+            if vad_model_path is not None:
+                cmd += ["--vad", "-vm", vad_model_path]
+            if self._max_context >= 0:
+                cmd += ["-mc", str(self._max_context)]
+
+            logger.info(
+                "whisper-cli starting (vad=%s max_context=%d language=%s)",
+                vad_model_path is not None,
+                self._max_context,
+                language,
+                extra={
+                    "event": "whispercpp_cli",
+                    "vad": vad_model_path is not None,
+                    "max_context": self._max_context,
+                    "language": language,
+                },
+            )
 
             # encoding/errors (not text=True) so non-ASCII output — e.g. zh
             # transcripts or file names — cannot raise UnicodeDecodeError.

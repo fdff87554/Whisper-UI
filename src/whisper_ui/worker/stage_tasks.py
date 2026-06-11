@@ -84,6 +84,9 @@ def _build_transcribe_stage(job: Job, runtime: WorkerRuntime, torch_device: str)
             binary=runtime.settings.whispercpp_binary,
             threads=runtime.settings.whispercpp_threads,
             device=runtime.settings.device,
+            vad=runtime.settings.whispercpp_vad,
+            vad_model=runtime.settings.whispercpp_vad_model,
+            max_context=runtime.settings.whispercpp_max_context,
         )
     return TranscribeStage(
         model_name=job.model_name,
