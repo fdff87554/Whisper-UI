@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 from rq.timeouts import BaseTimeoutException
 
 from whisper_ui.core.exceptions import PipelineError
-from whisper_ui.pipeline.progress_bands import DEFAULT_STAGE_WEIGHTS
+from whisper_ui.pipeline.progress_bands import build_stage_weights
 
 if TYPE_CHECKING:
     from whisper_ui.core.models import TranscriptResult
@@ -32,7 +32,7 @@ class PipelineOrchestrator:
     ) -> None:
         self._stages = stages
         self._on_progress = on_progress
-        self._stage_weights = stage_weights or DEFAULT_STAGE_WEIGHTS
+        self._stage_weights = stage_weights or build_stage_weights(has_download=False, has_llm=False)
 
     def run(self, context: dict[str, Any]) -> TranscriptResult:
         for stage in self._stages:

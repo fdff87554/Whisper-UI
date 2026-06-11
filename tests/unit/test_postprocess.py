@@ -75,6 +75,33 @@ def test_postprocess_falls_back_to_context_language_when_undetected():
     assert result["transcript_result"].language == "zh"
 
 
+def test_postprocess_treats_unknown_sentinel_as_undetected():
+    """The whisper.cpp adapter's truthy "unknown" must not beat the job's
+    configured language — that would silently disable the zh-only s2t and
+    LLM gates on an explicitly-zh job.
+    """
+    stage = PostprocessStage(convert_to_traditional=True)
+    raw = {"language": "unknown", "segments": [{"start": 0.0, "end": 1.0, "text": "简体"}]}
+    context = {"transcription_result": raw, "language": "zh", "duration": 1.0}
+    mock_opencc = MagicMock()
+    mock_opencc.OpenCC.return_value.convert.side_effect = lambda text: f"[t]{text}"
+    with patch.dict("sys.modules", {"opencc": mock_opencc}):
+        result = stage.execute(context)
+    assert result["transcript_result"].language == "zh"
+    assert result["transcript_result"].segments[0].text == "[t]简体"
+
+
+def test_postprocess_auto_request_with_unknown_detection_persists_unknown():
+    """When detection was requested but nothing was detected, the persisted
+    language must be "unknown", never the "auto" sentinel itself.
+    """
+    stage = PostprocessStage()
+    raw = {"language": "unknown", "segments": [{"start": 0.0, "end": 1.0, "text": "hi"}]}
+    context = {"transcription_result": raw, "language": "auto", "duration": 1.0}
+    result = stage.execute(context)
+    assert result["transcript_result"].language == "unknown"
+
+
 def _raw_with_texts(texts: list[str]) -> dict:
     return {"segments": [{"start": float(i), "end": float(i + 1), "text": t} for i, t in enumerate(texts)]}
 
@@ -122,7 +149,3 @@ def test_quality_gate_ignores_empty_segment_texts():
     texts = ["   "] * 25 + ["同一句"] * 19
     result = stage.execute({"final_result": _raw_with_texts(texts), "language": "zh", "duration": 44.0})
     assert "quality_warning" not in result
-
-
-def test_postprocess_name():
-    assert PostprocessStage().name == "postprocess"

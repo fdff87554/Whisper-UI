@@ -6,7 +6,7 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from whisper_ui.core.constants import DEFAULT_JOB_LIST_LIMIT, SQLITE_BUSY_TIMEOUT_MS
+from whisper_ui.core.constants import SQLITE_BUSY_TIMEOUT_MS
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.storage.migrations import init_db
 
@@ -153,13 +153,6 @@ class JobDatabase:
         if row is None:
             return None
         return _row_to_job(row)
-
-    def list_jobs(self, *, limit: int = DEFAULT_JOB_LIST_LIMIT, offset: int = 0) -> list[Job]:
-        rows = self._conn.execute(
-            "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (limit, offset),
-        ).fetchall()
-        return [_row_to_job(r) for r in rows]
 
     def count_jobs(self, *, status: str | None = None, owner_id: int | None = None) -> int:
         """Count jobs, optionally restricted by status and/or owner.

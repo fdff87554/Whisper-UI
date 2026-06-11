@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from whisper_ui.export.utils import collapse_newlines, format_timestamp
+from whisper_ui.export.utils import collapse_newlines, format_timestamp, neutralize_srt_arrows
 
 if TYPE_CHECKING:
     from whisper_ui.core.models import Segment, TranscriptResult
@@ -10,14 +10,10 @@ if TYPE_CHECKING:
 
 def _format_text(segment: Segment) -> str:
     prefix = f"[{segment.speaker}] " if segment.speaker else ""
-    return collapse_newlines(f"{prefix}{segment.text}")
+    return collapse_newlines(neutralize_srt_arrows(f"{prefix}{segment.text}"))
 
 
 class SrtExporter:
-    @property
-    def format_name(self) -> str:
-        return "SRT"
-
     @property
     def file_extension(self) -> str:
         return ".srt"

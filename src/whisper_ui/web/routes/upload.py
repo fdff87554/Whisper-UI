@@ -75,7 +75,10 @@ def _build_upload_toast(
 def _format_size(size_bytes: int) -> str:
     if size_bytes >= 1024 * 1024 * 1024:
         return f"{size_bytes / (1024**3):.1f} GB"
-    return f"{size_bytes / (1024**2):.0f} MB"
+    if size_bytes >= 1024 * 1024:
+        return f"{size_bytes / (1024**2):.0f} MB"
+    # Sub-MB limits would otherwise round to "0 MB" in the rejection toast.
+    return f"{size_bytes / 1024:.0f} KB"
 
 
 def _is_htmx(request: Request) -> bool:
@@ -514,10 +517,7 @@ async def upload_url_submit(
     )
 
     # Even when every enqueue failed we fall through to the /jobs redirect so
-    # the per-URL FAILED rows we just inserted are visible to the user. The
-    # "/upload?error=queue" fragment is reserved for the case above where the
-    # Queue itself could not be constructed — that happens before any job is
-    # persisted, so there is nothing to show on /jobs.
+    # the per-URL FAILED rows we just inserted are visible to the user.
 
     message, category = _build_upload_toast(
         submitted_count,

@@ -23,11 +23,6 @@ class FileStore:
         job_dir.mkdir(parents=True, exist_ok=True)
         return job_dir / Path(filename).name
 
-    def save_upload(self, job_id: str, filename: str, data: bytes) -> Path:
-        dest = self.prepare_upload_path(job_id, filename)
-        dest.write_bytes(data)
-        return dest
-
     def copy_source_for_new_job(self, src_job_id: str, src_filename: str, new_job_id: str) -> Path:
         """Copy ``src_job_id``'s uploaded audio into ``new_job_id``'s upload dir.
 
@@ -64,9 +59,6 @@ class FileStore:
 
     def get_upload_path(self, job_id: str, filename: str) -> Path:
         return self._upload_dir / job_id / Path(filename).name
-
-    def get_output_dir(self, job_id: str) -> Path:
-        return self._output_dir / job_id
 
     def get_source_media_path(self, job_id: str) -> Path | None:
         """Return the downloaded media file for a YouTube job, or None if not found.

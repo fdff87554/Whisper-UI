@@ -22,6 +22,7 @@ the ``?bootstrap=1`` query param — that param only controls UI wording.
 from __future__ import annotations
 
 import logging
+import math
 import re
 import sqlite3
 from typing import Annotated
@@ -100,7 +101,9 @@ def _login_error_message(error: str, lockout_seconds: int = 0) -> str | None:
     if error == "inactive":
         return ui_labels.AUTH_ACCOUNT_INACTIVE
     if error == "rate_limited":
-        minutes = max(1, lockout_seconds // 60)
+        # Ceil, not floor: understating the wait makes users retry early and
+        # get rejected again.
+        minutes = max(1, math.ceil(lockout_seconds / 60))
         return ui_labels.AUTH_RATE_LIMITED.format(minutes=minutes)
     return None
 

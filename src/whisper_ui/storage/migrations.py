@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 
 logger = logging.getLogger(__name__)
+
+_CREATE_INDEX_RE = re.compile(r"CREATE INDEX IF NOT EXISTS (\w+)", re.IGNORECASE)
+_DROP_INDEX_RE = re.compile(r"DROP INDEX IF EXISTS (\w+)", re.IGNORECASE)
 
 
 # RETURNING clause requires SQLite 3.35+. recover_stale_jobs depends on it
@@ -77,6 +81,11 @@ _MIGRATIONS: list[str] = [
     # Quality-gate warning for completed-but-degenerate transcripts
     # (hallucination loops). Nullable: clean jobs never set it.
     "ALTER TABLE jobs ADD COLUMN quality_warning TEXT",
+    # idx_jobs_source_job_id shipped in v2.10.0-v2.11.0 and was removed from
+    # this list (with its query) in v2.12.0 without a DROP, so installs that
+    # upgraded through those releases still carry it. Drop it so migrated
+    # and fresh schemas converge.
+    "DROP INDEX IF EXISTS idx_jobs_source_job_id",
 ]
 
 
@@ -109,6 +118,9 @@ def _ensure_sqlite_version() -> None:
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
     for sql in _MIGRATIONS:
+        if _is_already_applied(conn, sql):
+            logger.debug("schema migration already applied (skipped): %s", sql)
+            continue
         try:
             conn.execute(sql)
             conn.commit()
@@ -118,3 +130,23 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
                 logger.debug("schema migration already applied (skipped): %s", sql)
                 continue
             raise
+
+
+def _is_already_applied(conn: sqlite3.Connection, sql: str) -> bool:
+    """Detect index migrations that would be silent no-ops.
+
+    ``IF NOT EXISTS`` / ``IF EXISTS`` never raise, so without this check
+    every connection (one per stage task) would re-log them as freshly
+    applied — misleading INFO noise in an audit trail. Column migrations
+    keep relying on the "duplicate column" error instead.
+    """
+    if match := _CREATE_INDEX_RE.match(sql):
+        return _index_exists(conn, match.group(1))
+    if match := _DROP_INDEX_RE.match(sql):
+        return not _index_exists(conn, match.group(1))
+    return False
+
+
+def _index_exists(conn: sqlite3.Connection, name: str) -> bool:
+    row = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?", (name,)).fetchone()
+    return row is not None

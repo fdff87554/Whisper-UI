@@ -73,8 +73,18 @@ _RETRY_BACKOFF_SECONDS = 2
 
 
 class DownloadStage:
-    def __init__(self, *, max_duration: int = 14400, twitter_cookies_file: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        max_duration: int = 14400,
+        max_file_size: int = 0,
+        twitter_cookies_file: str | None = None,
+    ) -> None:
+        # max_file_size guards the Google Drive path, which has no duration
+        # metadata to enforce the cap on; 0 disables the check. The dispatcher
+        # passes the same limit as direct file uploads (max_upload_size).
         self._max_duration = max_duration
+        self._max_file_size = max_file_size
         self._twitter_cookies_file = twitter_cookies_file
 
     @property
@@ -154,6 +164,12 @@ class DownloadStage:
         if not downloaded.is_file() or downloaded.stat().st_size == 0:
             raise DownloadError("Download completed but the file was empty or not found.")
 
+        if self._max_file_size and downloaded.stat().st_size > self._max_file_size:
+            size_mb = downloaded.stat().st_size / (1024 * 1024)
+            limit_mb = self._max_file_size / (1024 * 1024)
+            downloaded.unlink(missing_ok=True)
+            raise DownloadError(f"Downloaded file ({size_mb:.1f} MB) exceeds the maximum allowed ({limit_mb:.1f} MB).")
+
         from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
 
         if downloaded.suffix.lower() not in SUPPORTED_EXTENSIONS:
@@ -183,6 +199,13 @@ class DownloadStage:
 
         download_dir = Path(context["download_dir"])
         download_dir.mkdir(parents=True, exist_ok=True)
+
+        # A reaped-then-retried job reuses the same download dir, so a killed
+        # attempt can leave ``video.mp4.part`` or unmerged DASH fragments
+        # behind. Clear them so the glob fallback below cannot pick one up.
+        for stale in download_dir.glob("video.*"):
+            if stale.is_file():
+                stale.unlink()
 
         if on_progress:
             on_progress(0.0, DOWNLOAD_EXTRACTING_INFO)
@@ -221,13 +244,29 @@ class DownloadStage:
 
         info = self._extract_with_retries(yt_dlp, source_url, ydl_opts, allowed_extractors=allowed_extractors)
 
-        downloaded_files = list(download_dir.glob("video.*"))
-        if not downloaded_files:
-            raise DownloadError("Download completed but no video file was found.")
-
-        context["input_path"] = str(downloaded_files[0])
+        context["input_path"] = str(self._resolve_downloaded_path(info, download_dir))
         context["video_title"] = info.get("title", "")
         return context
+
+    @staticmethod
+    def _resolve_downloaded_path(info: dict[str, Any], download_dir: Path) -> Path:
+        """Return the file yt-dlp actually produced.
+
+        ``requested_downloads[0]["filepath"]`` is the post-merge final path
+        yt-dlp reports for the download pass. The glob fallback covers info
+        dicts that lack it (e.g. older extractor results); it sorts for
+        determinism and skips ``.part`` files since ``Path.glob`` order is
+        filesystem-dependent and ``video.*`` also matches partial downloads.
+        """
+        requested = info.get("requested_downloads") or [{}]
+        reported = requested[0].get("filepath")
+        if reported and Path(reported).is_file():
+            return Path(reported)
+
+        candidates = sorted(p for p in download_dir.glob("video.*") if p.is_file() and p.suffix != ".part")
+        if not candidates:
+            raise DownloadError("Download completed but no video file was found.")
+        return candidates[0]
 
     def _extract_with_retries(
         self,
@@ -277,10 +316,21 @@ class DownloadStage:
             if info is None:
                 raise DownloadError("Failed to extract video information.")
 
+            # Live/upcoming streams report duration=None, which would slip
+            # past the cap below as 0 and download until the job timeout
+            # kills the worker. yt-dlp auto-fills live_status from is_live,
+            # but check both so a sparse extractor result still trips this.
+            live_status = info.get("live_status")
+            if info.get("is_live") or live_status in ("is_live", "is_upcoming"):
+                raise DownloadError("Live or upcoming streams are not supported. Retry after the stream has ended.")
+
             duration = info.get("duration") or 0
             if duration > self._max_duration:
-                hours = self._max_duration // 3600
-                raise DownloadError(f"Video duration ({duration}s) exceeds the maximum allowed ({hours}h).")
+                # :g keeps whole hours bare (4h) and fractional ones exact
+                # (1.5h) so a custom non-hour-aligned cap is not understated.
+                raise DownloadError(
+                    f"Video duration ({duration}s) exceeds the maximum allowed ({self._max_duration / 3600:g}h)."
+                )
 
             info = ydl.extract_info(source_url, download=True)
             if info is None:

@@ -1,5 +1,4 @@
 {# Reusable job card fragment — expects `job` and `progress_data` in context #}
-{% from "_icons.html" import icon_eye, icon_refresh, icon_trash, icon_download %}
 <div class="flex items-center justify-between gap-2">
   {% if job.status.value in ('completed', 'failed') %}
   <label class="cursor-pointer flex-shrink-0 inline-flex items-center"

@@ -30,13 +30,14 @@ class AlignStage:
         if on_progress:
             on_progress(0.0, ALIGN_LOADING)
 
-        language = context.get("language", "unknown")
+        # Read the contract keys outside the try: a missing key is an upstream
+        # programming error that must fail the stage loudly, not be disguised
+        # as "alignment failed" and silently degrade to the unaligned result.
+        transcription = context["transcription_result"]
+        audio = context["whisperx_audio"]
+        language = transcription.get("language", context.get("language", "zh"))
         try:
             import whisperx
-
-            transcription = context["transcription_result"]
-            audio = context["whisperx_audio"]
-            language = transcription.get("language", context.get("language", "zh"))
 
             self._model, self._metadata = whisperx.load_align_model(
                 language_code=language,

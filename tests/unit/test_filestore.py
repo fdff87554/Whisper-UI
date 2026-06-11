@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tests.helpers.store import save_upload
 from whisper_ui.core.models import Segment, TranscriptResult
 
 if TYPE_CHECKING:
@@ -13,7 +14,7 @@ if TYPE_CHECKING:
 
 def test_save_and_load_upload(filestore: FileStore):
     data = b"fake audio data"
-    path = filestore.save_upload("job1", "test.mp3", data)
+    path = save_upload(filestore, "job1", "test.mp3", data)
     assert path.exists()
     assert path.read_bytes() == data
 
@@ -51,7 +52,7 @@ def test_load_result_ignores_directory_named_result_json(filestore: FileStore, s
 
 
 def test_get_source_media_path_finds_downloaded_video(filestore: FileStore):
-    path = filestore.save_upload("yt", "video.mp4", b"fake video bytes")
+    path = save_upload(filestore, "yt", "video.mp4", b"fake video bytes")
     assert filestore.get_source_media_path("yt") == path
 
 
@@ -64,7 +65,7 @@ def test_get_source_media_path_ignores_directory_matching_glob(filestore: FileSt
 
 def test_save_upload_sanitizes_path_traversal(filestore: FileStore):
     data = b"malicious content"
-    path = filestore.save_upload("job1", "/etc/passwd", data)
+    path = save_upload(filestore, "job1", "/etc/passwd", data)
     assert path.parent.name == "job1"
     assert path.name == "passwd"
     assert path.read_bytes() == data
@@ -72,7 +73,7 @@ def test_save_upload_sanitizes_path_traversal(filestore: FileStore):
 
 def test_save_upload_sanitizes_relative_traversal(filestore: FileStore):
     data = b"malicious content"
-    path = filestore.save_upload("job1", "../../etc/shadow", data)
+    path = save_upload(filestore, "job1", "../../etc/shadow", data)
     assert path.parent.name == "job1"
     assert path.name == "shadow"
 
@@ -84,7 +85,7 @@ def test_get_upload_path_sanitizes_filename(filestore: FileStore):
 
 
 def test_delete_job_files(filestore: FileStore):
-    filestore.save_upload("job2", "test.mp3", b"data")
+    save_upload(filestore, "job2", "test.mp3", b"data")
     result = TranscriptResult(segments=[], language="zh", duration=0.0)
     filestore.save_result("job2", result)
 
@@ -93,7 +94,7 @@ def test_delete_job_files(filestore: FileStore):
 
 
 def test_delete_upload_files_removes_uploads_but_keeps_result(filestore: FileStore):
-    filestore.save_upload("job3", "input.mp3", b"data")
+    save_upload(filestore, "job3", "input.mp3", b"data")
     result = TranscriptResult(segments=[], language="zh", duration=0.0)
     filestore.save_result("job3", result)
 
@@ -111,7 +112,7 @@ def test_delete_upload_files_returns_false_when_nothing_to_remove(filestore: Fil
 def test_delete_job_files_logs_info_with_directory_summary(filestore: FileStore, caplog):
     import logging as _logging
 
-    filestore.save_upload("job-log", "input.mp3", b"data")
+    save_upload(filestore, "job-log", "input.mp3", b"data")
     result = TranscriptResult(segments=[], language="zh", duration=0.0)
     filestore.save_result("job-log", result)
 
@@ -127,7 +128,7 @@ def test_delete_job_files_logs_info_with_directory_summary(filestore: FileStore,
 def test_delete_upload_files_logs_debug_on_success(filestore: FileStore, caplog):
     import logging as _logging
 
-    filestore.save_upload("job-dbg", "input.mp3", b"data")
+    save_upload(filestore, "job-dbg", "input.mp3", b"data")
     with caplog.at_level(_logging.DEBUG, logger="whisper_ui.storage.filestore"):
         filestore.delete_upload_files("job-dbg")
 
@@ -136,7 +137,7 @@ def test_delete_upload_files_logs_debug_on_success(filestore: FileStore, caplog)
 
 def test_copy_source_for_new_job_copies_audio_to_new_dir(filestore: FileStore):
     data = b"original audio bytes"
-    filestore.save_upload("root", "meeting.mp3", data)
+    save_upload(filestore, "root", "meeting.mp3", data)
 
     dest = filestore.copy_source_for_new_job("root", "meeting.mp3", "version1")
 
@@ -147,7 +148,7 @@ def test_copy_source_for_new_job_copies_audio_to_new_dir(filestore: FileStore):
 
 def test_copy_source_for_new_job_leaves_original_intact(filestore: FileStore):
     data = b"original audio bytes"
-    src = filestore.save_upload("root", "meeting.mp3", data)
+    src = save_upload(filestore, "root", "meeting.mp3", data)
 
     filestore.copy_source_for_new_job("root", "meeting.mp3", "version1")
 
@@ -157,7 +158,7 @@ def test_copy_source_for_new_job_leaves_original_intact(filestore: FileStore):
 
 
 def test_copy_source_for_new_job_independent_of_source_deletion(filestore: FileStore):
-    filestore.save_upload("root", "meeting.mp3", b"data")
+    save_upload(filestore, "root", "meeting.mp3", b"data")
     filestore.copy_source_for_new_job("root", "meeting.mp3", "version1")
 
     filestore.delete_job_files("root")
@@ -187,7 +188,7 @@ def test_delete_job_files_raises_on_filesystem_failure(filestore: FileStore, mon
     """
     import shutil
 
-    filestore.save_upload("job-fail", "input.mp3", b"data")
+    save_upload(filestore, "job-fail", "input.mp3", b"data")
 
     def _boom(*_args, **_kwargs):
         raise PermissionError("read-only filesystem")

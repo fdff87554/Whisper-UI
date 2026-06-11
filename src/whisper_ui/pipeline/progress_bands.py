@@ -79,13 +79,7 @@ def build_stage_weights(*, has_download: bool, has_llm: bool, has_diarization: b
     return bands
 
 
-# Default band layout (no optional stages). Exposed so callers that have
-# no pipeline shape on hand still get a sensible mapping.
-DEFAULT_STAGE_WEIGHTS: StageWeights = build_stage_weights(has_download=False, has_llm=False)
-
-
 __all__ = [
-    "DEFAULT_STAGE_WEIGHTS",
     "StageWeights",
     "build_stage_weights",
 ]

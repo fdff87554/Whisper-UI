@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tests.helpers.store import list_jobs
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.storage.database import JobDatabase
 
@@ -54,7 +55,7 @@ def test_get_nonexistent(db: JobDatabase):
 def test_list_jobs(db: JobDatabase):
     for i in range(3):
         db.insert_job(Job(filename=f"file{i}.mp3", filepath=f"/tmp/file{i}.mp3"))
-    jobs = db.list_jobs()
+    jobs = list_jobs(db)
     assert len(jobs) == 3
 
 
@@ -82,7 +83,7 @@ def test_delete_job(db: JobDatabase):
 def test_list_jobs_with_limit(db: JobDatabase):
     for i in range(5):
         db.insert_job(Job(filename=f"file{i}.mp3", filepath=f"/tmp/file{i}.mp3"))
-    jobs = db.list_jobs(limit=2)
+    jobs = list_jobs(db, limit=2)
     assert len(jobs) == 2
 
 
@@ -110,7 +111,7 @@ def test_list_jobs_ignores_unknown_db_fields(db: JobDatabase):
     db._conn.execute("ALTER TABLE jobs ADD COLUMN future_field TEXT DEFAULT 'x'")
     db._conn.commit()
 
-    jobs = db.list_jobs()
+    jobs = list_jobs(db)
     assert len(jobs) == 2
     assert all(j.filename in ("a.mp3", "b.mp3") for j in jobs)
 
@@ -292,6 +293,63 @@ def test_init_db_accepts_sqlite_3_35(monkeypatch, tmp_path):
         migrations.init_db(conn)
     finally:
         conn.close()
+
+
+def test_reinit_does_not_relog_index_migrations(tmp_path, caplog):
+    """Migrations re-run on every connection (one per stage task). The
+    IF NOT EXISTS index entries never raise, so without an existence check
+    each task would emit a misleading 'migration applied' INFO line."""
+    import logging as _logging
+    import sqlite3 as _sqlite3
+
+    from whisper_ui.storage import migrations
+
+    db_path = tmp_path / "relog.db"
+    conn = _sqlite3.connect(db_path)
+    migrations.init_db(conn)
+    conn.close()
+
+    # The first init_db above legitimately logs the index creation; only the
+    # re-run must stay silent. clear() also drops records captured when an
+    # earlier test raised the global log level (caplog captures the whole
+    # test, not just the at_level block).
+    caplog.clear()
+    conn = _sqlite3.connect(db_path)
+    try:
+        with caplog.at_level(_logging.INFO, logger="whisper_ui.storage.migrations"):
+            migrations.init_db(conn)
+    finally:
+        conn.close()
+
+    applied = [r.getMessage() for r in caplog.records if "schema migration applied" in r.getMessage()]
+    assert applied == []
+
+
+def test_stray_source_job_id_index_is_dropped_on_upgrade(tmp_path):
+    """v2.10-v2.11 installs created idx_jobs_source_job_id; the index was
+    removed from the migration list in v2.12.0 without a DROP, leaving
+    upgraded deployments with an index fresh installs never get."""
+    import sqlite3 as _sqlite3
+
+    from whisper_ui.storage import migrations
+
+    db_path = tmp_path / "stray.db"
+    conn = _sqlite3.connect(db_path)
+    migrations.init_db(conn)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_source_job_id ON jobs(source_job_id)")
+    conn.commit()
+    conn.close()
+
+    conn = _sqlite3.connect(db_path)
+    try:
+        migrations.init_db(conn)
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_jobs_source_job_id'"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row is None
 
 
 def test_has_active_jobs_empty(db: JobDatabase):

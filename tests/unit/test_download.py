@@ -39,12 +39,18 @@ class TestDownloadStageWithMock:
             "input_path": "",
         }
 
-    def _make_mock_ydl(self, download_dir: Path, duration: int = 120, title: str = "Test Video"):
+    def _make_mock_ydl(
+        self,
+        download_dir: Path,
+        duration: int = 120,
+        title: str = "Test Video",
+        extra_info: dict[str, Any] | None = None,
+    ):
         """Create a mock YoutubeDL that simulates a successful download."""
         mock_ydl_instance = MagicMock()
 
         def extract_info(url, download=True):
-            info = {"duration": duration, "title": title}
+            info = {"duration": duration, "title": title, **(extra_info or {})}
             if download:
                 # Simulate file creation
                 (Path(download_dir) / "video.mp4").write_bytes(b"fake video")
@@ -93,6 +99,116 @@ class TestDownloadStageWithMock:
             stage = DownloadStage(max_duration=3600)
             with pytest.raises(DownloadError, match="exceeds the maximum"):
                 stage.execute(context)
+
+    def test_live_stream_rejected_before_download_pass(self, context, download_dir):
+        # A live stream reports duration=None, which must not bypass the
+        # duration cap as 0; the rejection has to happen on the metadata
+        # probe, before any download pass starts.
+        mock_ydl_instance = MagicMock()
+
+        def extract_info(url, download=True):
+            assert not download, "live stream must be rejected before the download pass"
+            return {"duration": None, "title": "Live", "is_live": True, "live_status": "is_live"}
+
+        mock_ydl_instance.extract_info = extract_info
+        mock_ydl_instance.__enter__ = lambda self: self
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl_instance
+
+        with patch.dict("sys.modules", {"yt_dlp": mock_module}):
+            stage = DownloadStage()
+            with pytest.raises(DownloadError, match=r"[Ll]ive"):
+                stage.execute(context)
+
+    def test_upcoming_stream_rejected(self, context, download_dir):
+        mock_ydl = self._make_mock_ydl(download_dir, extra_info={"live_status": "is_upcoming"})
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl
+
+        with patch.dict("sys.modules", {"yt_dlp": mock_module}):
+            stage = DownloadStage()
+            with pytest.raises(DownloadError, match=r"[Ll]ive"):
+                stage.execute(context)
+
+    def test_finished_live_vod_downloads_normally(self, context, download_dir):
+        mock_ydl = self._make_mock_ydl(download_dir, extra_info={"live_status": "was_live", "is_live": False})
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl
+
+        with patch.dict("sys.modules", {"yt_dlp": mock_module}):
+            stage = DownloadStage()
+            result = stage.execute(context)
+
+        assert result["input_path"] == str(download_dir / "video.mp4")
+
+    def test_input_path_prefers_ytdlp_reported_filepath(self, context, download_dir):
+        # When two media files coexist, the path yt-dlp reports wins over the
+        # filesystem-order glob fallback.
+        reported = download_dir / "video.webm"
+
+        def write_files(url, download=True):
+            if download:
+                (download_dir / "video.mp4").write_bytes(b"other file")
+                reported.write_bytes(b"reported file")
+            return {
+                "duration": 120,
+                "title": "Test Video",
+                "requested_downloads": [{"filepath": str(reported)}],
+            }
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info = write_files
+        mock_ydl_instance.__enter__ = lambda self: self
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl_instance
+
+        with patch.dict("sys.modules", {"yt_dlp": mock_module}):
+            stage = DownloadStage()
+            result = stage.execute(context)
+
+        assert result["input_path"] == str(reported)
+
+    def test_stale_artifacts_cleared_before_download(self, context, download_dir):
+        # A reaped attempt can leave partial files behind; they must not be
+        # picked up as input_path by the retry.
+        (download_dir / "video.mp4.part").write_bytes(b"stale partial")
+        (download_dir / "video.f614.mp4").write_bytes(b"stale fragment")
+
+        mock_ydl = self._make_mock_ydl(download_dir)
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl
+
+        with patch.dict("sys.modules", {"yt_dlp": mock_module}):
+            stage = DownloadStage()
+            result = stage.execute(context)
+
+        assert result["input_path"] == str(download_dir / "video.mp4")
+        assert not (download_dir / "video.mp4.part").exists()
+        assert not (download_dir / "video.f614.mp4").exists()
+
+    def test_glob_fallback_skips_part_files_and_sorts(self, context, download_dir):
+        # Without requested_downloads, the fallback must never resolve to a
+        # .part file regardless of filesystem ordering.
+        def write_files(url, download=True):
+            if download:
+                (download_dir / "video.mp4.part").write_bytes(b"partial")
+                (download_dir / "video.mp4").write_bytes(b"final")
+            return {"duration": 120, "title": "Test Video"}
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info = write_files
+        mock_ydl_instance.__enter__ = lambda self: self
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl_instance
+
+        with patch.dict("sys.modules", {"yt_dlp": mock_module}):
+            stage = DownloadStage()
+            result = stage.execute(context)
+
+        assert result["input_path"] == str(download_dir / "video.mp4")
 
     def test_extract_info_returns_none(self, context, download_dir):
         mock_ydl_instance = MagicMock()
@@ -279,6 +395,69 @@ class TestGoogleDriveDownload:
             stage = DownloadStage()
             with pytest.raises(DownloadError, match="empty or not found"):
                 stage.execute(context)
+
+    def test_gdrive_file_exceeding_size_cap_raises_and_deletes(self, context, download_dir):
+        # Drive files carry no duration metadata, so the byte cap is the only
+        # guard against an oversized file filling the disk.
+        def mock_download(url, output, quiet=True, fuzzy=False):
+            out_path = Path(output) / "audio.mp3"
+            out_path.write_bytes(b"x" * 100)
+            return str(out_path)
+
+        mock_gdown = MagicMock()
+        mock_gdown.download = mock_download
+
+        with patch.dict("sys.modules", {"gdown": mock_gdown}):
+            stage = DownloadStage(max_file_size=10)
+            with pytest.raises(DownloadError, match="exceeds the maximum allowed"):
+                stage.execute(context)
+        assert not (download_dir / "audio.mp3").exists()
+
+    def test_gdrive_size_cap_message_uses_fractional_megabytes(self, context, download_dir):
+        # Integer division understated both numbers (a sub-MB file read
+        # "0 MB"); the message must carry one decimal place.
+        def mock_download(url, output, quiet=True, fuzzy=False):
+            out_path = Path(output) / "audio.mp3"
+            out_path.write_bytes(b"x" * int(1.5 * 1024 * 1024))
+            return str(out_path)
+
+        mock_gdown = MagicMock()
+        mock_gdown.download = mock_download
+
+        with patch.dict("sys.modules", {"gdown": mock_gdown}):
+            stage = DownloadStage(max_file_size=1024 * 1024)
+            with pytest.raises(DownloadError, match=r"1\.5 MB.*1\.0 MB"):
+                stage.execute(context)
+
+    def test_gdrive_file_within_size_cap_succeeds(self, context, download_dir):
+        def mock_download(url, output, quiet=True, fuzzy=False):
+            out_path = Path(output) / "audio.mp3"
+            out_path.write_bytes(b"x" * 100)
+            return str(out_path)
+
+        mock_gdown = MagicMock()
+        mock_gdown.download = mock_download
+
+        with patch.dict("sys.modules", {"gdown": mock_gdown}):
+            stage = DownloadStage(max_file_size=1024)
+            result = stage.execute(context)
+
+        assert result["input_path"] == str(download_dir / "audio.mp3")
+
+    def test_gdrive_size_cap_disabled_by_default(self, context, download_dir):
+        def mock_download(url, output, quiet=True, fuzzy=False):
+            out_path = Path(output) / "audio.mp3"
+            out_path.write_bytes(b"x" * 100)
+            return str(out_path)
+
+        mock_gdown = MagicMock()
+        mock_gdown.download = mock_download
+
+        with patch.dict("sys.modules", {"gdown": mock_gdown}):
+            stage = DownloadStage()
+            result = stage.execute(context)
+
+        assert result["input_path"] == str(download_dir / "audio.mp3")
 
     def test_gdrive_unsupported_extension_raises(self, context, download_dir):
         def mock_download(url, output, quiet=True, fuzzy=False):

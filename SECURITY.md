@@ -81,5 +81,5 @@ restricts the network the application is reachable from.
 - Run Docker containers with minimal privileges.
 - Keep dependencies updated; the project ships a GitHub Dependabot
   config (`.github/dependabot.yml`) and CI runs dependency checks.
-- Restrict network access to the application port (8000) so reach is
+- Restrict network access to the published port (default 8080) so reach is
   limited to the intended audience.

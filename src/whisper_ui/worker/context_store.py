@@ -141,10 +141,6 @@ class PipelineContextStore:
         self._gated_hset_script = redis.register_script(_GENERATION_GATED_HSET_LUA)
 
     @property
-    def key(self) -> str:
-        return self._key
-
-    @property
     def generation_key(self) -> str:
         return self._generation_key
 

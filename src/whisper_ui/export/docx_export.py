@@ -15,10 +15,6 @@ logger = logging.getLogger(__name__)
 
 class DocxExporter:
     @property
-    def format_name(self) -> str:
-        return "DOCX"
-
-    @property
     def file_extension(self) -> str:
         return ".docx"
 

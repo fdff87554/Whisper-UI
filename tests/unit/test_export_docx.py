@@ -52,6 +52,5 @@ def test_docx_export_empty():
 
 def test_docx_format_metadata():
     exporter = DocxExporter()
-    assert exporter.format_name == "DOCX"
     assert exporter.file_extension == ".docx"
     assert "wordprocessingml" in exporter.mime_type

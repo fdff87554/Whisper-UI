@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from tests.conftest import flash_messages
+from tests.helpers.store import list_jobs
 from whisper_ui.core.config import Settings
 from whisper_ui.core.constants import (
     WORKER_QUEUE_CPU,
@@ -290,7 +291,7 @@ def test_upload_to_export_golden_path(
     page = integration_client.get("/jobs")
     assert flash_messages(page.text) == [ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", "1")]
 
-    jobs = db.list_jobs()
+    jobs = list_jobs(db)
     assert len(jobs) == 1
     job = jobs[0]
     assert job.status == JobStatus.QUEUED

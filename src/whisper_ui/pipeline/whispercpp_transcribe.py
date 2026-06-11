@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from rq.timeouts import BaseTimeoutException
 
 from whisper_ui.core.exceptions import TranscriptionError
-from whisper_ui.core.languages import DEFAULT_WHISPER_MODEL
+from whisper_ui.core.languages import AUTO_LANGUAGE, DEFAULT_WHISPER_MODEL
 from whisper_ui.core.messages import TRANSCRIBE_DONE, TRANSCRIBE_LOADING, TRANSCRIBE_RUNNING
 
 if TYPE_CHECKING:
@@ -88,7 +88,7 @@ class WhisperCppTranscribeStage:
                 on_progress(_RUN_PROGRESS_START, TRANSCRIBE_RUNNING)
 
             data = self._run_whisper_cli(model_path, audio_path, language, vad_model_path)
-            transcription = self._to_whisperx_result(data)
+            transcription = self._to_whisperx_result(data, language)
 
             # AlignStage consumes ``whisperx_audio`` (the decoded 16 kHz array);
             # load it the same way the whisperx path does so the contract is
@@ -211,17 +211,23 @@ class WhisperCppTranscribeStage:
             return json.loads(json_path.read_text(encoding="utf-8"))
 
     @staticmethod
-    def _to_whisperx_result(data: dict[str, Any]) -> dict[str, Any]:
+    def _to_whisperx_result(data: dict[str, Any], requested_language: str) -> dict[str, Any]:
         """Adapt whisper.cpp ``-oj`` JSON to the whisperx transcription contract.
 
         whisper.cpp emits ``result.language`` and a ``transcription`` array of
         segments with millisecond ``offsets`` and ``text``; AlignStage expects
         ``{"language", "segments": [{"start", "end", "text"}]}`` with seconds.
+
+        When the JSON lacks ``result.language``, fall back to the language the
+        job requested — it is what ``-l`` decoded with, and a truthy
+        ``"unknown"`` here would silently disable the zh-only postprocess and
+        LLM gates downstream. Only an ``auto`` request is genuinely unknown.
         """
+        fallback = "unknown" if requested_language == AUTO_LANGUAGE else requested_language
         if not isinstance(data, dict):
-            return {"language": "unknown", "segments": []}
+            return {"language": fallback, "segments": []}
         result = data.get("result")
-        language = (result.get("language") if isinstance(result, dict) else None) or "unknown"
+        language = (result.get("language") if isinstance(result, dict) else None) or fallback
         segments: list[dict[str, Any]] = []
         for seg in data.get("transcription") or []:
             if not isinstance(seg, dict):

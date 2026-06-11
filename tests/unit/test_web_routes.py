@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tests.conftest import authed_test_client, flash_messages
+from tests.helpers.store import list_jobs, save_upload
 from whisper_ui.core.models import Job, JobStatus, Segment, TranscriptResult
 from whisper_ui.ui import labels as ui_labels
 from whisper_ui.web.app import create_app
@@ -75,7 +76,7 @@ def _completed_upload_job_with_audio(db, filestore, *, filename: str = "meeting.
     """A COMPLETED upload job with both its source audio and result on disk."""
     result = TranscriptResult(segments=[], language="zh", duration=60.0)
     job = Job(filename=filename, status=JobStatus.COMPLETED, language="zh", model_name="large-v3")
-    filestore.save_upload(job.id, filename, b"original audio bytes")
+    save_upload(filestore, job.id, filename, b"original audio bytes")
     job.filepath = str(filestore.get_upload_path(job.id, filename))
     job.result_path = str(filestore.save_result(job.id, result))
     db.insert_job(job)
@@ -386,8 +387,8 @@ class TestJobsRoutes:
             language="en",
             source_job_id=root.id,
         )
-        filestore.save_result(version.id, TranscriptResult(segments=[], language="en", duration=1.0))
-        version.result_path = str(filestore.get_output_dir(version.id) / "result.json")
+        result_path = filestore.save_result(version.id, TranscriptResult(segments=[], language="en", duration=1.0))
+        version.result_path = str(result_path)
         db.insert_job(version)
 
         resp = client.get("/jobs")
@@ -645,6 +646,29 @@ class TestJobsRoutes:
         assert resp.status_code == 204
         assert mock_enqueue.call_args[0][0].language == "auto"
 
+    def test_re_transcribe_invalid_language_is_escaped_in_response(self, client, db, filestore):
+        # The 400 reflects the form value back as text/html; markup in the
+        # rejected value must come back escaped, never verbatim.
+        src = _completed_upload_job_with_audio(db, filestore)
+        resp = client.post(
+            f"/jobs/{src.id}/re-transcribe",
+            data={"language": "<script>alert(1)</script>", "model_name": "large-v3"},
+        )
+
+        assert resp.status_code == 400
+        assert "<script>" not in resp.text
+        assert "&lt;script&gt;" in resp.text
+
+    def test_re_transcribe_invalid_model_is_escaped_in_response(self, client, db, filestore):
+        src = _completed_upload_job_with_audio(db, filestore)
+        resp = client.post(
+            f"/jobs/{src.id}/re-transcribe",
+            data={"language": "zh", "model_name": "<img src=x>"},
+        )
+
+        assert resp.status_code == 400
+        assert "<img" not in resp.text
+
     def test_re_transcribe_clamps_diarization_when_hf_token_absent(self, client, db, filestore, app):
         # Force no hf_token so a posted diarization flag must be clamped to
         # False (honest persisted flag, no no-op sub-job).
@@ -735,7 +759,7 @@ class TestJobsRoutes:
         # The original is untouched; only the new version flips to FAILED with a
         # generic, leak-free message.
         assert db.get_job(src.id).status == JobStatus.COMPLETED
-        new_versions = [j for j in db.list_jobs() if j.source_job_id == src.id]
+        new_versions = [j for j in list_jobs(db) if j.source_job_id == src.id]
         assert len(new_versions) == 1
         assert new_versions[0].status == JobStatus.FAILED
         assert "secret" not in (new_versions[0].error or "")
@@ -781,6 +805,15 @@ class TestJobsRoutes:
         assert "bulkPartial" in after_settle
         assert db.get_job(completed.id) is None
         assert db.get_job(active.id) is not None
+
+    def test_bulk_action_rejects_oversized_id_list(self, client, db):
+        # A hand-crafted request must not tie up the event loop with an
+        # unbounded per-job loop; the UI never selects anywhere near this many.
+        from whisper_ui.core.constants import MAX_BULK_ACTION_IDS
+
+        ids = ",".join(f"{i:032x}" for i in range(MAX_BULK_ACTION_IDS + 1))
+        resp = client.post("/jobs/bulk/retry", data={"job_ids": ids})
+        assert resp.status_code == 400
 
     def test_bulk_action_rejects_unknown_action(self, client, db):
         failed = _create_failed_job(db)
@@ -1048,6 +1081,23 @@ class TestViewerRoutes:
         assert "鍵盤捷徑" in resp.text
         assert "聚焦搜尋" in resp.text
 
+    def test_viewer_copy_shortcut_ignores_modifier_combos(self, client, db, filestore):
+        """Pressing Ctrl+C / Cmd+C to copy selected transcript text must not
+        trigger copyActive() and overwrite the user's clipboard selection."""
+        segments = [Segment(start=0.0, end=1.0, text="hello")]
+        result = TranscriptResult(segments=segments, language="zh", duration=1.0)
+        job = Job(filename="copy.mp3", status=JobStatus.COMPLETED, language="zh")
+        result_path = filestore.save_result(job.id, result)
+        job.result_path = str(result_path)
+        db.insert_job(job)
+
+        resp = client.get(f"/viewer/{job.id}")
+
+        assert resp.status_code == 200
+        shortcut_line = next(line for line in resp.text.splitlines() if "copyActive();" in line)
+        assert "$event.ctrlKey" in shortcut_line
+        assert "$event.metaKey" in shortcut_line
+
     def test_viewer_hides_download_media_in_no_segments_branch(self, client, db, filestore):
         """No-segments fallback toolbar must also gate Download Media on
         media_available (regression for PR #41 followup F1)."""
@@ -1191,7 +1241,7 @@ class TestUploadPost:
         assert resp.status_code == 303
         assert resp.headers["location"] == "/jobs"
         assert mock_enqueue.call_count == 1
-        jobs = db.list_jobs()
+        jobs = list_jobs(db)
         assert len(jobs) == 1 and jobs[0].filename == "good.mp3"
         # The toast reports the skipped file.
         page = client.get("/jobs")
@@ -1379,7 +1429,7 @@ class TestUploadPost:
             "{count}", "1"
         )
         assert flash_messages(page.text) == [expected]
-        statuses = sorted(j.status for j in db.list_jobs())
+        statuses = sorted(j.status for j in list_jobs(db))
         assert statuses == sorted([JobStatus.QUEUED, JobStatus.FAILED])
 
     def test_upload_htmx_error_escapes_html(self, client, app):
@@ -1417,7 +1467,7 @@ class TestUploadURLPost:
     def test_upload_url_creates_job_with_source_url(self, client, app, db):
         with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
             self._post_url(client)
-        jobs = db.list_jobs()
+        jobs = list_jobs(db)
         assert len(jobs) == 1
         assert jobs[0].source_url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
@@ -1430,14 +1480,14 @@ class TestUploadURLPost:
     def test_upload_x_url_creates_job_with_canonical_source_url(self, client, app, db):
         with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
             self._post_url(client, url="https://x.com/jack/status/20?s=20")
-        jobs = db.list_jobs()
+        jobs = list_jobs(db)
         assert len(jobs) == 1
         assert jobs[0].source_url == "https://x.com/i/status/20"
 
     def test_upload_twitter_com_url_accepted(self, client, app, db):
         with patch("whisper_ui.web.routes.upload.enqueue_pipeline"):
             self._post_url(client, url="https://twitter.com/jack/status/20")
-        jobs = db.list_jobs()
+        jobs = list_jobs(db)
         assert len(jobs) == 1
         assert jobs[0].source_url == "https://x.com/i/status/20"
 
@@ -1511,7 +1561,7 @@ class TestUploadURLPost:
             ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", "0")
             + ui_labels.TOAST_UPLOAD_FAILED.replace("{count}", "1")
         ]
-        jobs = db.list_jobs()
+        jobs = list_jobs(db)
         assert len(jobs) == 1
         assert jobs[0].status == JobStatus.FAILED
 
@@ -1536,7 +1586,7 @@ class TestUploadURLPost:
             )
         assert resp.status_code == 204
         assert resp.headers.get("HX-Redirect") == "/jobs"
-        jobs = db.list_jobs()
+        jobs = list_jobs(db)
         assert len(jobs) == 1
         assert jobs[0].status == JobStatus.FAILED
 
@@ -1569,7 +1619,7 @@ class TestUploadPlaylistPost:
 
         assert resp.status_code == 303
         assert resp.headers["location"] == "/jobs"
-        jobs = db.list_jobs()
+        jobs = list_jobs(db)
         assert sorted(j.source_url for j in jobs) == self._VIDEO_URLS
         assert len({j.batch_id for j in jobs}) == 1
         assert jobs[0].batch_id is not None
@@ -1583,7 +1633,7 @@ class TestUploadPlaylistPost:
         ):
             self._post_url(client, url=self._PLAYLIST_URL)
 
-        jobs = db.list_jobs()
+        jobs = list_jobs(db)
         assert len(jobs) == 1
         assert jobs[0].batch_id is None
         assert jobs[0].batch_title is None
@@ -1604,7 +1654,7 @@ class TestUploadPlaylistPost:
 
         assert resp.status_code == 303
         mock_expand.assert_called_once()
-        jobs = db.list_jobs()
+        jobs = list_jobs(db)
         assert sorted(j.source_url for j in jobs) == self._VIDEO_URLS
         assert {j.batch_title for j in jobs} == {"Team Meetings 2026Q2"}
         page = client.get("/jobs")
@@ -1624,7 +1674,7 @@ class TestUploadPlaylistPost:
         ):
             self._post_url(client, url=mixed)
 
-        jobs = db.list_jobs()
+        jobs = list_jobs(db)
         assert len(jobs) == 3
         assert len({j.batch_id for j in jobs}) == 1
         assert jobs[0].batch_id is not None
@@ -1639,7 +1689,7 @@ class TestUploadPlaylistPost:
             resp = self._post_url(client, url=mixed)
 
         assert resp.status_code == 303
-        assert len(db.list_jobs()) == 3
+        assert len(list_jobs(db)) == 3
         page = client.get("/jobs")
         expected = ui_labels.TOAST_UPLOAD_SUCCESS.replace("{count}", "3") + ui_labels.TOAST_URL_DEDUPED.replace(
             "{count}", "1"
@@ -1705,7 +1755,7 @@ class TestUploadPlaylistPost:
 
         assert resp.status_code == 303
         assert f"error={error_code}" in resp.headers["location"]
-        assert db.list_jobs() == [], "a failed expansion must not persist any job"
+        assert list_jobs(db) == [], "a failed expansion must not persist any job"
 
     def test_upload_playlist_pushing_total_over_limit_rejected(self, client, db):
         from whisper_ui.core.constants import MAX_BATCH_SIZE
@@ -1718,7 +1768,7 @@ class TestUploadPlaylistPost:
         assert resp.status_code == 303
         assert "error=too_many_urls" in resp.headers["location"]
         assert f"count={MAX_BATCH_SIZE + 1}" in resp.headers["location"]
-        assert db.list_jobs() == []
+        assert list_jobs(db) == []
 
 
 class TestBatchRoutes:
@@ -1802,6 +1852,21 @@ class TestBatchRoutes:
         assert resp.status_code == 204
         mock_enqueue.assert_called_once()
         assert mock_enqueue.call_args[0][0].duration is None
+
+    def test_retry_batch_enqueue_failure_uses_shared_label(self, client, db):
+        # All three retry paths must surface the same localized message;
+        # this one previously hardcoded an English string.
+        from whisper_ui.ui import labels as ui_labels
+
+        batch_id = "e" * 32
+        job = Job(filename="boom.mp3", status=JobStatus.FAILED, error="err", batch_id=batch_id)
+        db.insert_job(job)
+        with patch("whisper_ui.web.routes.jobs.enqueue_pipeline", side_effect=RuntimeError("redis down")):
+            resp = client.post(f"/jobs/batch/{batch_id}/retry")
+        assert resp.status_code == 204
+        refreshed = db.get_job(job.id)
+        assert refreshed.status == JobStatus.FAILED
+        assert refreshed.error == ui_labels.UPLOAD_ENQUEUE_FAILED
 
     def test_delete_batch(self, client, db, filestore):
         batch_id = "c" * 32
@@ -1973,12 +2038,24 @@ class TestRetentionSweep:
 class TestContentDispositionHelper:
     def test_ascii_filename(self):
         result = make_content_disposition("report.pdf")
-        assert result == "attachment; filename*=UTF-8''report.pdf"
+        assert result == "attachment; filename=\"report.pdf\"; filename*=UTF-8''report.pdf"
 
     def test_non_ascii_filename(self):
         result = make_content_disposition("\u6e2c\u8a66.srt")
         assert "filename*=UTF-8''" in result
         assert "%E6%B8%AC%E8%A9%A6" in result
+
+    def test_ascii_fallback_replaces_non_ascii_and_quotes(self):
+        # The plain filename= form must stay a valid quoted-string: no raw
+        # Unicode, no embedded quotes or backslashes.
+        result = make_content_disposition('\u6e2c\u8a66"a\\b.srt')
+        assert 'filename="___a_b.srt"' in result
+
+    def test_plain_filename_form_present_for_client_regex(self):
+        # The bulk export client parses filename="..." from this header; the
+        # filename* form alone would never match.
+        result = make_content_disposition("selection_srt.zip")
+        assert 'filename="selection_srt.zip"' in result
 
     def test_inline_disposition(self):
         result = make_content_disposition("file.txt", disposition="inline")
@@ -2012,3 +2089,20 @@ class TestFormatRelativeTime:
         now = datetime.now(UTC).isoformat()
         result = _format_relative_time(now)
         assert result == "剛剛"
+
+
+class TestFormatSizeHelper:
+    def test_gigabytes_have_one_decimal(self):
+        from whisper_ui.web.routes.upload import _format_size
+
+        assert _format_size(2 * 1024**3) == "2.0 GB"
+
+    def test_megabytes_are_whole(self):
+        from whisper_ui.web.routes.upload import _format_size
+
+        assert _format_size(500 * 1024**2) == "500 MB"
+
+    def test_sub_megabyte_shows_kilobytes_not_zero_mb(self):
+        from whisper_ui.web.routes.upload import _format_size
+
+        assert _format_size(512 * 1024) == "512 KB"

@@ -33,7 +33,6 @@ from urllib.parse import quote
 from fastapi import APIRouter, Form, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
-from whisper_ui.core.constants import DEFAULT_JOBS_PER_PAGE
 from whisper_ui.storage import users_repo
 from whisper_ui.storage.users_repo import LastAdminError
 from whisper_ui.ui import labels as ui_labels
@@ -234,7 +233,6 @@ async def admin_jobs_page(
     # owner_id=None → no owner filter; admin sees everything.
     ctx = build_list_context(db, redis, filestore, status, page, owner_id=None)
     ctx["active_page"] = "admin_jobs"
-    ctx["DEFAULT_JOBS_PER_PAGE"] = DEFAULT_JOBS_PER_PAGE
     _add_admin_list_context(ctx, db)
     return templates.TemplateResponse(request=request, name="admin_jobs.html", context=ctx)
 

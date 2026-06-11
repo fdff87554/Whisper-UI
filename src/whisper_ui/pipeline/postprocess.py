@@ -5,6 +5,7 @@ from collections import Counter
 from typing import TYPE_CHECKING, Any
 
 from whisper_ui.core.constants import QUALITY_GATE_MIN_SEGMENTS, QUALITY_GATE_REPEAT_RATIO
+from whisper_ui.core.languages import AUTO_LANGUAGE
 from whisper_ui.core.messages import (
     POSTPROCESS_DONE,
     POSTPROCESS_EMPTY,
@@ -39,15 +40,20 @@ def _resolve_language(context: dict[str, Any]) -> str:
 
     Only the transcription result carries the detected code (whisperx's
     align/assign outputs drop the ``language`` key), so walk the result chain
-    most-processed-first and fall back to the job's configured language. With
-    ``language=auto`` the context value is the sentinel itself, which must
-    never reach the s2t conversion gate or the persisted transcript.
+    most-processed-first and fall back to the job's configured language. Two
+    sentinels must never win over a real code: ``"unknown"`` (the whisper.cpp
+    adapter's missing-language fallback, truthy but meaningless) and ``auto``
+    (the configured value when detection was requested) — neither may reach
+    the zh-only conversion gate or the persisted transcript as-is.
     """
     for key in ("final_result", "aligned_result", "transcription_result"):
         raw = context.get(key)
-        if isinstance(raw, dict) and raw.get("language"):
-            return raw["language"]
-    return context.get("language", "zh")
+        if isinstance(raw, dict):
+            detected = raw.get("language")
+            if detected and detected != "unknown":
+                return detected
+    configured = context.get("language", "zh")
+    return "unknown" if configured == AUTO_LANGUAGE else configured
 
 
 class PostprocessStage:

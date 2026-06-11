@@ -5,20 +5,15 @@ ERROR_MAX_LENGTH = 1000
 ERROR_DISPLAY_LENGTH = 200
 MESSAGE_MAX_LENGTH = 500
 STDERR_MAX_LENGTH = 500
-JOB_ID_DISPLAY_LENGTH = 8
 TIMESTAMP_DISPLAY_LENGTH = 19
 
 # List limits
-DEFAULT_JOB_LIST_LIMIT = 50
 DEFAULT_JOBS_PER_PAGE = 20
 
 # Timeouts (seconds)
 FFMPEG_CONVERT_TIMEOUT = 300
 FFPROBE_TIMEOUT = 30
 SQLITE_BUSY_TIMEOUT_MS = 5000
-
-# Jobs page auto-refresh
-JOBS_REFRESH_INTERVAL = 3  # seconds
 
 # Worker progress-write throttling. A callback that neither changes the
 # message nor crosses these thresholds is dropped so the SQLite/Redis
@@ -38,6 +33,12 @@ STALE_JOB_CHECK_INTERVAL = 60  # seconds
 # the configured worker throughput simply wait in the queue (the liveness-aware
 # stale reaper spares queued work and re-arms its state TTL while it waits).
 MAX_BATCH_SIZE = 100
+
+# Upper bound on ids per bulk job action (retry / delete / export). The UI
+# selects at most a page of jobs at a time, so this is far above any
+# legitimate selection — it only stops a hand-crafted request from tying up
+# the event loop in the per-job processing loop.
+MAX_BULK_ACTION_IDS = 200
 
 # Viewer client-side search becomes O(n) per keystroke; very large transcripts
 # (multi-hour multi-speaker recordings) will lock up the browser tab. Above
@@ -91,11 +92,10 @@ PIPELINE_STATE_TTL_SECONDS = 604_800  # 7 days (must outlive max backlog wait)
 #                  so a worker bound to only io+cpu does not pick up (and block
 #                  on) a slow LLM; bind whisper:llm to a dedicated worker to
 #                  isolate it from the fast io/cpu path.
-# The default queue stays listed because worker startup scripts include it in
-# their queue list so an operator can drop ad-hoc maintenance jobs on every
-# worker without learning the resource-class names.
+# The literal "default" queue appears in every compose WORKER_QUEUES value so
+# an operator can drop ad-hoc maintenance jobs on every worker without
+# learning the resource-class names; no Python constant refers to it.
 WORKER_QUEUE_IO = "whisper:io"
 WORKER_QUEUE_GPU = "whisper:gpu"
 WORKER_QUEUE_CPU = "whisper:cpu"
 WORKER_QUEUE_LLM = "whisper:llm"
-WORKER_QUEUE_DEFAULT = "default"

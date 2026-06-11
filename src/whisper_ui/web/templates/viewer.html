@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_icons.html" import icon_chevron_left, icon_copy, icon_check, icon_search, icon_download %}
+{% from "_icons.html" import icon_copy, icon_check, icon_search, icon_download %}
 
 {% block content %}
 {# Breadcrumb #}
@@ -94,7 +94,8 @@
   else if ($event.key === 'Escape' && document.activeElement.matches('input[type=search]')) { clearSearch(); document.activeElement.blur(); }
   else if (!inField && $event.key === 'ArrowDown') { $event.preventDefault(); navigateSegments(1); }
   else if (!inField && $event.key === 'ArrowUp') { $event.preventDefault(); navigateSegments(-1); }
-  else if (!inField && ($event.key === 'c' || $event.key === 'C')) { copyActive(); }
+  {# Bare c only: Ctrl+C / Cmd+C is the user copying their own selection and must not be hijacked. #}
+  else if (!inField && !$event.ctrlKey && !$event.metaKey && ($event.key === 'c' || $event.key === 'C')) { copyActive(); }
 ">
   {# Sticky toolbar #}
   <div class="sticky top-0 z-10 bg-base-100 border-b border-line pb-3 mb-4 pt-2">

@@ -9,8 +9,9 @@ from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
+from markupsafe import escape
 
-from whisper_ui.core.constants import DEFAULT_JOBS_PER_PAGE
+from whisper_ui.core.constants import DEFAULT_JOBS_PER_PAGE, MAX_BULK_ACTION_IDS
 from whisper_ui.core.languages import DEFAULT_WHISPER_MODEL, LANGUAGE_CHOICES, WHISPER_MODELS
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.pipeline.audio_probe import get_audio_duration_seconds
@@ -171,6 +172,33 @@ def _probe_retry_duration(job: Job) -> float | None:
         return None
 
 
+async def _reset_and_enqueue_retry(job: Job, db, redis, settings, filestore) -> bool:
+    """Reset a FAILED job's progress fields and re-enqueue its pipeline.
+
+    Shared by single retry, bulk retry, and batch retry so the reset field
+    list and the failure label cannot drift apart. Returns True when the
+    enqueue succeeded; on failure the job is flipped back to FAILED with the
+    shared enqueue-failure label and the exception is logged.
+    """
+    try:
+        retry_duration = await asyncio.to_thread(_probe_retry_duration, job)
+        job.status = JobStatus.QUEUED
+        job.error = None
+        job.progress = 0.0
+        job.progress_message = ""
+        job.result_path = None
+        job.duration = retry_duration
+        db.update_job(job)
+        await asyncio.to_thread(enqueue_pipeline, job, redis=redis, settings=settings, filestore=filestore)
+    except Exception:
+        logger.exception("Failed to enqueue retry for job %s", job.id)
+        job.status = JobStatus.FAILED
+        job.error = ui_labels.UPLOAD_ENQUEUE_FAILED
+        db.update_job(job)
+        return False
+    return True
+
+
 _BULK_ACTIONS = frozenset({"retry", "delete", "export"})
 
 
@@ -222,6 +250,8 @@ async def bulk_job_action(
     job_ids = _parse_bulk_job_ids(job_ids_raw)
     if not job_ids:
         raise HTTPException(status_code=400, detail="No job ids provided")
+    if len(job_ids) > MAX_BULK_ACTION_IDS:
+        raise HTTPException(status_code=400, detail="Too many job ids")
     for job_id in job_ids:
         validate_hex_id(job_id, "job_id")
 
@@ -257,22 +287,9 @@ async def bulk_job_action(
             if job.status != JobStatus.FAILED:
                 failed += 1
                 continue
-            try:
-                retry_duration = await asyncio.to_thread(_probe_retry_duration, job)
-                job.status = JobStatus.QUEUED
-                job.error = None
-                job.progress = 0.0
-                job.progress_message = ""
-                job.result_path = None
-                job.duration = retry_duration
-                db.update_job(job)
-                enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+            if await _reset_and_enqueue_retry(job, db, redis, settings, filestore):
                 succeeded += 1
-            except Exception:
-                logger.exception("bulk retry failed for job %s", job.id)
-                job.status = JobStatus.FAILED
-                job.error = ui_labels.UPLOAD_ENQUEUE_FAILED
-                db.update_job(job)
+            else:
                 failed += 1
         else:  # delete
             if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
@@ -320,16 +337,7 @@ async def retry_job(
         return Response(status_code=404)
 
     previous_error = job.error
-    try:
-        retry_duration = await asyncio.to_thread(_probe_retry_duration, job)
-        job.status = JobStatus.QUEUED
-        job.error = None
-        job.progress = 0.0
-        job.progress_message = ""
-        job.result_path = None
-        job.duration = retry_duration
-        db.update_job(job)
-        enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    if await _reset_and_enqueue_retry(job, db, redis, settings, filestore):
         logger.info(
             "job retried: job_id=%s user_id=%s filename=%r previous_error=%r",
             job.id,
@@ -337,11 +345,6 @@ async def retry_job(
             job.filename,
             previous_error or "(none)",
         )
-    except Exception:
-        logger.exception("Failed to enqueue retry for job %s", job.id)
-        job.status = JobStatus.FAILED
-        job.error = ui_labels.UPLOAD_ENQUEUE_FAILED
-        db.update_job(job)
 
     return Response(status_code=204, headers={"HX-Trigger": "refreshJobList"})
 
@@ -375,10 +378,12 @@ async def re_transcribe_job(
     if src is None or src.status != JobStatus.COMPLETED:
         return Response(status_code=404)
 
+    # escape(): these labels reflect the raw form value back in a text/html
+    # response, same convention as upload.py's _htmx_error.
     if language not in LANGUAGE_CHOICES:
-        return HTMLResponse(ui_labels.UPLOAD_INVALID_LANGUAGE.format(value=language), status_code=400)
+        return HTMLResponse(escape(ui_labels.UPLOAD_INVALID_LANGUAGE.format(value=language)), status_code=400)
     if model_name not in WHISPER_MODELS:
-        return HTMLResponse(ui_labels.UPLOAD_INVALID_MODEL.format(value=model_name), status_code=400)
+        return HTMLResponse(escape(ui_labels.UPLOAD_INVALID_MODEL.format(value=model_name)), status_code=400)
 
     # Flat chain: every version points at the original root so grouping is a
     # single lookup. Re-transcribing a version re-roots to the same source.
@@ -425,7 +430,7 @@ async def re_transcribe_job(
 
     db.insert_job(new_job)
     try:
-        enqueue_pipeline(new_job, redis=redis, settings=settings, filestore=filestore)
+        await asyncio.to_thread(enqueue_pipeline, new_job, redis=redis, settings=settings, filestore=filestore)
         logger.info(
             "job re-transcribe queued: new_job_id=%s source_job_id=%s user_id=%s model=%s lang=%s",
             new_job.id,
@@ -495,22 +500,8 @@ async def retry_batch(
     for job in all_jobs:
         if job.status != JobStatus.FAILED:
             continue
-        try:
-            retry_duration = await asyncio.to_thread(_probe_retry_duration, job)
-            job.status = JobStatus.QUEUED
-            job.error = None
-            job.progress = 0.0
-            job.progress_message = ""
-            job.result_path = None
-            job.duration = retry_duration
-            db.update_job(job)
-            enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+        if await _reset_and_enqueue_retry(job, db, redis, settings, filestore):
             retried += 1
-        except Exception:
-            logger.exception("Failed to retry job %s", job.id)
-            job.status = JobStatus.FAILED
-            job.error = "Failed to enqueue retry"
-            db.update_job(job)
 
     logger.info(
         "batch retry finished: batch_id=%s user_id=%s retried=%d total=%d",

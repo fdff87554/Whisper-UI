@@ -9,10 +9,6 @@ if TYPE_CHECKING:
 
 class JsonExporter:
     @property
-    def format_name(self) -> str:
-        return "JSON"
-
-    @property
     def file_extension(self) -> str:
         return ".json"
 

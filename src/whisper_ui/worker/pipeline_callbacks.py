@@ -113,23 +113,25 @@ def cancel_remaining_subjobs(
 
     1. **Already running.** ``RQJob.cancel()`` alone does *not* stop a
        running job — it only removes pending / deferred ones from the
-       queue. For running jobs ``send_stop_job_command`` is fired first;
-       RQ delivers it via Redis pub/sub and the owning worker raises a
-       stop exception at the next safe point. Without this, the diarize
-       branch could keep running after transcribe failed and eventually
-       write its result into the Redis context store, polluting a later
-       retry.
+       queue. ``send_stop_job_command`` is fired first, but what it does
+       depends on the worker class: the default forking Worker (CPU
+       profile) SIGKILLs the horse process immediately, while
+       ``SimpleWorker`` (cuda / rocm profiles, no child process) treats
+       the resulting ``kill_horse`` as a documented no-op — the running
+       stage keeps executing to completion. Verified against rq 2.9.1
+       (``Worker.kill_horse`` vs ``BaseWorker.kill_horse``).
     2. **Still queued / deferred.** ``send_stop_job_command`` is a no-op
        for jobs that have not started, so it is followed by ``cancel()``
        to evict them from the queue registry. Downstream dependent jobs
        would otherwise sit in the deferred registry forever.
 
     Both calls are best-effort: failures only debug-log and the loop
-    keeps going so one stuck sibling cannot block the others. Workers
-    already inside a native extension call (pyannote / whisperx C++
-    inference) can take a bounded amount of time to actually exit after
-    the stop command lands; that residual window is closed by the
-    generation-gated context write inside the stage task body.
+    keeps going so one stuck sibling cannot block the others. A sibling
+    that keeps running after this returns (the SimpleWorker case above,
+    or a forked worker mid-native-call) wastes its worker slot but
+    cannot corrupt state: ``finalize_failure`` bumps the generation
+    right after marking the parent FAILED, so every gated write from
+    the zombie stage is rejected.
     """
     from rq.job import Job as RQJob
 

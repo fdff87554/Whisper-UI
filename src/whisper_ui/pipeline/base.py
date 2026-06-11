@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol
 
 
 class ProgressCallback(Protocol):
     def __call__(self, progress: float, message: str) -> None: ...
 
 
-@runtime_checkable
 class PipelineStage(Protocol):
     @property
     def name(self) -> str: ...

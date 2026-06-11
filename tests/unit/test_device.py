@@ -35,10 +35,26 @@ class TestDetectDevice:
             assert detect_device("cuda") == "cuda"
 
     def test_explicit_cuda_unavailable(self, caplog):
-        with patch("whisper_ui.core.device._cuda_available", return_value=False), caplog.at_level(logging.WARNING):
+        with (
+            patch("whisper_ui.core.device._cuda_available", return_value=False),
+            patch("whisper_ui.core.device._rocm_available", return_value=False),
+            caplog.at_level(logging.WARNING),
+        ):
             result = detect_device("cuda")
         assert result == "cpu"
         assert "Falling back to CPU" in caplog.text
+
+    def test_explicit_cuda_on_rocm_box_uses_rocm(self, caplog):
+        # DEVICE=cuda on an AMD machine is a config slip; the GPU must not be
+        # silently wasted by a CPU fallback.
+        with (
+            patch("whisper_ui.core.device._cuda_available", return_value=False),
+            patch("whisper_ui.core.device._rocm_available", return_value=True),
+            caplog.at_level(logging.WARNING),
+        ):
+            result = detect_device("cuda")
+        assert result == "rocm"
+        assert "DEVICE=rocm" in caplog.text
 
     def test_unsupported_device(self, caplog):
         with caplog.at_level(logging.WARNING):

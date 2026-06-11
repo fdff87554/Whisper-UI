@@ -727,6 +727,54 @@ def test_finalize_failure_marks_job_failed_and_cancels_siblings(monkeypatch, tmp
     assert PipelineContextStore(redis, job.id).load() == {}
 
 
+def test_finalize_failure_bumps_generation_to_fence_zombie_writes(monkeypatch, tmp_path):
+    """A sibling that survives the best-effort cancel (SimpleWorker cannot
+    stop a running job) must have its gated writes rejected once the parent
+    is FAILED, not resurrect the deleted context hash as an orphan key."""
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    job = Job(
+        id="job-fence",
+        filename="m.mp3",
+        filepath=str(tmp_path / "m.mp3"),
+        status=JobStatus.PROCESSING,
+        enable_diarization=True,
+    )
+    enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+    generation_at_enqueue = int(redis.get(f"whisper:pipeline:{job.id}:generation"))
+
+    subs = _load_subjobs(redis, job.id)
+    failing = next(s for s in subs if _stage_func(s) == "run_transcribe_align")
+
+    runtime = MagicMock()
+    runtime.redis = redis
+    runtime.db.get_job.return_value = job
+    runtime.settings.redis_processing_expiry = 7200
+
+    from contextlib import contextmanager
+
+    from whisper_ui.worker.progress import RedisProgressReporter
+
+    @contextmanager
+    def _fake_builder(job_id, *, generation=None):
+        runtime.reporter = RedisProgressReporter(redis, job_id, processing_ttl=7200, generation=generation)
+        yield runtime
+
+    monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
+
+    pd.finalize_failure(failing, redis, RuntimeError, RuntimeError("kaboom"), None)
+
+    assert int(redis.get(f"whisper:pipeline:{job.id}:generation")) == generation_at_enqueue + 1
+    # A zombie sibling still holding the failed attempt's generation must be
+    # rejected by the gated write instead of recreating the context hash.
+    ctx = PipelineContextStore(redis, job.id)
+    assert ctx.update_if_generation_matches({"diarization_result": "zombie"}, generation_at_enqueue) is False
+    assert ctx.load() == {}
+
+
 def test_finalize_failure_logs_exception_class_separately_from_user_label(monkeypatch, tmp_path, caplog):
     """The user-facing error message is localised; the logged exception
     class is not. Operators counting timeouts vs preprocess errors vs

@@ -1,7 +1,7 @@
 # Whisper-UI
 
 Speech-to-text system using [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
-(large-v3, INT8) with speaker diarization via
+(large-v3, int8_float16 on GPU) with speaker diarization via
 [pyannote-audio](https://github.com/pyannote/pyannote-audio),
 a [FastAPI](https://fastapi.tiangolo.com/) + [htmx](https://htmx.org/) + [Alpine.js](https://alpinejs.dev/) web interface,
 and Docker deployment (NVIDIA GPU / CPU / AMD ROCm).
@@ -11,6 +11,8 @@ and Docker deployment (NVIDIA GPU / CPU / AMD ROCm).
 ## Features
 
 - Upload audio/video files for transcription
+- Transcribe directly from a URL: YouTube videos and playlists, X (Twitter)
+  posts, and Google Drive files are downloaded by the worker
 - Batch upload with automatic filtering of unsupported files
 - Speaker diarization with pyannote speaker-diarization-3.1 (optional)
 - Optional LLM text correction via Ollama (a Gemma model, per-job toggle)
@@ -94,9 +96,24 @@ docker compose --profile rocm up -d
 ```
 
 The first run compiles whisper.cpp for the target GPU arch and downloads the
-GGML model (`ggml-large-v3.bin`), so allow extra time. On gfx1151 the worker
-disables the MIOpen backend (falls back to native HIP kernels) to avoid a known
-`miopenStatusUnknownError` in pyannote's segmentation model.
+GGML model (`ggml-large-v3.bin`), so allow extra time. On every `DEVICE=rocm`
+worker the MIOpen backend is disabled (native HIP kernels are used instead) to
+avoid a known `miopenStatusUnknownError` in pyannote's segmentation model,
+first observed on gfx1151.
+
+The whisper.cpp backend ships with hallucination guards enabled: Silero VAD
+pre-segmentation skips non-speech (silence / music that otherwise produces
+looping subtitle-style hallucinations) and cross-window text conditioning is
+disabled so a bad window cannot contaminate the rest of the transcript.
+Settings specific to this backend:
+
+| Variable                 | Default                  | Description                                                              |
+| ------------------------ | ------------------------ | ------------------------------------------------------------------------ |
+| `WHISPERCPP_BINARY`      | `whisper-cli`            | whisper.cpp CLI binary name or path inside the worker image              |
+| `WHISPERCPP_THREADS`     | `0`                      | CPU threads for whisper-cli (`0` = let it decide)                        |
+| `WHISPERCPP_VAD`         | `true`                   | Silero VAD pre-segmentation (the main anti-hallucination guard)          |
+| `WHISPERCPP_VAD_MODEL`   | `ggml-silero-v5.1.2.bin` | VAD model file; auto-downloaded and cached on the model-cache volume     |
+| `WHISPERCPP_MAX_CONTEXT` | `0`                      | Text-context tokens carried across windows (`0` = off, `-1` = unlimited) |
 
 Open <http://localhost:8080> in your browser.
 
@@ -125,7 +142,7 @@ Pre-built Docker images are published to GHCR on each release.
 **Pin a specific version** by setting `WHISPER_UI_VERSION` in your `.env` file:
 
 ```bash
-WHISPER_UI_VERSION=1.3.0
+WHISPER_UI_VERSION=2.13.0
 ```
 
 **Build locally** instead of pulling (optional):
@@ -138,17 +155,21 @@ docker compose --profile gpu build
 
 All settings are configured via environment variables (`.env` file):
 
-| Variable             | Default                             | Description                                                                                   |
-| -------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------- |
-| `WHISPER_MODEL`      | `large-v3`                          | Whisper model variant (see model list below)                                                  |
-| `COMPUTE_TYPE`       | `int8_float16` (GPU) / `int8` (CPU) | CTranslate2 compute type                                                                      |
-| `DEVICE`             | `auto`                              | Inference device; compose profiles set `cuda` (GPU) / `rocm` (AMD) / `cpu` (CPU)              |
-| `TRANSCRIBE_BACKEND` | `whisperx`                          | `whisperx` (CTranslate2, CUDA/CPU) or `whispercpp` (whisper.cpp HIP; set by the rocm profile) |
-| `BATCH_SIZE`         | `4`                                 | Transcription batch size (whisperx backend only)                                              |
-| `LANGUAGE`           | `zh`                                | Default language code                                                                         |
-| `HF_TOKEN`           | (empty)                             | HuggingFace token for speaker diarization                                                     |
-| `PIP_INDEX_URL`      | (empty)                             | Custom PyPI mirror for Docker builds                                                          |
-| `WHISPER_UI_VERSION` | `latest`                            | Docker image version tag to pull                                                              |
+| Variable               | Default                             | Description                                                                                   |
+| ---------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------- |
+| `WHISPER_MODEL`        | `large-v3`                          | Whisper model variant (see model list below)                                                  |
+| `COMPUTE_TYPE`         | `int8_float16` (GPU) / `int8` (CPU) | CTranslate2 compute type                                                                      |
+| `DEVICE`               | `auto`                              | Inference device; compose profiles set `cuda` (GPU) / `rocm` (AMD) / `cpu` (CPU)              |
+| `TRANSCRIBE_BACKEND`   | `whisperx`                          | `whisperx` (CTranslate2, CUDA/CPU) or `whispercpp` (whisper.cpp HIP; set by the rocm profile) |
+| `BATCH_SIZE`           | `4`                                 | Transcription batch size (whisperx backend only)                                              |
+| `LANGUAGE`             | `zh`                                | Default language code                                                                         |
+| `HF_TOKEN`             | (empty)                             | HuggingFace token for speaker diarization                                                     |
+| `MAX_UPLOAD_SIZE`      | `2147483648`                        | Per-file upload cap in bytes (2 GB); also caps Google Drive downloads                         |
+| `YOUTUBE_MAX_DURATION` | `14400`                             | Longest accepted YouTube video in seconds (4 h); live streams are always rejected             |
+| `TWITTER_MAX_DURATION` | `14400`                             | Longest accepted X (Twitter) video in seconds                                                 |
+| `TWITTER_COOKIES_FILE` | (empty)                             | Container path to a cookies.txt for login-walled X posts (see `.env.example`)                 |
+| `PIP_INDEX_URL`        | (empty)                             | Custom PyPI mirror for Docker builds                                                          |
+| `WHISPER_UI_VERSION`   | `latest`                            | Docker image version tag to pull                                                              |
 
 **Whisper models:** `tiny`, `tiny.en`, `base`, `base.en`, `small`, `small.en`, `medium`, `medium.en`, `large-v1`, `large-v2`, `large-v3`, `large-v3-turbo`
 
@@ -478,9 +499,10 @@ The worker container starts via `python -m whisper_ui.worker`, which
 calls `setup_logging()` before delegating to RQ so the dictConfig (and
 the RQ-noise suppression) applies inside the worker process.
 
-**Log rotation.** Every service in `compose.yml` pins
+**Log rotation.** Every long-running service in `compose.yml` pins
 `logging.driver=json-file` with `max-size: 20m` and `max-file: 5`
-(100 MB per container). Larger deployments should plug a centralised
+(100 MB per container); the two one-shot init sidecars (`volume-init`,
+`ollama-pull`) are exempt — they emit a handful of lines and exit. Larger deployments should plug a centralised
 driver (Loki, Splunk, Datadog) via a compose override; the file-driver
 ceiling is sized for small-office deployments only.
 
@@ -543,14 +565,14 @@ uv run uvicorn whisper_ui.web.app:app --reload --reload-dir=src
 
 ## Tech Stack
 
-| Component           | Technology                                   |
-| ------------------- | -------------------------------------------- |
-| STT Engine          | faster-whisper large-v3 (INT8) via WhisperX  |
-| Speaker Diarization | pyannote-audio (optional, requires HF token) |
-| Task Queue          | RQ + Redis                                   |
-| Frontend            | FastAPI + htmx + Alpine.js                   |
-| Storage             | SQLite + local filesystem                    |
-| Containerization    | Docker Compose (NVIDIA GPU / CPU / AMD ROCm) |
+| Component           | Technology                                                      |
+| ------------------- | --------------------------------------------------------------- |
+| STT Engine          | faster-whisper large-v3 via WhisperX; whisper.cpp (HIP) on ROCm |
+| Speaker Diarization | pyannote-audio (optional, requires HF token)                    |
+| Task Queue          | RQ + Redis                                                      |
+| Frontend            | FastAPI + htmx + Alpine.js                                      |
+| Storage             | SQLite + local filesystem                                       |
+| Containerization    | Docker Compose (NVIDIA GPU / CPU / AMD ROCm)                    |
 
 ## Project Structure
 
@@ -589,10 +611,11 @@ ui                          <- web
   - [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0)
 - Diarization is optional; transcription works without it
 
-### CPU mode fails with compute type error
+### CPU run logs a compute type warning
 
-- Use `COMPUTE_TYPE=int8` or `COMPUTE_TYPE=auto` for CPU
-- `int8_float16` and `float16` require a GPU
+- `int8_float16` and `float16` need a GPU; on CPU the worker automatically
+  downgrades them to `int8` and logs a WARNING — the job still runs
+- Set `COMPUTE_TYPE=int8` explicitly to silence the warning
 
 ### Redis connection error
 

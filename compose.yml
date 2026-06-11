@@ -1,3 +1,63 @@
+# Shared blocks (YAML anchors). environment uses map form so services can
+# combine these with `<<:` merge keys; a new shared knob is added once here
+# instead of once per worker. Values reach a container only when listed —
+# compose has no env_file, so a .env value alone never applies. See README.
+# Cap the json-file driver so unbounded structured logs cannot fill
+# /var/lib/docker on long-running deployments. 20 MB x 5 files per service
+# is enough headroom for a few days of forensic context on the small-office
+# deployments this profile targets; larger operations should plug a
+# centralised log driver via .env override.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+x-app-depends: &app-depends
+  redis:
+    condition: service_healthy
+  volume-init:
+    condition: service_completed_successfully
+x-core-env: &core-env
+  REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/0
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  LOG_JSON: ${LOG_JSON:-false}
+  DATABASE_PATH: /app/data/db/whisper_ui.db
+  UPLOAD_DIR: /app/data/uploads
+  OUTPUT_DIR: /app/data/outputs
+  LANGUAGE: ${LANGUAGE:-zh}
+  # One cap, two consumers: the web tier enforces it on file uploads, the
+  # download workers on Google Drive files (which carry no duration metadata
+  # for the duration cap to act on).
+  MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-2147483648}
+# Queue / job timeouts — see README "Queue / Timeout tuning".
+# When changing any of these, keep the invariants:
+#   0 < JOB_TIMEOUT_FLOOR <= JOB_TIMEOUT_DEFAULT <= JOB_TIMEOUT_MAX
+#   REDIS_PROCESSING_EXPIRY >= JOB_TIMEOUT_MAX + STALE_JOB_BUFFER
+x-timeout-env: &timeout-env
+  JOB_TIMEOUT_DEFAULT: ${JOB_TIMEOUT_DEFAULT:-7200}
+  JOB_TIMEOUT_FLOOR: ${JOB_TIMEOUT_FLOOR:-1800}
+  JOB_TIMEOUT_AUDIO_MULTIPLIER: ${JOB_TIMEOUT_AUDIO_MULTIPLIER:-3.0}
+  JOB_TIMEOUT_MAX: ${JOB_TIMEOUT_MAX:-28800}
+  STALE_JOB_BUFFER: ${STALE_JOB_BUFFER:-1800}
+  REDIS_PROCESSING_EXPIRY: ${REDIS_PROCESSING_EXPIRY:-30600}
+# Optional LLM text correction (Ollama). Empty OLLAMA_BASE_URL disables the
+# feature globally.
+x-llm-env: &llm-env
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+  OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e4b}
+  OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+  OLLAMA_REQUEST_TIMEOUT: ${OLLAMA_REQUEST_TIMEOUT:-120}
+  LLM_CHUNK_SIZE: ${LLM_CHUNK_SIZE:-8}
+  LLM_CHUNK_CONTEXT: ${LLM_CHUNK_CONTEXT:-2}
+  LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.1}
+  OLLAMA_THINK: ${OLLAMA_THINK:-false}
+# URL-source download caps. TWITTER_COOKIES_FILE: for X login-walled /
+# age-restricted posts, set a container path here and mount the cookies.txt
+# there (see .env.example). Empty = anonymous.
+x-download-env: &download-env
+  YOUTUBE_MAX_DURATION: ${YOUTUBE_MAX_DURATION:-14400}
+  TWITTER_MAX_DURATION: ${TWITTER_MAX_DURATION:-14400}
+  TWITTER_COOKIES_FILE: ${TWITTER_COOKIES_FILE:-}
 services:
   frontend:
     image: ghcr.io/fdff87554/whisper-ui-frontend:${WHISPER_UI_VERSION:-latest}
@@ -9,69 +69,37 @@ services:
     ports:
       - "8080:8000"
     environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
-      # Logging knobs reach the container only if listed here — compose has no
-      # env_file, so a .env value alone would never apply. See README.
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_JSON=${LOG_JSON:-false}
-      - DATABASE_PATH=/app/data/db/whisper_ui.db
-      - UPLOAD_DIR=/app/data/uploads
-      - OUTPUT_DIR=/app/data/outputs
-      - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
-      - LANGUAGE=${LANGUAGE:-zh}
-      - HF_TOKEN=${HF_TOKEN:-}
-      # Queue / job timeouts — see README "Queue / Timeout tuning".
-      # When changing any of these, keep the invariants:
-      #   0 < JOB_TIMEOUT_FLOOR <= JOB_TIMEOUT_DEFAULT <= JOB_TIMEOUT_MAX
-      #   REDIS_PROCESSING_EXPIRY >= JOB_TIMEOUT_MAX + STALE_JOB_BUFFER
-      - JOB_TIMEOUT_DEFAULT=${JOB_TIMEOUT_DEFAULT:-7200}
-      - JOB_TIMEOUT_FLOOR=${JOB_TIMEOUT_FLOOR:-1800}
-      - JOB_TIMEOUT_AUDIO_MULTIPLIER=${JOB_TIMEOUT_AUDIO_MULTIPLIER:-3.0}
-      - JOB_TIMEOUT_MAX=${JOB_TIMEOUT_MAX:-28800}
-      - STALE_JOB_BUFFER=${STALE_JOB_BUFFER:-1800}
-      - REDIS_PROCESSING_EXPIRY=${REDIS_PROCESSING_EXPIRY:-30600}
-      - DIARIZE_HEARTBEAT_INTERVAL=${DIARIZE_HEARTBEAT_INTERVAL:-30}
-      # Optional LLM text correction (Ollama). Empty string disables the
-      # feature globally and greys out the upload-form toggle.
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e4b}
+      !!merge <<: [*core-env, *timeout-env]
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
+      HF_TOKEN: ${HF_TOKEN:-}
+      DIARIZE_HEARTBEAT_INTERVAL: ${DIARIZE_HEARTBEAT_INTERVAL:-30}
+      # LLM correction: the frontend only needs the gate + model name to
+      # render the upload-form toggle; the client knobs stay worker-side.
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e4b}
       # Optional upload retention. 0 (default) keeps every upload until the
       # job is explicitly deleted. >0 has the web app hourly reclaim the
       # upload directory of COMPLETED jobs older than that many days.
-      - UPLOAD_RETENTION_DAYS=${UPLOAD_RETENTION_DAYS:-0}
+      UPLOAD_RETENTION_DAYS: ${UPLOAD_RETENTION_DAYS:-0}
       # Auth / session — see README "Multi-user authentication". Leaving
       # SESSION_SECRET empty makes the app fall back to a per-process
       # random secret (logs WARNING) which invalidates every session on
       # restart; set it to a stable value in production:
       #   SESSION_SECRET=$(openssl rand -hex 32)
-      - SESSION_SECRET=${SESSION_SECRET:-}
-      - SESSION_HTTPS_ONLY=${SESSION_HTTPS_ONLY:-false}
-      - MAX_LOGIN_ATTEMPTS=${MAX_LOGIN_ATTEMPTS:-5}
-      - MAX_LOGIN_ATTEMPTS_PER_IP=${MAX_LOGIN_ATTEMPTS_PER_IP:-20}
-      - LOGIN_LOCKOUT_SECONDS=${LOGIN_LOCKOUT_SECONDS:-900}
-      - TRUST_PROXY_HEADERS=${TRUST_PROXY_HEADERS:-false}
-      # Registration gate + per-file upload cap (frontend-only; same
-      # pass-through reason as the logging knobs above).
-      - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-true}
-      - MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE:-2147483648}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      SESSION_HTTPS_ONLY: ${SESSION_HTTPS_ONLY:-false}
+      MAX_LOGIN_ATTEMPTS: ${MAX_LOGIN_ATTEMPTS:-5}
+      MAX_LOGIN_ATTEMPTS_PER_IP: ${MAX_LOGIN_ATTEMPTS_PER_IP:-20}
+      LOGIN_LOCKOUT_SECONDS: ${LOGIN_LOCKOUT_SECONDS:-900}
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
+      # Registration gate (frontend-only).
+      ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
     volumes:
       - app-data:/app/data
     depends_on:
-      redis:
-        condition: service_healthy
-      volume-init:
-        condition: service_completed_successfully
+      !!merge <<: *app-depends
     restart: unless-stopped
-    # Cap the json-file driver so unbounded structured logs cannot fill
-    # /var/lib/docker on long-running deployments. 20 MB x 5 files per
-    # service is enough headroom for a few days of forensic context on
-    # the small-office deployments this profile targets; larger
-    # operations should plug a centralised log driver via .env override.
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "5"
+    logging: *default-logging
   redis:
     image: redis:7-alpine
     # maxmemory-policy is hardcoded to noeviction on purpose: this Redis holds
@@ -87,11 +115,7 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "5"
+    logging: *default-logging
   # One-shot init sidecar. The worker/frontend images run as USER 1000, but
   # a named volume can keep root:root ownership inherited from an earlier
   # root-era deployment — the Dockerfile build-time chown only seeds an
@@ -127,56 +151,24 @@ services:
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     environment:
+      !!merge <<: [*core-env, *timeout-env, *llm-env, *download-env]
       # Queues this worker listens on. The default includes every queue so a
       # single-profile `docker compose --profile gpu up` still runs the full
       # pipeline end-to-end. For the scaled topology, set
       # `WORKER_GPU_QUEUES=whisper:gpu default` and add the `io` profile so
       # a dedicated worker-io handles download / preprocess / llm_correction.
-      - WORKER_QUEUES=${WORKER_GPU_QUEUES:-whisper:gpu whisper:io whisper:cpu whisper:llm default}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
-      # Logging knobs reach the container only if listed here — compose has no
-      # env_file, so a .env value alone would never apply. See README.
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_JSON=${LOG_JSON:-false}
-      - DATABASE_PATH=/app/data/db/whisper_ui.db
-      - UPLOAD_DIR=/app/data/uploads
-      - OUTPUT_DIR=/app/data/outputs
-      - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
-      - COMPUTE_TYPE=${COMPUTE_TYPE:-int8_float16}
-      - DEVICE=cuda
-      - BATCH_SIZE=${BATCH_SIZE:-4}
-      - LANGUAGE=${LANGUAGE:-zh}
-      - HF_TOKEN=${HF_TOKEN:-}
-      - YOUTUBE_MAX_DURATION=${YOUTUBE_MAX_DURATION:-14400}
-      - TWITTER_MAX_DURATION=${TWITTER_MAX_DURATION:-14400}
-      # X login-walled / age-restricted posts: set a container path here and
-      # mount the cookies.txt there (see .env.example). Empty = anonymous.
-      - TWITTER_COOKIES_FILE=${TWITTER_COOKIES_FILE:-}
-      # Queue / job timeouts — see README "Queue / Timeout tuning".
-      - JOB_TIMEOUT_DEFAULT=${JOB_TIMEOUT_DEFAULT:-7200}
-      - JOB_TIMEOUT_FLOOR=${JOB_TIMEOUT_FLOOR:-1800}
-      - JOB_TIMEOUT_AUDIO_MULTIPLIER=${JOB_TIMEOUT_AUDIO_MULTIPLIER:-3.0}
-      - JOB_TIMEOUT_MAX=${JOB_TIMEOUT_MAX:-28800}
-      - STALE_JOB_BUFFER=${STALE_JOB_BUFFER:-1800}
-      - REDIS_PROCESSING_EXPIRY=${REDIS_PROCESSING_EXPIRY:-30600}
-      - DIARIZE_HEARTBEAT_INTERVAL=${DIARIZE_HEARTBEAT_INTERVAL:-30}
-      # Optional LLM text correction (Ollama).
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e4b}
-      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
-      - OLLAMA_REQUEST_TIMEOUT=${OLLAMA_REQUEST_TIMEOUT:-120}
-      - LLM_CHUNK_SIZE=${LLM_CHUNK_SIZE:-8}
-      - LLM_CHUNK_CONTEXT=${LLM_CHUNK_CONTEXT:-2}
-      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.1}
-      - OLLAMA_THINK=${OLLAMA_THINK:-false}
+      WORKER_QUEUES: ${WORKER_GPU_QUEUES:-whisper:gpu whisper:io whisper:cpu whisper:llm default}
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
+      COMPUTE_TYPE: ${COMPUTE_TYPE:-int8_float16}
+      DEVICE: cuda
+      BATCH_SIZE: ${BATCH_SIZE:-4}
+      HF_TOKEN: ${HF_TOKEN:-}
+      DIARIZE_HEARTBEAT_INTERVAL: ${DIARIZE_HEARTBEAT_INTERVAL:-30}
     volumes:
       - app-data:/app/data
       - model-cache:/cache/huggingface
     depends_on:
-      redis:
-        condition: service_healthy
-      volume-init:
-        condition: service_completed_successfully
+      !!merge <<: *app-depends
     deploy:
       resources:
         reservations:
@@ -185,11 +177,7 @@ services:
               device_ids: ["${WORKER_GPU_DEVICE_ID:-0}"]
               capabilities: [gpu]
     restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "5"
+    logging: *default-logging
   worker-cpu:
     profiles: [cpu]
     image: ghcr.io/fdff87554/whisper-ui-worker-cpu:${WHISPER_UI_VERSION:-latest}
@@ -199,60 +187,24 @@ services:
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     environment:
+      !!merge <<: [*core-env, *timeout-env, *llm-env, *download-env]
       # Same broad default as worker-gpu: runs the whole pipeline in a
       # single container when the CPU profile is used alone. Override with
       # `WORKER_CPU_QUEUES=whisper:cpu default` to specialise.
-      - WORKER_QUEUES=${WORKER_CPU_QUEUES:-whisper:gpu whisper:io whisper:cpu whisper:llm default}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
-      # Logging knobs reach the container only if listed here — compose has no
-      # env_file, so a .env value alone would never apply. See README.
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_JSON=${LOG_JSON:-false}
-      - DATABASE_PATH=/app/data/db/whisper_ui.db
-      - UPLOAD_DIR=/app/data/uploads
-      - OUTPUT_DIR=/app/data/outputs
-      - WHISPER_MODEL=${WHISPER_MODEL:-base}
-      - COMPUTE_TYPE=${COMPUTE_TYPE:-int8}
-      - DEVICE=cpu
-      - BATCH_SIZE=${BATCH_SIZE:-4}
-      - LANGUAGE=${LANGUAGE:-zh}
-      - HF_TOKEN=${HF_TOKEN:-}
-      - YOUTUBE_MAX_DURATION=${YOUTUBE_MAX_DURATION:-14400}
-      - TWITTER_MAX_DURATION=${TWITTER_MAX_DURATION:-14400}
-      # X login-walled / age-restricted posts: set a container path here and
-      # mount the cookies.txt there (see .env.example). Empty = anonymous.
-      - TWITTER_COOKIES_FILE=${TWITTER_COOKIES_FILE:-}
-      # Queue / job timeouts — see README "Queue / Timeout tuning".
-      - JOB_TIMEOUT_DEFAULT=${JOB_TIMEOUT_DEFAULT:-7200}
-      - JOB_TIMEOUT_FLOOR=${JOB_TIMEOUT_FLOOR:-1800}
-      - JOB_TIMEOUT_AUDIO_MULTIPLIER=${JOB_TIMEOUT_AUDIO_MULTIPLIER:-3.0}
-      - JOB_TIMEOUT_MAX=${JOB_TIMEOUT_MAX:-28800}
-      - STALE_JOB_BUFFER=${STALE_JOB_BUFFER:-1800}
-      - REDIS_PROCESSING_EXPIRY=${REDIS_PROCESSING_EXPIRY:-30600}
-      - DIARIZE_HEARTBEAT_INTERVAL=${DIARIZE_HEARTBEAT_INTERVAL:-30}
-      # Optional LLM text correction (Ollama).
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e4b}
-      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
-      - OLLAMA_REQUEST_TIMEOUT=${OLLAMA_REQUEST_TIMEOUT:-120}
-      - LLM_CHUNK_SIZE=${LLM_CHUNK_SIZE:-8}
-      - LLM_CHUNK_CONTEXT=${LLM_CHUNK_CONTEXT:-2}
-      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.1}
-      - OLLAMA_THINK=${OLLAMA_THINK:-false}
+      WORKER_QUEUES: ${WORKER_CPU_QUEUES:-whisper:gpu whisper:io whisper:cpu whisper:llm default}
+      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      COMPUTE_TYPE: ${COMPUTE_TYPE:-int8}
+      DEVICE: cpu
+      BATCH_SIZE: ${BATCH_SIZE:-4}
+      HF_TOKEN: ${HF_TOKEN:-}
+      DIARIZE_HEARTBEAT_INTERVAL: ${DIARIZE_HEARTBEAT_INTERVAL:-30}
     volumes:
       - app-data:/app/data
       - model-cache:/cache/huggingface
     depends_on:
-      redis:
-        condition: service_healthy
-      volume-init:
-        condition: service_completed_successfully
+      !!merge <<: *app-depends
     restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "5"
+    logging: *default-logging
   # AMD / ROCm worker. Transcription runs on whisper.cpp (HIP); alignment and
   # diarization run on PyTorch-ROCm. Enable with:
   #   docker compose --profile rocm up -d
@@ -269,49 +221,21 @@ services:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
         AMDGPU_TARGETS: ${AMDGPU_TARGETS:-gfx1151}
     environment:
-      - WORKER_QUEUES=${WORKER_ROCM_QUEUES:-whisper:gpu whisper:io whisper:cpu whisper:llm default}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
-      # Logging knobs reach the container only if listed here — compose has no
-      # env_file, so a .env value alone would never apply. See README.
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_JSON=${LOG_JSON:-false}
-      - DATABASE_PATH=/app/data/db/whisper_ui.db
-      - UPLOAD_DIR=/app/data/uploads
-      - OUTPUT_DIR=/app/data/outputs
-      - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
-      - DEVICE=rocm
+      !!merge <<: [*core-env, *timeout-env, *llm-env, *download-env]
+      WORKER_QUEUES: ${WORKER_ROCM_QUEUES:-whisper:gpu whisper:io whisper:cpu whisper:llm default}
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
+      DEVICE: rocm
       # CTranslate2 has no ROCm backend; transcribe via whisper.cpp (HIP).
-      - TRANSCRIBE_BACKEND=whispercpp
-      - WHISPERCPP_THREADS=${WHISPERCPP_THREADS:-0}
+      TRANSCRIBE_BACKEND: whispercpp
+      WHISPERCPP_BINARY: ${WHISPERCPP_BINARY:-whisper-cli}
+      WHISPERCPP_THREADS: ${WHISPERCPP_THREADS:-0}
       # Hallucination guards: Silero VAD pre-segmentation (model cached on the
       # model-cache volume via HF_HOME) + no cross-window text conditioning.
-      - WHISPERCPP_VAD=${WHISPERCPP_VAD:-true}
-      - WHISPERCPP_VAD_MODEL=${WHISPERCPP_VAD_MODEL:-ggml-silero-v5.1.2.bin}
-      - WHISPERCPP_MAX_CONTEXT=${WHISPERCPP_MAX_CONTEXT:-0}
-      - LANGUAGE=${LANGUAGE:-zh}
-      - HF_TOKEN=${HF_TOKEN:-}
-      - YOUTUBE_MAX_DURATION=${YOUTUBE_MAX_DURATION:-14400}
-      - TWITTER_MAX_DURATION=${TWITTER_MAX_DURATION:-14400}
-      # X login-walled / age-restricted posts: set a container path here and
-      # mount the cookies.txt there (see .env.example). Empty = anonymous.
-      - TWITTER_COOKIES_FILE=${TWITTER_COOKIES_FILE:-}
-      # Queue / job timeouts — see README "Queue / Timeout tuning".
-      - JOB_TIMEOUT_DEFAULT=${JOB_TIMEOUT_DEFAULT:-7200}
-      - JOB_TIMEOUT_FLOOR=${JOB_TIMEOUT_FLOOR:-1800}
-      - JOB_TIMEOUT_AUDIO_MULTIPLIER=${JOB_TIMEOUT_AUDIO_MULTIPLIER:-3.0}
-      - JOB_TIMEOUT_MAX=${JOB_TIMEOUT_MAX:-28800}
-      - STALE_JOB_BUFFER=${STALE_JOB_BUFFER:-1800}
-      - REDIS_PROCESSING_EXPIRY=${REDIS_PROCESSING_EXPIRY:-30600}
-      - DIARIZE_HEARTBEAT_INTERVAL=${DIARIZE_HEARTBEAT_INTERVAL:-30}
-      # Optional LLM text correction (Ollama).
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e4b}
-      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
-      - OLLAMA_REQUEST_TIMEOUT=${OLLAMA_REQUEST_TIMEOUT:-120}
-      - LLM_CHUNK_SIZE=${LLM_CHUNK_SIZE:-8}
-      - LLM_CHUNK_CONTEXT=${LLM_CHUNK_CONTEXT:-2}
-      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.1}
-      - OLLAMA_THINK=${OLLAMA_THINK:-false}
+      WHISPERCPP_VAD: ${WHISPERCPP_VAD:-true}
+      WHISPERCPP_VAD_MODEL: ${WHISPERCPP_VAD_MODEL:-ggml-silero-v5.1.2.bin}
+      WHISPERCPP_MAX_CONTEXT: ${WHISPERCPP_MAX_CONTEXT:-0}
+      HF_TOKEN: ${HF_TOKEN:-}
+      DIARIZE_HEARTBEAT_INTERVAL: ${DIARIZE_HEARTBEAT_INTERVAL:-30}
     devices:
       - /dev/kfd
       - /dev/dri
@@ -322,16 +246,9 @@ services:
       - app-data:/app/data
       - model-cache:/cache/huggingface
     depends_on:
-      redis:
-        condition: service_healthy
-      volume-init:
-        condition: service_completed_successfully
+      !!merge <<: *app-depends
     restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "5"
+    logging: *default-logging
   # Optional IO-dedicated worker for multi-worker topologies. Use it when
   # you want the GPU worker(s) to stay focused on whisper:gpu while a
   # lightweight CPU container handles download / preprocess / llm_correction.
@@ -354,50 +271,16 @@ services:
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     environment:
-      - WORKER_QUEUES=${WORKER_IO_QUEUES:-whisper:io whisper:cpu whisper:llm default}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
-      # Logging knobs reach the container only if listed here — compose has no
-      # env_file, so a .env value alone would never apply. See README.
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_JSON=${LOG_JSON:-false}
-      - DATABASE_PATH=/app/data/db/whisper_ui.db
-      - UPLOAD_DIR=/app/data/uploads
-      - OUTPUT_DIR=/app/data/outputs
-      - DEVICE=cpu
-      - LANGUAGE=${LANGUAGE:-zh}
-      - YOUTUBE_MAX_DURATION=${YOUTUBE_MAX_DURATION:-14400}
-      - TWITTER_MAX_DURATION=${TWITTER_MAX_DURATION:-14400}
-      # X login-walled / age-restricted posts: set a container path here and
-      # mount the cookies.txt there (see .env.example). Empty = anonymous.
-      - TWITTER_COOKIES_FILE=${TWITTER_COOKIES_FILE:-}
-      - JOB_TIMEOUT_DEFAULT=${JOB_TIMEOUT_DEFAULT:-7200}
-      - JOB_TIMEOUT_FLOOR=${JOB_TIMEOUT_FLOOR:-1800}
-      - JOB_TIMEOUT_AUDIO_MULTIPLIER=${JOB_TIMEOUT_AUDIO_MULTIPLIER:-3.0}
-      - JOB_TIMEOUT_MAX=${JOB_TIMEOUT_MAX:-28800}
-      - STALE_JOB_BUFFER=${STALE_JOB_BUFFER:-1800}
-      - REDIS_PROCESSING_EXPIRY=${REDIS_PROCESSING_EXPIRY:-30600}
       # LLM correction runs here when enabled — no GPU required.
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e4b}
-      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
-      - OLLAMA_REQUEST_TIMEOUT=${OLLAMA_REQUEST_TIMEOUT:-120}
-      - LLM_CHUNK_SIZE=${LLM_CHUNK_SIZE:-8}
-      - LLM_CHUNK_CONTEXT=${LLM_CHUNK_CONTEXT:-2}
-      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.1}
-      - OLLAMA_THINK=${OLLAMA_THINK:-false}
+      !!merge <<: [*core-env, *timeout-env, *llm-env, *download-env]
+      WORKER_QUEUES: ${WORKER_IO_QUEUES:-whisper:io whisper:cpu whisper:llm default}
+      DEVICE: cpu
     volumes:
       - app-data:/app/data
     depends_on:
-      redis:
-        condition: service_healthy
-      volume-init:
-        condition: service_completed_successfully
+      !!merge <<: *app-depends
     restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "5"
+    logging: *default-logging
   # Dedicated LLM-correction worker (whisper:llm queue only). Enable with
   # `--profile llm-worker` on hosts where the LLM is slow (a big Ollama model)
   # and must NOT block the fast io/cpu finalisation path. Uses the CPU image —
@@ -413,42 +296,15 @@ services:
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     environment:
-      - WORKER_QUEUES=${WORKER_LLM_QUEUES:-whisper:llm default}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_JSON=${LOG_JSON:-false}
-      - DATABASE_PATH=/app/data/db/whisper_ui.db
-      - UPLOAD_DIR=/app/data/uploads
-      - OUTPUT_DIR=/app/data/outputs
-      - DEVICE=cpu
-      - LANGUAGE=${LANGUAGE:-zh}
-      - JOB_TIMEOUT_DEFAULT=${JOB_TIMEOUT_DEFAULT:-7200}
-      - JOB_TIMEOUT_FLOOR=${JOB_TIMEOUT_FLOOR:-1800}
-      - JOB_TIMEOUT_AUDIO_MULTIPLIER=${JOB_TIMEOUT_AUDIO_MULTIPLIER:-3.0}
-      - JOB_TIMEOUT_MAX=${JOB_TIMEOUT_MAX:-28800}
-      - STALE_JOB_BUFFER=${STALE_JOB_BUFFER:-1800}
-      - REDIS_PROCESSING_EXPIRY=${REDIS_PROCESSING_EXPIRY:-30600}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:e4b}
-      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
-      - OLLAMA_REQUEST_TIMEOUT=${OLLAMA_REQUEST_TIMEOUT:-120}
-      - LLM_CHUNK_SIZE=${LLM_CHUNK_SIZE:-8}
-      - LLM_CHUNK_CONTEXT=${LLM_CHUNK_CONTEXT:-2}
-      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.1}
-      - OLLAMA_THINK=${OLLAMA_THINK:-false}
+      !!merge <<: [*core-env, *timeout-env, *llm-env]
+      WORKER_QUEUES: ${WORKER_LLM_QUEUES:-whisper:llm default}
+      DEVICE: cpu
     volumes:
       - app-data:/app/data
     depends_on:
-      redis:
-        condition: service_healthy
-      volume-init:
-        condition: service_completed_successfully
+      !!merge <<: *app-depends
     restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "5"
+    logging: *default-logging
   # Optional bundled Ollama server for LLM text correction. Enable with:
   #   docker compose --profile gpu --profile llm up -d
   # Users who already run Ollama elsewhere should skip this profile and
@@ -474,11 +330,7 @@ services:
               device_ids: ["${OLLAMA_GPU_DEVICE_ID:-1}"]
               capabilities: [gpu]
     restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "5"
+    logging: *default-logging
   # One-shot init sidecar: waits until Ollama is healthy, pulls the
   # configured model, then exits. Idempotent — pulling an already-present
   # model is a fast no-op.
@@ -509,11 +361,7 @@ services:
     ports:
       - "127.0.0.1:9090:9090"
     restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "5"
+    logging: *default-logging
   redis-exporter:
     profiles: [monitoring]
     image: oliver006/redis_exporter:latest
@@ -524,11 +372,7 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "5"
+    logging: *default-logging
   # AMD GPU metrics — reuses the same /dev/kfd + /dev/dri passthrough as the
   # ROCm worker. NOTE: rocm/device-metrics-exporter is officially validated on
   # Instinct (MI) GPUs; on a gfx1151 (Strix Halo APU) some fields may be empty.
@@ -549,11 +393,7 @@ services:
       - "${VIDEO_GID:-44}"
       - "${RENDER_GID:-993}"
     restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "5"
+    logging: *default-logging
 volumes:
   app-data:
   redis-data:
