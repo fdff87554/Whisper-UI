@@ -23,15 +23,25 @@ services:
     command: >
       sh -c "npm ci && npx @tailwindcss/cli -i src/whisper_ui/web/static/css/input.css -o src/whisper_ui/web/static/style.css --watch"
 
+  # Workers need PYTHONPATH too: the image installs whisper_ui into
+  # site-packages (non-editable), so without it the bind mount is dead
+  # weight and the worker silently runs the baked-in code. RQ has no code
+  # reload — restart the worker container to pick up changes.
   worker-gpu:
+    environment:
+      - PYTHONPATH=/app/src
     volumes:
       - ./src:/app/src
       - ./data:/app/data
   worker-cpu:
+    environment:
+      - PYTHONPATH=/app/src
     volumes:
       - ./src:/app/src
       - ./data:/app/data
   worker-rocm:
+    environment:
+      - PYTHONPATH=/app/src
     volumes:
       - ./src:/app/src
       - ./data:/app/data
