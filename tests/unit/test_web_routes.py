@@ -1071,6 +1071,23 @@ class TestViewerRoutes:
         assert "鍵盤捷徑" in resp.text
         assert "聚焦搜尋" in resp.text
 
+    def test_viewer_copy_shortcut_ignores_modifier_combos(self, client, db, filestore):
+        """Pressing Ctrl+C / Cmd+C to copy selected transcript text must not
+        trigger copyActive() and overwrite the user's clipboard selection."""
+        segments = [Segment(start=0.0, end=1.0, text="hello")]
+        result = TranscriptResult(segments=segments, language="zh", duration=1.0)
+        job = Job(filename="copy.mp3", status=JobStatus.COMPLETED, language="zh")
+        result_path = filestore.save_result(job.id, result)
+        job.result_path = str(result_path)
+        db.insert_job(job)
+
+        resp = client.get(f"/viewer/{job.id}")
+
+        assert resp.status_code == 200
+        shortcut_line = next(line for line in resp.text.splitlines() if "copyActive();" in line)
+        assert "$event.ctrlKey" in shortcut_line
+        assert "$event.metaKey" in shortcut_line
+
     def test_viewer_hides_download_media_in_no_segments_branch(self, client, db, filestore):
         """No-segments fallback toolbar must also gate Download Media on
         media_available (regression for PR #41 followup F1)."""
