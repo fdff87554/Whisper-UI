@@ -266,7 +266,10 @@ async def bulk_job_action(
                 job.result_path = None
                 job.duration = retry_duration
                 db.update_job(job)
-                enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+                # Same rationale as the upload routes: the enqueue does many
+                # Redis/RQ round-trips and must not stall the event loop,
+                # especially inside this per-job loop.
+                await asyncio.to_thread(enqueue_pipeline, job, redis=redis, settings=settings, filestore=filestore)
                 succeeded += 1
             except Exception:
                 logger.exception("bulk retry failed for job %s", job.id)
@@ -329,7 +332,7 @@ async def retry_job(
         job.result_path = None
         job.duration = retry_duration
         db.update_job(job)
-        enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+        await asyncio.to_thread(enqueue_pipeline, job, redis=redis, settings=settings, filestore=filestore)
         logger.info(
             "job retried: job_id=%s user_id=%s filename=%r previous_error=%r",
             job.id,
@@ -425,7 +428,7 @@ async def re_transcribe_job(
 
     db.insert_job(new_job)
     try:
-        enqueue_pipeline(new_job, redis=redis, settings=settings, filestore=filestore)
+        await asyncio.to_thread(enqueue_pipeline, new_job, redis=redis, settings=settings, filestore=filestore)
         logger.info(
             "job re-transcribe queued: new_job_id=%s source_job_id=%s user_id=%s model=%s lang=%s",
             new_job.id,
@@ -504,7 +507,7 @@ async def retry_batch(
             job.result_path = None
             job.duration = retry_duration
             db.update_job(job)
-            enqueue_pipeline(job, redis=redis, settings=settings, filestore=filestore)
+            await asyncio.to_thread(enqueue_pipeline, job, redis=redis, settings=settings, filestore=filestore)
             retried += 1
         except Exception:
             logger.exception("Failed to retry job %s", job.id)
