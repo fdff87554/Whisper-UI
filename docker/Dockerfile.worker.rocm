@@ -51,13 +51,14 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-COPY pyproject.toml ./
-COPY src/ ./src/
-COPY docker/entrypoint-worker.sh ./entrypoint-worker.sh
-RUN chmod +x ./entrypoint-worker.sh
-
 ARG PIP_INDEX_URL=
 ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+
+# Dependency layer: only project metadata plus a stub package, so editing
+# src/ does not invalidate the expensive torch-rocm install below.
+COPY pyproject.toml ./
+RUN mkdir -p src/whisper_ui && touch src/whisper_ui/__init__.py
+
 # AMD's manylinux wheel index. torch 2.10.0+rocm7.2.0 matches the cuda
 # worker's torch 2.10.0 and the ROCm 7.2 runtime in the base image; it pins
 # triton==3.6.0+rocm7.2.0 (hosted here, not on PyPI), hence --find-links.
@@ -68,6 +69,14 @@ RUN pip install --no-cache-dir --break-system-packages --find-links "${ROCM_WHEE
     "${ROCM_WHEEL_INDEX}/triton-3.6.0%2Brocm7.2.0.gitba5c1517-cp312-cp312-linux_x86_64.whl" && \
     pip install --no-cache-dir --break-system-packages --no-deps "whisperx>=3.8,<3.9" && \
     pip install --no-cache-dir --break-system-packages ".[worker,worker-llm]"
+
+# Project layer: cheap to rebuild on every code change. --force-reinstall
+# replaces the stub install of whisper-ui itself; --no-deps keeps it from
+# touching the dependency layer.
+COPY src/ ./src/
+COPY docker/entrypoint-worker.sh ./entrypoint-worker.sh
+RUN chmod +x ./entrypoint-worker.sh && \
+    pip install --no-cache-dir --break-system-packages --no-deps --force-reinstall .
 
 # whisper.cpp HIP binary + its shared libs from the build stage.
 COPY --from=whispercpp-build /artifacts/whisper-cli /usr/local/bin/whisper-cli

@@ -12,14 +12,22 @@ RUN npx @tailwindcss/cli -i src/whisper_ui/web/static/css/input.css \
 FROM python:3.13-slim
 WORKDIR /app
 
+ARG PIP_INDEX_URL=
+ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+
+# Dependency layer: only project metadata plus a stub package, so editing
+# src/ does not invalidate the dependency install below.
 COPY pyproject.toml ./
+RUN mkdir -p src/whisper_ui && touch src/whisper_ui/__init__.py && \
+    pip install --no-cache-dir ".[frontend]"
+
+# Project layer: the compiled stylesheet must land inside src/ before the
+# final install so it ships as package data. --force-reinstall replaces the
+# stub install of whisper-ui itself; --no-deps keeps the layer cheap.
 COPY src/ ./src/
 COPY --from=css-builder /app/src/whisper_ui/web/static/style.css \
      ./src/whisper_ui/web/static/style.css
-
-ARG PIP_INDEX_URL=
-ENV PIP_INDEX_URL=${PIP_INDEX_URL}
-RUN pip install --no-cache-dir ".[frontend]"
+RUN pip install --no-cache-dir --no-deps --force-reinstall .
 
 RUN useradd --uid 1000 --create-home appuser 2>/dev/null || true \
     && mkdir -p /app/data/db /app/data/uploads /app/data/outputs \

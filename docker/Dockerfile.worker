@@ -8,13 +8,13 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-COPY pyproject.toml ./
-COPY src/ ./src/
-COPY docker/entrypoint-worker.sh ./entrypoint-worker.sh
-RUN chmod +x ./entrypoint-worker.sh
-
 ARG PIP_INDEX_URL=
 ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+
+# Dependency layer: only project metadata plus a stub package, so editing
+# src/ does not invalidate the expensive ML-dependency install below.
+COPY pyproject.toml ./
+RUN mkdir -p src/whisper_ui && touch src/whisper_ui/__init__.py
 
 # torch/torchaudio are pre-installed by the base image (2.10.0+cu128).
 # Install whisperx without deps first to avoid its torch~=2.8.0 constraint
@@ -24,6 +24,14 @@ ENV PIP_INDEX_URL=${PIP_INDEX_URL}
 # stage is still gated by OLLAMA_BASE_URL at runtime.
 RUN pip install --no-cache-dir --break-system-packages --no-deps "whisperx>=3.8,<3.9" && \
     pip install --no-cache-dir --break-system-packages ".[worker,worker-llm]"
+
+# Project layer: cheap to rebuild on every code change. --force-reinstall
+# replaces the stub install of whisper-ui itself; --no-deps keeps it from
+# touching the dependency layer.
+COPY src/ ./src/
+COPY docker/entrypoint-worker.sh ./entrypoint-worker.sh
+RUN chmod +x ./entrypoint-worker.sh && \
+    pip install --no-cache-dir --break-system-packages --no-deps --force-reinstall .
 
 RUN useradd --uid 1000 --create-home appuser 2>/dev/null || true \
     && mkdir -p /app/data/db /app/data/uploads /app/data/outputs /cache/huggingface \
