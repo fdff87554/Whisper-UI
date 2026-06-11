@@ -25,19 +25,14 @@ import time
 from unittest.mock import MagicMock
 
 import fakeredis
-import pytest
 from rq import Queue, SimpleWorker
 
-from tests.unit.test_pipeline_dag_parallelism import (
-    _fake_runtime_factory,
-    _install_runtime,
-    _stub_stages,
-)
+from tests.helpers.dag_harness import fake_runtime_factory as _fake_runtime_factory
+from tests.helpers.dag_harness import install_runtime as _install_runtime
+from tests.helpers.dag_harness import stub_stages as _stub_stages
 from whisper_ui.core.constants import WORKER_QUEUE_CPU, WORKER_QUEUE_GPU, WORKER_QUEUE_IO, WORKER_QUEUE_LLM
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.worker.pipeline_dispatcher import enqueue_pipeline
-
-pytestmark = pytest.mark.integration
 
 _GATE_TIMEOUT = 30.0  # stage backstop: never block forever if the test forgets to release
 _SYNC_TIMEOUT = 10.0  # how long a test waits for a concurrent condition before failing
