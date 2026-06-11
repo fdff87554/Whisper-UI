@@ -39,12 +39,18 @@ class TestDownloadStageWithMock:
             "input_path": "",
         }
 
-    def _make_mock_ydl(self, download_dir: Path, duration: int = 120, title: str = "Test Video"):
+    def _make_mock_ydl(
+        self,
+        download_dir: Path,
+        duration: int = 120,
+        title: str = "Test Video",
+        extra_info: dict[str, Any] | None = None,
+    ):
         """Create a mock YoutubeDL that simulates a successful download."""
         mock_ydl_instance = MagicMock()
 
         def extract_info(url, download=True):
-            info = {"duration": duration, "title": title}
+            info = {"duration": duration, "title": title, **(extra_info or {})}
             if download:
                 # Simulate file creation
                 (Path(download_dir) / "video.mp4").write_bytes(b"fake video")
@@ -93,6 +99,48 @@ class TestDownloadStageWithMock:
             stage = DownloadStage(max_duration=3600)
             with pytest.raises(DownloadError, match="exceeds the maximum"):
                 stage.execute(context)
+
+    def test_live_stream_rejected_before_download_pass(self, context, download_dir):
+        # A live stream reports duration=None, which must not bypass the
+        # duration cap as 0; the rejection has to happen on the metadata
+        # probe, before any download pass starts.
+        mock_ydl_instance = MagicMock()
+
+        def extract_info(url, download=True):
+            assert not download, "live stream must be rejected before the download pass"
+            return {"duration": None, "title": "Live", "is_live": True, "live_status": "is_live"}
+
+        mock_ydl_instance.extract_info = extract_info
+        mock_ydl_instance.__enter__ = lambda self: self
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl_instance
+
+        with patch.dict("sys.modules", {"yt_dlp": mock_module}):
+            stage = DownloadStage()
+            with pytest.raises(DownloadError, match=r"[Ll]ive"):
+                stage.execute(context)
+
+    def test_upcoming_stream_rejected(self, context, download_dir):
+        mock_ydl = self._make_mock_ydl(download_dir, extra_info={"live_status": "is_upcoming"})
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl
+
+        with patch.dict("sys.modules", {"yt_dlp": mock_module}):
+            stage = DownloadStage()
+            with pytest.raises(DownloadError, match=r"[Ll]ive"):
+                stage.execute(context)
+
+    def test_finished_live_vod_downloads_normally(self, context, download_dir):
+        mock_ydl = self._make_mock_ydl(download_dir, extra_info={"live_status": "was_live", "is_live": False})
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl
+
+        with patch.dict("sys.modules", {"yt_dlp": mock_module}):
+            stage = DownloadStage()
+            result = stage.execute(context)
+
+        assert result["input_path"] == str(download_dir / "video.mp4")
 
     def test_extract_info_returns_none(self, context, download_dir):
         mock_ydl_instance = MagicMock()

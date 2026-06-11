@@ -277,6 +277,14 @@ class DownloadStage:
             if info is None:
                 raise DownloadError("Failed to extract video information.")
 
+            # Live/upcoming streams report duration=None, which would slip
+            # past the cap below as 0 and download until the job timeout
+            # kills the worker. yt-dlp auto-fills live_status from is_live,
+            # but check both so a sparse extractor result still trips this.
+            live_status = info.get("live_status")
+            if info.get("is_live") or live_status in ("is_live", "is_upcoming"):
+                raise DownloadError("Live or upcoming streams are not supported. Retry after the stream has ended.")
+
             duration = info.get("duration") or 0
             if duration > self._max_duration:
                 hours = self._max_duration // 3600
