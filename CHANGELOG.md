@@ -7,6 +7,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.13.0] - 2026-06-11
+
 ### Fixed
 
 - whisper.cpp transcriptions (ROCm profile) of recordings with long silence
@@ -18,6 +20,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   HF repo) and disables cross-window text conditioning
   (`WHISPERCPP_MAX_CONTEXT=0`), matching the protection the whisperx (CUDA)
   path already gets from its built-in VAD batching.
+- File-path checks across model resolution, result loading, media download
+  and source-audio copy now use `is_file()` instead of `exists()`, so a
+  same-named directory can no longer masquerade as a file and fail later
+  downstream; `get_source_media_path` also filters directories out of its
+  glob matches.
 
 ### Added
 
