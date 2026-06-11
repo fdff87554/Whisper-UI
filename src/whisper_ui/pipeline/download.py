@@ -200,6 +200,13 @@ class DownloadStage:
         download_dir = Path(context["download_dir"])
         download_dir.mkdir(parents=True, exist_ok=True)
 
+        # A reaped-then-retried job reuses the same download dir, so a killed
+        # attempt can leave ``video.mp4.part`` or unmerged DASH fragments
+        # behind. Clear them so the glob fallback below cannot pick one up.
+        for stale in download_dir.glob("video.*"):
+            if stale.is_file():
+                stale.unlink()
+
         if on_progress:
             on_progress(0.0, DOWNLOAD_EXTRACTING_INFO)
 
@@ -237,13 +244,29 @@ class DownloadStage:
 
         info = self._extract_with_retries(yt_dlp, source_url, ydl_opts, allowed_extractors=allowed_extractors)
 
-        downloaded_files = list(download_dir.glob("video.*"))
-        if not downloaded_files:
-            raise DownloadError("Download completed but no video file was found.")
-
-        context["input_path"] = str(downloaded_files[0])
+        context["input_path"] = str(self._resolve_downloaded_path(info, download_dir))
         context["video_title"] = info.get("title", "")
         return context
+
+    @staticmethod
+    def _resolve_downloaded_path(info: dict[str, Any], download_dir: Path) -> Path:
+        """Return the file yt-dlp actually produced.
+
+        ``requested_downloads[0]["filepath"]`` is the post-merge final path
+        yt-dlp reports for the download pass. The glob fallback covers info
+        dicts that lack it (e.g. older extractor results); it sorts for
+        determinism and skips ``.part`` files since ``Path.glob`` order is
+        filesystem-dependent and ``video.*`` also matches partial downloads.
+        """
+        requested = info.get("requested_downloads") or [{}]
+        reported = requested[0].get("filepath")
+        if reported and Path(reported).is_file():
+            return Path(reported)
+
+        candidates = sorted(p for p in download_dir.glob("video.*") if p.is_file() and p.suffix != ".part")
+        if not candidates:
+            raise DownloadError("Download completed but no video file was found.")
+        return candidates[0]
 
     def _extract_with_retries(
         self,

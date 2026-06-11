@@ -142,6 +142,74 @@ class TestDownloadStageWithMock:
 
         assert result["input_path"] == str(download_dir / "video.mp4")
 
+    def test_input_path_prefers_ytdlp_reported_filepath(self, context, download_dir):
+        # When two media files coexist, the path yt-dlp reports wins over the
+        # filesystem-order glob fallback.
+        reported = download_dir / "video.webm"
+
+        def write_files(url, download=True):
+            if download:
+                (download_dir / "video.mp4").write_bytes(b"other file")
+                reported.write_bytes(b"reported file")
+            return {
+                "duration": 120,
+                "title": "Test Video",
+                "requested_downloads": [{"filepath": str(reported)}],
+            }
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info = write_files
+        mock_ydl_instance.__enter__ = lambda self: self
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl_instance
+
+        with patch.dict("sys.modules", {"yt_dlp": mock_module}):
+            stage = DownloadStage()
+            result = stage.execute(context)
+
+        assert result["input_path"] == str(reported)
+
+    def test_stale_artifacts_cleared_before_download(self, context, download_dir):
+        # A reaped attempt can leave partial files behind; they must not be
+        # picked up as input_path by the retry.
+        (download_dir / "video.mp4.part").write_bytes(b"stale partial")
+        (download_dir / "video.f614.mp4").write_bytes(b"stale fragment")
+
+        mock_ydl = self._make_mock_ydl(download_dir)
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl
+
+        with patch.dict("sys.modules", {"yt_dlp": mock_module}):
+            stage = DownloadStage()
+            result = stage.execute(context)
+
+        assert result["input_path"] == str(download_dir / "video.mp4")
+        assert not (download_dir / "video.mp4.part").exists()
+        assert not (download_dir / "video.f614.mp4").exists()
+
+    def test_glob_fallback_skips_part_files_and_sorts(self, context, download_dir):
+        # Without requested_downloads, the fallback must never resolve to a
+        # .part file regardless of filesystem ordering.
+        def write_files(url, download=True):
+            if download:
+                (download_dir / "video.mp4.part").write_bytes(b"partial")
+                (download_dir / "video.mp4").write_bytes(b"final")
+            return {"duration": 120, "title": "Test Video"}
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info = write_files
+        mock_ydl_instance.__enter__ = lambda self: self
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+        mock_module = MagicMock()
+        mock_module.YoutubeDL.return_value = mock_ydl_instance
+
+        with patch.dict("sys.modules", {"yt_dlp": mock_module}):
+            stage = DownloadStage()
+            result = stage.execute(context)
+
+        assert result["input_path"] == str(download_dir / "video.mp4")
+
     def test_extract_info_returns_none(self, context, download_dir):
         mock_ydl_instance = MagicMock()
         mock_ydl_instance.extract_info.return_value = None
