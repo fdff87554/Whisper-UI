@@ -294,6 +294,31 @@ def test_init_db_accepts_sqlite_3_35(monkeypatch, tmp_path):
         conn.close()
 
 
+def test_reinit_does_not_relog_index_migrations(tmp_path, caplog):
+    """Migrations re-run on every connection (one per stage task). The
+    IF NOT EXISTS index entries never raise, so without an existence check
+    each task would emit a misleading 'migration applied' INFO line."""
+    import logging as _logging
+    import sqlite3 as _sqlite3
+
+    from whisper_ui.storage import migrations
+
+    db_path = tmp_path / "relog.db"
+    conn = _sqlite3.connect(db_path)
+    migrations.init_db(conn)
+    conn.close()
+
+    conn = _sqlite3.connect(db_path)
+    try:
+        with caplog.at_level(_logging.INFO, logger="whisper_ui.storage.migrations"):
+            migrations.init_db(conn)
+    finally:
+        conn.close()
+
+    applied = [r.getMessage() for r in caplog.records if "schema migration applied" in r.getMessage()]
+    assert applied == []
+
+
 def test_has_active_jobs_empty(db: JobDatabase):
     assert db.has_active_jobs() is False
 
