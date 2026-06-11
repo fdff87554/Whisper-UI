@@ -42,3 +42,15 @@ def test_srt_collapses_newlines_in_text_to_keep_cue_single_line():
     assert lines[1] == "00:00:00,000 --> 00:00:01,000"
     assert lines[2] == "[SPEAKER_00] line one line two"
     assert lines[3] == ""
+
+
+def test_srt_neutralizes_arrow_in_text():
+    # SRT has no escaping mechanism; a literal "-->" inside the text would
+    # mimic a timing line, so it is substituted with a visual equivalent.
+    result = TranscriptResult(
+        segments=[Segment(start=0.0, end=1.0, text="from a --> to b")],
+    )
+    data = SrtExporter().export(result).decode("utf-8")
+
+    assert "from a → to b" in data
+    assert data.count("-->") == 1  # the genuine timing line only

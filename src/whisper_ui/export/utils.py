@@ -9,6 +9,27 @@ def format_timestamp(seconds: float, ms_separator: str = ",") -> str:
     return f"{h:02d}:{m:02d}:{s:02d}{ms_separator}{ms:03d}"
 
 
+def escape_vtt_text(text: str) -> str:
+    """Escape characters with structural meaning inside a WebVTT cue.
+
+    ``&`` and ``<`` are reserved by the cue-text grammar, and a literal
+    ``-->`` inside a cue line is parsed as a timing line. ``>`` is escaped
+    as well so ``-->`` cannot survive in any form. Like the newline case in
+    :func:`collapse_newlines`, the realistic source of these characters is
+    the optional LLM correction stage, not the ASR output itself.
+    """
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def neutralize_srt_arrows(text: str) -> str:
+    """Replace a literal ``-->`` so it cannot mimic an SRT timing line.
+
+    SRT has no escaping mechanism, so the arrow is substituted with the
+    visually equivalent ``→``.
+    """
+    return text.replace("-->", "→")
+
+
 def collapse_newlines(text: str) -> str:
     """Collapse any embedded line breaks into single spaces.
 

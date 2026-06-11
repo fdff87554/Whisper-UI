@@ -35,3 +35,16 @@ def test_vtt_collapses_newlines_in_text_to_keep_cue_single_line():
     lines = VttExporter().export(result).decode("utf-8").split("\n")
 
     assert lines == ["WEBVTT", "", "00:00:00.000 --> 00:00:01.500", "<v SPEAKER_00>line one line two", ""]
+
+
+def test_vtt_escapes_structural_characters_in_cue_text():
+    # "&" and "<" are reserved in VTT cue text and a literal "-->" would be
+    # parsed as a timing line; all must come back escaped while the voice tag
+    # itself stays real markup.
+    result = TranscriptResult(
+        segments=[Segment(start=0.0, end=1.0, text="a < b & c --> d", speaker="SPEAKER_00")],
+    )
+    data = VttExporter().export(result).decode("utf-8")
+
+    cue_line = data.split("\n")[3]
+    assert cue_line == "<v SPEAKER_00>a &lt; b &amp; c --&gt; d"
