@@ -255,10 +255,6 @@ class RedisProgressReporter:
         self._complete_script = redis.register_script(_PROGRESS_COMPLETE_LUA)
         self._fail_script = redis.register_script(_PROGRESS_FAIL_LUA)
 
-    @property
-    def generation(self) -> int | None:
-        return self._generation
-
     def _caller_gen_arg(self) -> int:
         """Translate the optional generation into the Lua sentinel encoding.
 

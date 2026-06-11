@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from whisper_ui.core.models import TranscriptResult
 
 
-@runtime_checkable
 class Exporter(Protocol):
     @property
     def format_name(self) -> str: ...

@@ -10,7 +10,7 @@ from fastapi.templating import Jinja2Templates
 from redis import Redis
 
 from whisper_ui.core.config import Settings
-from whisper_ui.core.constants import JOB_ID_DISPLAY_LENGTH, MAX_BATCH_SIZE, TIMESTAMP_DISPLAY_LENGTH
+from whisper_ui.core.constants import MAX_BATCH_SIZE, TIMESTAMP_DISPLAY_LENGTH
 from whisper_ui.storage.database import JobDatabase
 from whisper_ui.storage.filestore import FileStore
 from whisper_ui.web.flash import consume_flash
@@ -72,7 +72,6 @@ def _format_relative_time(iso_str: str) -> str:
 
 templates.env.filters["format_time"] = _format_time
 templates.env.filters["relative_time"] = _format_relative_time
-templates.env.globals["JOB_ID_DISPLAY_LENGTH"] = JOB_ID_DISPLAY_LENGTH
 templates.env.globals["TIMESTAMP_DISPLAY_LENGTH"] = TIMESTAMP_DISPLAY_LENGTH
 templates.env.globals["MAX_BATCH_SIZE"] = MAX_BATCH_SIZE
 # base.html consumes queued flash messages on full-page renders (see flash.py).

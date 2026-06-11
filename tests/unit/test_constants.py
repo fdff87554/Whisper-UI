@@ -6,7 +6,6 @@ from whisper_ui.core.constants import (
     ERROR_MAX_LENGTH,
     FFMPEG_CONVERT_TIMEOUT,
     FFPROBE_TIMEOUT,
-    JOB_ID_DISPLAY_LENGTH,
     MESSAGE_MAX_LENGTH,
     REDIS_COMPLETED_EXPIRY,
     REDIS_FAILED_EXPIRY,
@@ -22,7 +21,6 @@ def test_string_lengths_positive():
 
 
 def test_display_lengths_positive():
-    assert JOB_ID_DISPLAY_LENGTH > 0
     assert TIMESTAMP_DISPLAY_LENGTH > 0
 
 

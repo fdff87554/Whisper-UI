@@ -514,10 +514,7 @@ async def upload_url_submit(
     )
 
     # Even when every enqueue failed we fall through to the /jobs redirect so
-    # the per-URL FAILED rows we just inserted are visible to the user. The
-    # "/upload?error=queue" fragment is reserved for the case above where the
-    # Queue itself could not be constructed — that happens before any job is
-    # persisted, so there is nothing to show on /jobs.
+    # the per-URL FAILED rows we just inserted are visible to the user.
 
     message, category = _build_upload_toast(
         submitted_count,
