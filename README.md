@@ -1,7 +1,7 @@
 # Whisper-UI
 
 Speech-to-text system using [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
-(large-v3, INT8) with speaker diarization via
+(large-v3, int8_float16 on GPU) with speaker diarization via
 [pyannote-audio](https://github.com/pyannote/pyannote-audio),
 a [FastAPI](https://fastapi.tiangolo.com/) + [htmx](https://htmx.org/) + [Alpine.js](https://alpinejs.dev/) web interface,
 and Docker deployment (NVIDIA GPU / CPU / AMD ROCm).
@@ -96,9 +96,10 @@ docker compose --profile rocm up -d
 ```
 
 The first run compiles whisper.cpp for the target GPU arch and downloads the
-GGML model (`ggml-large-v3.bin`), so allow extra time. On gfx1151 the worker
-disables the MIOpen backend (falls back to native HIP kernels) to avoid a known
-`miopenStatusUnknownError` in pyannote's segmentation model.
+GGML model (`ggml-large-v3.bin`), so allow extra time. On every `DEVICE=rocm`
+worker the MIOpen backend is disabled (native HIP kernels are used instead) to
+avoid a known `miopenStatusUnknownError` in pyannote's segmentation model,
+first observed on gfx1151.
 
 The whisper.cpp backend ships with hallucination guards enabled: Silero VAD
 pre-segmentation skips non-speech (silence / music that otherwise produces
@@ -141,7 +142,7 @@ Pre-built Docker images are published to GHCR on each release.
 **Pin a specific version** by setting `WHISPER_UI_VERSION` in your `.env` file:
 
 ```bash
-WHISPER_UI_VERSION=1.3.0
+WHISPER_UI_VERSION=2.13.0
 ```
 
 **Build locally** instead of pulling (optional):
@@ -498,9 +499,10 @@ The worker container starts via `python -m whisper_ui.worker`, which
 calls `setup_logging()` before delegating to RQ so the dictConfig (and
 the RQ-noise suppression) applies inside the worker process.
 
-**Log rotation.** Every service in `compose.yml` pins
+**Log rotation.** Every long-running service in `compose.yml` pins
 `logging.driver=json-file` with `max-size: 20m` and `max-file: 5`
-(100 MB per container). Larger deployments should plug a centralised
+(100 MB per container); the two one-shot init sidecars (`volume-init`,
+`ollama-pull`) are exempt — they emit a handful of lines and exit. Larger deployments should plug a centralised
 driver (Loki, Splunk, Datadog) via a compose override; the file-driver
 ceiling is sized for small-office deployments only.
 
@@ -563,14 +565,14 @@ uv run uvicorn whisper_ui.web.app:app --reload --reload-dir=src
 
 ## Tech Stack
 
-| Component           | Technology                                   |
-| ------------------- | -------------------------------------------- |
-| STT Engine          | faster-whisper large-v3 (INT8) via WhisperX  |
-| Speaker Diarization | pyannote-audio (optional, requires HF token) |
-| Task Queue          | RQ + Redis                                   |
-| Frontend            | FastAPI + htmx + Alpine.js                   |
-| Storage             | SQLite + local filesystem                    |
-| Containerization    | Docker Compose (NVIDIA GPU / CPU / AMD ROCm) |
+| Component           | Technology                                                      |
+| ------------------- | --------------------------------------------------------------- |
+| STT Engine          | faster-whisper large-v3 via WhisperX; whisper.cpp (HIP) on ROCm |
+| Speaker Diarization | pyannote-audio (optional, requires HF token)                    |
+| Task Queue          | RQ + Redis                                                      |
+| Frontend            | FastAPI + htmx + Alpine.js                                      |
+| Storage             | SQLite + local filesystem                                       |
+| Containerization    | Docker Compose (NVIDIA GPU / CPU / AMD ROCm)                    |
 
 ## Project Structure
 
@@ -609,10 +611,11 @@ ui                          <- web
   - [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0)
 - Diarization is optional; transcription works without it
 
-### CPU mode fails with compute type error
+### CPU run logs a compute type warning
 
-- Use `COMPUTE_TYPE=int8` or `COMPUTE_TYPE=auto` for CPU
-- `int8_float16` and `float16` require a GPU
+- `int8_float16` and `float16` need a GPU; on CPU the worker automatically
+  downgrades them to `int8` and logs a WARNING — the job still runs
+- Set `COMPUTE_TYPE=int8` explicitly to silence the warning
 
 ### Redis connection error
 
