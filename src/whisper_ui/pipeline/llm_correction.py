@@ -167,13 +167,15 @@ class LLMCorrectionStage:
         # correction. Running it on other languages would feed a Chinese
         # instruction to a model looking at English (or other) text, with
         # unpredictable results. Skip entirely for non-zh transcripts rather
-        # than silently producing garbage. The upload form's help text also
-        # tells users this is Chinese-only.
-        if context.get("language") != "zh":
+        # than silently producing garbage. The gate reads the *detected*
+        # language carried by the transcript (resolved by postprocess) rather
+        # than the job's configured language, so ``language=auto`` jobs are
+        # corrected when detection lands on zh and skipped otherwise.
+        if not isinstance(transcript, TranscriptResult) or transcript.language != "zh":
             if on_progress:
                 on_progress(1.0, LLM_CORRECTION_SKIPPED)
             return context
-        if not self._base_url or not isinstance(transcript, TranscriptResult) or not transcript.segments:
+        if not self._base_url or not transcript.segments:
             if on_progress:
                 on_progress(1.0, LLM_CORRECTION_SKIPPED)
             return context

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
 from whisper_ui.pipeline.postprocess import PostprocessStage
 
 
@@ -37,6 +39,40 @@ def test_postprocess_skips_conversion_for_non_zh():
     context = {"final_result": raw, "language": "en", "duration": 1.0}
     result = stage.execute(context)
     assert result["transcript_result"].segments[0].text == "Hello world"
+
+
+def test_postprocess_prefers_detected_language_over_context():
+    """With language=auto the context holds the sentinel; the language the
+    model actually detected (carried by the transcription result) must win.
+    """
+    stage = PostprocessStage()
+    raw = {"language": "en", "segments": [{"start": 0.0, "end": 1.0, "text": "Hello"}]}
+    context = {"transcription_result": raw, "language": "auto", "duration": 1.0}
+    result = stage.execute(context)
+    assert result["transcript_result"].language == "en"
+
+
+def test_postprocess_converts_chinese_when_detected_language_is_zh():
+    """The s2t gate must fire on the detected language, not the auto sentinel."""
+    stage = PostprocessStage(convert_to_traditional=True)
+    raw = {"language": "zh", "segments": [{"start": 0.0, "end": 1.0, "text": "简体中文"}]}
+    context = {"transcription_result": raw, "language": "auto", "duration": 1.0}
+    mock_opencc = MagicMock()
+    mock_opencc.OpenCC.return_value.convert.side_effect = lambda text: f"[t]{text}"
+    with patch.dict("sys.modules", {"opencc": mock_opencc}):
+        result = stage.execute(context)
+    assert result["transcript_result"].segments[0].text == "[t]简体中文"
+
+
+def test_postprocess_falls_back_to_context_language_when_undetected():
+    """whisperx's align/assign outputs drop the language key; a final_result
+    without one must fall back to the job's configured language.
+    """
+    stage = PostprocessStage()
+    raw = {"segments": [{"start": 0.0, "end": 1.0, "text": "你好"}]}
+    context = {"final_result": raw, "language": "zh", "duration": 1.0}
+    result = stage.execute(context)
+    assert result["transcript_result"].language == "zh"
 
 
 def test_postprocess_name():

@@ -12,6 +12,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _resolve_language(context: dict[str, Any]) -> str:
+    """Return the transcript's language, preferring what the model detected.
+
+    Only the transcription result carries the detected code (whisperx's
+    align/assign outputs drop the ``language`` key), so walk the result chain
+    most-processed-first and fall back to the job's configured language. With
+    ``language=auto`` the context value is the sentinel itself, which must
+    never reach the s2t conversion gate or the persisted transcript.
+    """
+    for key in ("final_result", "aligned_result", "transcription_result"):
+        raw = context.get(key)
+        if isinstance(raw, dict) and raw.get("language"):
+            return raw["language"]
+    return context.get("language", "zh")
+
+
 class PostprocessStage:
     """Convert WhisperX-style segments into a :class:`TranscriptResult`.
 
@@ -42,13 +58,14 @@ class PostprocessStage:
             return context
 
         segments = self._build_segments(raw)
+        language = _resolve_language(context)
 
-        if self._convert_to_traditional and context.get("language") == "zh":
+        if self._convert_to_traditional and language == "zh":
             segments = self._convert_chinese(segments)
 
         result = TranscriptResult(
             segments=segments,
-            language=context.get("language", "zh"),
+            language=language,
             duration=context.get("duration", 0.0),
         )
 

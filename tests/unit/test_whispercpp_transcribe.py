@@ -166,6 +166,22 @@ class TestCliFlags:
         cmd = self._run_and_capture(WhisperCppTranscribeStage(max_context=-1))
         assert "-mc" not in cmd
 
+    def test_auto_language_passes_through_to_cli(self):
+        calls: list[list[str]] = []
+        payload = {"result": {"language": "en"}, "transcription": []}
+        mock_whisperx = MagicMock()
+        stage = WhisperCppTranscribeStage()
+        with (
+            _patched_model_paths(),
+            patch(f"{_MODULE}.subprocess.run", side_effect=_fake_cli_writer(payload, calls)),
+            patch.dict("sys.modules", {"whisperx": mock_whisperx}),
+        ):
+            ctx = stage.execute({"audio_path": "/tmp/a.wav", "language": "auto"})
+        cmd = calls[0]
+        assert cmd[cmd.index("-l") + 1] == "auto"
+        # The detected language reported by whisper.cpp flows into the result.
+        assert ctx["transcription_result"]["language"] == "en"
+
     def test_vad_resolution_failure_fails_the_stage(self):
         stage = WhisperCppTranscribeStage()
         with (

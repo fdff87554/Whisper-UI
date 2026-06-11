@@ -11,7 +11,7 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 
 from whisper_ui.core.constants import DEFAULT_JOBS_PER_PAGE
-from whisper_ui.core.languages import DEFAULT_WHISPER_MODEL, SUPPORTED_LANGUAGES, WHISPER_MODELS
+from whisper_ui.core.languages import DEFAULT_WHISPER_MODEL, LANGUAGE_CHOICES, WHISPER_MODELS
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.pipeline.audio_probe import get_audio_duration_seconds
 from whisper_ui.ui import labels as ui_labels
@@ -118,7 +118,7 @@ async def jobs_page(
     ctx["active_page"] = "jobs"
     # The re-transcribe modal (full page only, not the /jobs/list fragment)
     # reuses the upload form's option choices.
-    ctx["supported_languages"] = SUPPORTED_LANGUAGES
+    ctx["supported_languages"] = LANGUAGE_CHOICES
     ctx["whisper_models"] = WHISPER_MODELS
     # Pass only the derived availability flags the template needs, not the
     # whole Settings object, so a future sensitive field can never leak into
@@ -375,7 +375,7 @@ async def re_transcribe_job(
     if src is None or src.status != JobStatus.COMPLETED:
         return Response(status_code=404)
 
-    if language not in SUPPORTED_LANGUAGES:
+    if language not in LANGUAGE_CHOICES:
         return HTMLResponse(ui_labels.UPLOAD_INVALID_LANGUAGE.format(value=language), status_code=400)
     if model_name not in WHISPER_MODELS:
         return HTMLResponse(ui_labels.UPLOAD_INVALID_MODEL.format(value=model_name), status_code=400)

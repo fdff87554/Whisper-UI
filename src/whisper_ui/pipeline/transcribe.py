@@ -9,7 +9,7 @@ from rq.timeouts import BaseTimeoutException
 
 from whisper_ui.core.device import release_gpu_memory
 from whisper_ui.core.exceptions import TranscriptionError
-from whisper_ui.core.languages import DEFAULT_WHISPER_MODEL
+from whisper_ui.core.languages import AUTO_LANGUAGE, DEFAULT_WHISPER_MODEL
 from whisper_ui.core.messages import TRANSCRIBE_DONE, TRANSCRIBE_LOADING, TRANSCRIBE_RUNNING
 
 if TYPE_CHECKING:
@@ -40,6 +40,9 @@ class TranscribeStage:
     def execute(self, context: dict[str, Any], on_progress: ProgressCallback | None = None) -> dict[str, Any]:
         audio_path = context["audio_path"]
         language = context.get("language", "zh")
+        # whisperx treats language=None as "detect from the first 30 s of
+        # audio"; the detected code is reported in the result's ``language``.
+        whisper_language = None if language == AUTO_LANGUAGE else language
         batch_size = context.get("batch_size", 4)
 
         if on_progress:
@@ -52,7 +55,7 @@ class TranscribeStage:
                 self._model_name,
                 device=self._device,
                 compute_type=self._compute_type,
-                language=language,
+                language=whisper_language,
             )
 
             if on_progress:
@@ -60,7 +63,7 @@ class TranscribeStage:
 
             audio = whisperx.load_audio(audio_path)
 
-            transcribe_kwargs: dict[str, Any] = {"batch_size": batch_size, "language": language}
+            transcribe_kwargs: dict[str, Any] = {"batch_size": batch_size, "language": whisper_language}
             if on_progress is not None and _supports_progress_callback(self._model.transcribe):
                 transcribe_kwargs["progress_callback"] = _build_whisperx_progress_callback(on_progress)
 
