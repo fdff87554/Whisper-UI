@@ -517,7 +517,7 @@ async def retry_batch(
         except Exception:
             logger.exception("Failed to retry job %s", job.id)
             job.status = JobStatus.FAILED
-            job.error = "Failed to enqueue retry"
+            job.error = ui_labels.UPLOAD_ENQUEUE_FAILED
             db.update_job(job)
 
     logger.info(

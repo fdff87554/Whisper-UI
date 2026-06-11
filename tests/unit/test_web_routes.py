@@ -1852,6 +1852,21 @@ class TestBatchRoutes:
         mock_enqueue.assert_called_once()
         assert mock_enqueue.call_args[0][0].duration is None
 
+    def test_retry_batch_enqueue_failure_uses_shared_label(self, client, db):
+        # All three retry paths must surface the same localized message;
+        # this one previously hardcoded an English string.
+        from whisper_ui.ui import labels as ui_labels
+
+        batch_id = "e" * 32
+        job = Job(filename="boom.mp3", status=JobStatus.FAILED, error="err", batch_id=batch_id)
+        db.insert_job(job)
+        with patch("whisper_ui.web.routes.jobs.enqueue_pipeline", side_effect=RuntimeError("redis down")):
+            resp = client.post(f"/jobs/batch/{batch_id}/retry")
+        assert resp.status_code == 204
+        refreshed = db.get_job(job.id)
+        assert refreshed.status == JobStatus.FAILED
+        assert refreshed.error == ui_labels.UPLOAD_ENQUEUE_FAILED
+
     def test_delete_batch(self, client, db, filestore):
         batch_id = "c" * 32
         jobs = self._create_batch(db, filestore, batch_id=batch_id)
