@@ -269,6 +269,19 @@ class TestAlignStage:
         ):
             stage.execute({"transcription_result": {"segments": []}, "whisperx_audio": "audio"})
 
+    def test_missing_context_keys_fail_fast_not_degrade(self):
+        """A broken context contract (missing transcription_result /
+        whisperx_audio) is an upstream bug and must raise, not be disguised
+        as an alignment failure that degrades to the unaligned result."""
+        stage = AlignStage(device="cpu")
+        mock_whisperx = MagicMock()
+
+        with patch.dict("sys.modules", {"whisperx": mock_whisperx}):
+            with pytest.raises(KeyError):
+                stage.execute({"whisperx_audio": "audio"})
+            with pytest.raises(KeyError):
+                stage.execute({"transcription_result": {"segments": [], "language": "zh"}})
+
     def test_alignment_failure_falls_back_to_transcription_result(self):
         """An align failure must keep speaker assignment possible: the
         unaligned transcription becomes the aligned_result so assign_speakers
