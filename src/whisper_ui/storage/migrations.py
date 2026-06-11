@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     batch_title TEXT,
     source_url TEXT,
     owner_id INTEGER,
-    source_job_id TEXT
+    source_job_id TEXT,
+    quality_warning TEXT
 );
 
 CREATE TABLE IF NOT EXISTS users (
@@ -73,6 +74,9 @@ _MIGRATIONS: list[str] = [
     # Denormalized batch display name (e.g. an expanded playlist's title).
     # Nullable: file-upload batches and pre-existing rows have none.
     "ALTER TABLE jobs ADD COLUMN batch_title TEXT",
+    # Quality-gate warning for completed-but-degenerate transcripts
+    # (hallucination loops). Nullable: clean jobs never set it.
+    "ALTER TABLE jobs ADD COLUMN quality_warning TEXT",
 ]
 
 

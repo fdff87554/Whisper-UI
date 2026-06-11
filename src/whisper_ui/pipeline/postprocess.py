@@ -1,15 +1,37 @@
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from typing import TYPE_CHECKING, Any
 
-from whisper_ui.core.messages import POSTPROCESS_DONE, POSTPROCESS_EMPTY, POSTPROCESS_RUNNING
+from whisper_ui.core.constants import QUALITY_GATE_MIN_SEGMENTS, QUALITY_GATE_REPEAT_RATIO
+from whisper_ui.core.messages import (
+    POSTPROCESS_DONE,
+    POSTPROCESS_EMPTY,
+    POSTPROCESS_RUNNING,
+    QUALITY_WARNING_REPETITIVE,
+)
 from whisper_ui.core.models import Segment, TranscriptResult
 
 if TYPE_CHECKING:
     from whisper_ui.pipeline.base import ProgressCallback
 
 logger = logging.getLogger(__name__)
+
+
+def _top_repeat_stats(segments: list[Segment]) -> tuple[int, float]:
+    """Return (non-empty segment count, share of the most frequent text).
+
+    Texts are normalized with strip+casefold so trivially-different repeats
+    still count as one; empty texts are excluded entirely — silence yielding
+    nothing is not a hallucination.
+    """
+    texts = [s.text.strip().casefold() for s in segments]
+    texts = [t for t in texts if t]
+    if not texts:
+        return 0, 0.0
+    top_count = Counter(texts).most_common(1)[0][1]
+    return len(texts), top_count / len(texts)
 
 
 def _resolve_language(context: dict[str, Any]) -> str:
@@ -68,6 +90,23 @@ class PostprocessStage:
             language=language,
             duration=context.get("duration", 0.0),
         )
+
+        total, repeat_ratio = _top_repeat_stats(segments)
+        if total >= QUALITY_GATE_MIN_SEGMENTS and repeat_ratio >= QUALITY_GATE_REPEAT_RATIO:
+            percent = round(repeat_ratio * 100)
+            context["quality_warning"] = QUALITY_WARNING_REPETITIVE.format(percent=percent, total=total)
+            logger.warning(
+                "quality gate tripped for job %s: %d%% of %d segments share one text",
+                context.get("parent_job_id"),
+                percent,
+                total,
+                extra={
+                    "event": "quality_gate_tripped",
+                    "job_id": context.get("parent_job_id"),
+                    "repeat_ratio": round(repeat_ratio, 4),
+                    "segments": total,
+                },
+            )
 
         if on_progress:
             on_progress(1.0, POSTPROCESS_DONE)

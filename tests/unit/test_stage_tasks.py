@@ -244,6 +244,25 @@ def test_run_postprocess_persists_transcript_result(monkeypatch):
 
     stored = PipelineContextStore(fake_redis, "job-p").load()
     assert stored["transcript_result"] == {"segments": [], "language": "zh"}
+    # The stage did not flag quality; no stale key may appear in the store.
+    assert "quality_warning" not in stored
+
+
+def test_run_postprocess_persists_quality_warning_when_flagged(monkeypatch):
+    fake_redis = fakeredis.FakeRedis()
+    job = Job(id="job-qw", status=JobStatus.PROCESSING, convert_to_traditional=False)
+    _install_fake_runtime(monkeypatch, fake_redis, job)
+
+    PipelineContextStore(fake_redis, "job-qw").initialize({"final_result": {"segments": []}})
+
+    fake_stage = _RecordingStage(
+        {"transcript_result": {"segments": [], "language": "zh"}, "quality_warning": "轉錄結果異常"}
+    )
+    with patch("whisper_ui.worker.stage_tasks.PostprocessStage", return_value=fake_stage):
+        run_postprocess("job-qw")
+
+    stored = PipelineContextStore(fake_redis, "job-qw").load()
+    assert stored["quality_warning"] == "轉錄結果異常"
 
 
 def test_stage_task_transitions_queued_parent_job_to_processing(monkeypatch):

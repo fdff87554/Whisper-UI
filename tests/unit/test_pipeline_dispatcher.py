@@ -537,6 +537,50 @@ def test_finalize_success_marks_job_completed(monkeypatch, tmp_path):
     assert stored["result_path"] == str(tmp_path / "result.json")
     assert not preprocessed.exists(), "preprocessed WAV should be cleaned up"
     assert PipelineContextStore(redis, job.id).load() == {}
+    # Clean run: any warning left over from a previous degenerate attempt is
+    # cleared by the unconditional assignment.
+    assert job.quality_warning is None
+
+
+def test_finalize_success_persists_quality_warning(monkeypatch, tmp_path):
+    from whisper_ui.core.models import TranscriptResult
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    job = Job(
+        id="job-warned",
+        filename="m.mp3",
+        filepath=str(tmp_path / "m.mp3"),
+        status=JobStatus.PROCESSING,
+    )
+
+    transcript = TranscriptResult(language="zh", duration=42.0)
+    PipelineContextStore(redis, job.id).initialize({"transcript_result": transcript, "quality_warning": "轉錄結果異常"})
+
+    runtime = MagicMock()
+    runtime.redis = redis
+    runtime.db.get_job.return_value = job
+    runtime.filestore.save_result.return_value = tmp_path / "result.json"
+    runtime.settings.redis_processing_expiry = 7200
+
+    from contextlib import contextmanager
+
+    from whisper_ui.worker.progress import RedisProgressReporter
+
+    @contextmanager
+    def _fake_builder(job_id, *, generation=None):
+        runtime.reporter = RedisProgressReporter(redis, job_id, processing_ttl=7200, generation=generation)
+        yield runtime
+
+    monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
+
+    fake_rq_job = MagicMock()
+    fake_rq_job.meta = {"parent_job_id": job.id}
+
+    pd.finalize_success(fake_rq_job, redis, None)
+
+    assert job.status == JobStatus.COMPLETED
+    assert job.quality_warning == "轉錄結果異常"
 
 
 def test_finalize_success_completes_even_if_cleanup_raises(monkeypatch, tmp_path):

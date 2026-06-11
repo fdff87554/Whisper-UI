@@ -39,6 +39,14 @@ def test_legacy_job_without_owner_id_is_stored_as_null(db: JobDatabase):
     assert fetched.owner_id is None
 
 
+def test_insert_and_get_preserves_quality_warning(db: JobDatabase):
+    job = Job(filename="noisy.mp3", filepath="/tmp/noisy.mp3", quality_warning="轉錄結果異常")
+    db.insert_job(job)
+    fetched = db.get_job(job.id)
+    assert fetched is not None
+    assert fetched.quality_warning == "轉錄結果異常"
+
+
 def test_get_nonexistent(db: JobDatabase):
     assert db.get_job("nonexistent") is None
 
@@ -375,6 +383,12 @@ def test_legacy_db_without_llm_column_upgrades(tmp_dir: Path):
         assert fetched is not None
         assert fetched.filename == "old.mp3"
         assert fetched.llm_correction_enabled is False
+        # The same migration pass also adds quality_warning; legacy rows
+        # surface it as None and updates can persist a value afterwards.
+        assert fetched.quality_warning is None
+        fetched.quality_warning = "轉錄結果異常"
+        database.update_job(fetched)
+        assert database.get_job("legacy-1").quality_warning == "轉錄結果異常"
     finally:
         database.close()
 

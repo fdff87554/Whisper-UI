@@ -45,6 +45,15 @@ MAX_BATCH_SIZE = 100
 # export TXT instead.
 VIEWER_SEARCH_SEGMENT_LIMIT = 2000
 
+# Transcript quality gate (pipeline/postprocess.py). A degenerate Whisper
+# output — a hallucination loop over silence — shows up as one normalized
+# segment text dominating the transcript (observed incidents sat at 98%+).
+# 50% of 20+ segments is far beyond anything real speech produces while
+# still catching partial collapses; tripping the gate only adds a warning
+# and skips LLM correction, so a false positive costs little.
+QUALITY_GATE_MIN_SEGMENTS = 20
+QUALITY_GATE_REPEAT_RATIO = 0.5
+
 # yt-dlp
 YT_DLP_SOCKET_TIMEOUT = 30
 

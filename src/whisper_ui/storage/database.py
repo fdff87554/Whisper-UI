@@ -51,6 +51,7 @@ _JOB_COLUMNS = [
     "source_url",
     "owner_id",
     "source_job_id",
+    "quality_warning",
 ]
 
 

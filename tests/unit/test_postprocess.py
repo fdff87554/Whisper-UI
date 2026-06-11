@@ -75,5 +75,54 @@ def test_postprocess_falls_back_to_context_language_when_undetected():
     assert result["transcript_result"].language == "zh"
 
 
+def _raw_with_texts(texts: list[str]) -> dict:
+    return {"segments": [{"start": float(i), "end": float(i + 1), "text": t} for i, t in enumerate(texts)]}
+
+
+def test_quality_gate_flags_repetitive_transcript():
+    stage = PostprocessStage()
+    context = {
+        "final_result": _raw_with_texts(["歡迎訂閱"] * 28 + ["真實內容", "另一句"]),
+        "language": "zh",
+        "duration": 30.0,
+        "parent_job_id": "job-q",
+    }
+    result = stage.execute(context)
+    warning = result["quality_warning"]
+    assert "93%" in warning
+    assert "30" in warning
+
+
+def test_quality_gate_skips_normal_transcript():
+    stage = PostprocessStage()
+    texts = [f"第 {i} 句不同的內容" for i in range(30)]
+    result = stage.execute({"final_result": _raw_with_texts(texts), "language": "zh", "duration": 30.0})
+    assert "quality_warning" not in result
+
+
+def test_quality_gate_skips_short_transcripts():
+    """Below the minimum segment count even 100% repetition is not flagged:
+    short clips legitimately produce few, similar segments."""
+    stage = PostprocessStage()
+    result = stage.execute({"final_result": _raw_with_texts(["同一句"] * 19), "language": "zh", "duration": 19.0})
+    assert "quality_warning" not in result
+
+
+def test_quality_gate_skips_ratio_below_threshold():
+    texts = ["重複的句子"] * 49 + [f"獨特內容 {i}" for i in range(51)]
+    stage = PostprocessStage()
+    result = stage.execute({"final_result": _raw_with_texts(texts), "language": "zh", "duration": 100.0})
+    assert "quality_warning" not in result
+
+
+def test_quality_gate_ignores_empty_segment_texts():
+    """Empty texts are not hallucinations; they must not count toward either
+    side of the ratio. 25 empties + 19 identical stays under MIN_SEGMENTS."""
+    stage = PostprocessStage()
+    texts = ["   "] * 25 + ["同一句"] * 19
+    result = stage.execute({"final_result": _raw_with_texts(texts), "language": "zh", "duration": 44.0})
+    assert "quality_warning" not in result
+
+
 def test_postprocess_name():
     assert PostprocessStage().name == "postprocess"

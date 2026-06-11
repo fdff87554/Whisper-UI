@@ -73,6 +73,10 @@ class Job:
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     error: str | None = None
+    # Localized warning set when the transcript passed the pipeline but the
+    # quality gate judged it degenerate (e.g. a hallucination loop). The job
+    # still completes; UI surfaces render this next to the COMPLETED badge.
+    quality_warning: str | None = None
     result_path: str | None = None
     duration: float | None = None
     batch_id: str | None = None

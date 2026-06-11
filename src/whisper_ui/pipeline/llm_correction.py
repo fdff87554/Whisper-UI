@@ -163,6 +163,13 @@ class LLMCorrectionStage:
         on_progress: ProgressCallback | None = None,
     ) -> dict[str, Any]:
         transcript = context.get("transcript_result")
+        # A transcript the quality gate flagged as degenerate (hallucination
+        # loop) is not worth correcting: the observed incident burned hours of
+        # LLM time "fixing" 1,600 copies of the same hallucinated line.
+        if context.get("quality_warning"):
+            if on_progress:
+                on_progress(1.0, LLM_CORRECTION_SKIPPED)
+            return context
         # The system prompt is crafted for Traditional Chinese typo / homophone
         # correction. Running it on other languages would feed a Chinese
         # instruction to a model looking at English (or other) text, with

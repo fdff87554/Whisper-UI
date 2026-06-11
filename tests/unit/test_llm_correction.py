@@ -151,6 +151,23 @@ def test_stage_runs_for_zh_transcript_when_context_language_is_auto():
     assert client.calls != []
 
 
+def test_stage_skipped_when_quality_gate_flagged_transcript():
+    """Correcting a degenerate (hallucination-loop) transcript wastes hours of
+    LLM time on garbage; the quality warning must short-circuit the stage."""
+    stage, client = _make_stage()
+    transcript = _make_transcript(["歡迎訂閱", "歡迎訂閱"])
+    progress, on_progress = _capture_progress()
+
+    result = stage.execute(
+        {"transcript_result": transcript, "language": "zh", "quality_warning": "轉錄結果異常"},
+        on_progress,
+    )
+
+    assert client.calls == []
+    assert [s.text for s in result["transcript_result"].segments] == ["歡迎訂閱", "歡迎訂閱"]
+    assert progress[-1] == (1.0, LLM_CORRECTION_SKIPPED)
+
+
 def test_stage_skipped_when_transcript_missing():
     stage, client = _make_stage()
     progress, on_progress = _capture_progress()

@@ -497,7 +497,7 @@ def run_postprocess(parent_job_id: str) -> str:
         build_stage=lambda job, runtime: PostprocessStage(
             convert_to_traditional=job.convert_to_traditional,
         ),
-        output_keys=("transcript_result",),
+        output_keys=("transcript_result", "quality_warning"),
     )
 
 
