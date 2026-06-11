@@ -20,7 +20,10 @@ RUN mkdir -p src/whisper_ui && touch src/whisper_ui/__init__.py
 # pulling in CUDA torch, then remaining worker dependencies. The worker-llm
 # extra adds httpx for the optional Ollama-backed correction stage; the
 # stage is still gated by OLLAMA_BASE_URL at runtime.
-RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
+# torch is pinned to the same minor as the GPU (base image) and ROCm
+# (explicit wheel) workers: whisperx is installed with --no-deps below, so
+# nothing else guards its torch~=2.8.0 compatibility assumption here.
+RUN pip install --no-cache-dir "torch==2.10.*" "torchaudio==2.10.*" --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir --no-deps "whisperx>=3.8,<3.9" && \
     pip install --no-cache-dir ".[worker,worker-llm]"
 
