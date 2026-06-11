@@ -11,7 +11,7 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from markupsafe import escape
 
-from whisper_ui.core.constants import DEFAULT_JOBS_PER_PAGE
+from whisper_ui.core.constants import DEFAULT_JOBS_PER_PAGE, MAX_BULK_ACTION_IDS
 from whisper_ui.core.languages import DEFAULT_WHISPER_MODEL, LANGUAGE_CHOICES, WHISPER_MODELS
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.pipeline.audio_probe import get_audio_duration_seconds
@@ -223,6 +223,8 @@ async def bulk_job_action(
     job_ids = _parse_bulk_job_ids(job_ids_raw)
     if not job_ids:
         raise HTTPException(status_code=400, detail="No job ids provided")
+    if len(job_ids) > MAX_BULK_ACTION_IDS:
+        raise HTTPException(status_code=400, detail="Too many job ids")
     for job_id in job_ids:
         validate_hex_id(job_id, "job_id")
 

@@ -39,6 +39,12 @@ STALE_JOB_CHECK_INTERVAL = 60  # seconds
 # stale reaper spares queued work and re-arms its state TTL while it waits).
 MAX_BATCH_SIZE = 100
 
+# Upper bound on ids per bulk job action (retry / delete / export). The UI
+# selects at most a page of jobs at a time, so this is far above any
+# legitimate selection — it only stops a hand-crafted request from tying up
+# the event loop in the per-job processing loop.
+MAX_BULK_ACTION_IDS = 200
+
 # Viewer client-side search becomes O(n) per keystroke; very large transcripts
 # (multi-hour multi-speaker recordings) will lock up the browser tab. Above
 # this segment count the viewer disables the live filter and tells the user to

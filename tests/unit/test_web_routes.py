@@ -805,6 +805,15 @@ class TestJobsRoutes:
         assert db.get_job(completed.id) is None
         assert db.get_job(active.id) is not None
 
+    def test_bulk_action_rejects_oversized_id_list(self, client, db):
+        # A hand-crafted request must not tie up the event loop with an
+        # unbounded per-job loop; the UI never selects anywhere near this many.
+        from whisper_ui.core.constants import MAX_BULK_ACTION_IDS
+
+        ids = ",".join(f"{i:032x}" for i in range(MAX_BULK_ACTION_IDS + 1))
+        resp = client.post("/jobs/bulk/retry", data={"job_ids": ids})
+        assert resp.status_code == 400
+
     def test_bulk_action_rejects_unknown_action(self, client, db):
         failed = _create_failed_job(db)
 
