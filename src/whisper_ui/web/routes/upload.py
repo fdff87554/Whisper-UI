@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from markupsafe import escape
 
 from whisper_ui.core.constants import MAX_BATCH_SIZE
-from whisper_ui.core.languages import DEFAULT_WHISPER_MODEL, SUPPORTED_LANGUAGES, WHISPER_MODELS
+from whisper_ui.core.languages import DEFAULT_WHISPER_MODEL, LANGUAGE_CHOICES, WHISPER_MODELS
 from whisper_ui.core.models import Job, JobStatus
 from whisper_ui.pipeline.audio_probe import get_audio_duration_seconds
 from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS
@@ -153,7 +153,7 @@ async def upload_page(request: Request, settings: SettingsDep, user: CurrentUser
             "default_language": settings.language,
             "default_model": settings.whisper_model,
             "supported_extensions": sorted(SUPPORTED_EXTENSIONS),
-            "supported_languages": SUPPORTED_LANGUAGES,
+            "supported_languages": LANGUAGE_CHOICES,
             "whisper_models": WHISPER_MODELS,
             "initial_tab": initial_tab,
         },
@@ -186,7 +186,7 @@ async def upload_submit(
     htmx = _is_htmx(request)
 
     # Server-side validation of select inputs
-    if language not in SUPPORTED_LANGUAGES:
+    if language not in LANGUAGE_CHOICES:
         msg = ui_labels.UPLOAD_INVALID_LANGUAGE.format(value=language)
         return _error_redirect_or_fragment(request, f"/upload?error=invalid_language&value={quote(language)}", msg)
     if model_name not in WHISPER_MODELS:
@@ -349,7 +349,7 @@ async def upload_url_submit(
 ):
     htmx = _is_htmx(request)
 
-    if language not in SUPPORTED_LANGUAGES:
+    if language not in LANGUAGE_CHOICES:
         msg = ui_labels.UPLOAD_INVALID_LANGUAGE.format(value=language)
         return _error_redirect_or_fragment(request, f"/upload?error=invalid_language&value={quote(language)}", msg)
     if model_name not in WHISPER_MODELS:

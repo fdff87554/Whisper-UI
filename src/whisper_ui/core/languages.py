@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+# Sentinel for "let the model detect the language". Kept out of
+# SUPPORTED_LANGUAGES so consumers that treat that list as real ISO codes
+# (e.g. alignment-model lookups) never see it; user-facing forms offer
+# LANGUAGE_CHOICES instead.
+AUTO_LANGUAGE = "auto"
+
 SUPPORTED_LANGUAGES: list[str] = [
     "zh",
     "en",
@@ -39,7 +45,10 @@ SUPPORTED_LANGUAGES: list[str] = [
     "ta",
 ]
 
+LANGUAGE_CHOICES: list[str] = [AUTO_LANGUAGE, *SUPPORTED_LANGUAGES]
+
 LANGUAGE_LABELS: dict[str, str] = {
+    "auto": "自動偵測 Auto-detect (auto)",
     "zh": "中文 Chinese (zh)",
     "en": "English (en)",
     "ja": "日本語 Japanese (ja)",

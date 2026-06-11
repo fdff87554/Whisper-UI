@@ -48,6 +48,23 @@ class Settings(BaseSettings):
     # "whispercpp"). The GGML model is fetched lazily as ggml-<whisper_model>.bin.
     whispercpp_binary: str = "whisper-cli"
     whispercpp_threads: int = 0  # 0 -> whisper.cpp's own default
+    # VAD pre-segmentation for the whisper.cpp CLI. Without it, long
+    # silence/music stretches make the decoder hallucinate and the loop
+    # propagates through cross-window text conditioning (observed in
+    # production as entire transcripts collapsing to one repeated line).
+    # The whisperx backend gets the same protection from its built-in VAD.
+    whispercpp_vad: bool = True
+    # GGML Silero VAD model file, resolved like the main GGML model: a
+    # pre-baked copy under the model dir wins, else fetched from the
+    # ggml-org/whisper-vad HF repo and cached under HF_HOME. v5.1.2 is the
+    # newest model the pinned whisper.cpp (v1.8.0) ships download support
+    # for; bump together with WHISPER_CPP_REF in Dockerfile.worker.rocm.
+    whispercpp_vad_model: str = "ggml-silero-v5.1.2.bin"
+    # Maximum text-context tokens carried across 30 s decode windows
+    # (whisper-cli ``-mc``). 0 disables conditioning entirely — parity with
+    # the whisperx batched pipeline and the guard that stops a hallucination
+    # loop from spreading. -1 keeps whisper.cpp's own default.
+    whispercpp_max_context: int = 0
 
     # Language
     language: str = "zh"
@@ -172,6 +189,21 @@ class Settings(BaseSettings):
         if v_lower not in allowed:
             raise ValueError(f"transcribe_backend must be one of {sorted(allowed)}, got {v!r}")
         return v_lower
+
+    @field_validator("whispercpp_max_context")
+    @classmethod
+    def _validate_whispercpp_max_context(cls, v: int) -> int:
+        """whisper-cli accepts -1 (its own default) or a non-negative count."""
+        if v < -1:
+            raise ValueError(f"whispercpp_max_context must be >= -1, got {v}")
+        return v
+
+    @model_validator(mode="after")
+    def _validate_whispercpp_vad_model(self) -> Settings:
+        """VAD without a model file cannot work; fail at startup, not mid-job."""
+        if self.whispercpp_vad and not self.whispercpp_vad_model:
+            raise ValueError("whispercpp_vad_model must be set when whispercpp_vad is enabled")
+        return self
 
     @field_validator("ollama_base_url", mode="before")
     @classmethod

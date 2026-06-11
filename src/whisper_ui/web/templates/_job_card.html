@@ -127,3 +127,10 @@
 {% if job.status.value == 'failed' and job.error %}
 <p class="text-xs text-error mt-1">{{ labels.JOBS_ERROR.format(error=job.error[:200]) }}</p>
 {% endif %}
+
+{% if job.status.value == 'completed' and job.quality_warning %}
+<p class="text-xs text-warning mt-1">
+  <span class="badge badge-warning badge-xs align-middle">{{ labels.JOBS_QUALITY_WARNING_BADGE }}</span>
+  {{ job.quality_warning[:200] }}
+</p>
+{% endif %}

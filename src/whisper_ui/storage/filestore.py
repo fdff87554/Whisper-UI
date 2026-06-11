@@ -42,7 +42,7 @@ class FileStore:
         clear "please re-upload" error instead of enqueuing a doomed job.
         """
         src_path = self.get_upload_path(src_job_id, src_filename)
-        if not src_path.exists():
+        if not src_path.is_file():
             raise FileNotFoundError(f"source audio for job {src_job_id} not found at {src_path}")
         dest = self.prepare_upload_path(new_job_id, src_path.name)
         shutil.copy2(src_path, dest)
@@ -57,7 +57,7 @@ class FileStore:
 
     def load_result(self, job_id: str) -> TranscriptResult | None:
         path = self._output_dir / job_id / "result.json"
-        if not path.exists():
+        if not path.is_file():
             return None
         data = json.loads(path.read_text(encoding="utf-8"))
         return TranscriptResult.from_dict(data)
@@ -76,7 +76,8 @@ class FileStore:
         """
         job_dir = self._upload_dir / job_id
         for pattern in ("video.*", "audio.*"):
-            matches = list(job_dir.glob(pattern))
+            # glob also matches directories; only a regular file is media.
+            matches = [m for m in job_dir.glob(pattern) if m.is_file()]
             if matches:
                 return matches[0]
         return None

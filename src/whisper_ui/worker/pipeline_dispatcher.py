@@ -425,6 +425,9 @@ def _persist_completion(
             job.progress_message = progress_message
             job.result_path = str(result_path)
             job.duration = transcript_result.duration
+            # Unconditional: a retry that completes cleanly must clear any
+            # stale warning persisted by a previous degenerate attempt.
+            job.quality_warning = context.get("quality_warning")
             runtime.db.update_job(job)
         except Exception as exc:
             # Persisting the finished transcript failed (e.g. disk full writing

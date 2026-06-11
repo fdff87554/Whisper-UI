@@ -7,6 +7,7 @@ import pytest
 from whisper_ui.core.models import Segment, TranscriptResult
 
 if TYPE_CHECKING:
+    from whisper_ui.core.config import Settings
     from whisper_ui.storage.filestore import FileStore
 
 
@@ -41,6 +42,24 @@ def test_save_and_load_result(filestore: FileStore):
 
 def test_load_nonexistent_result(filestore: FileStore):
     assert filestore.load_result("nonexistent") is None
+
+
+def test_load_result_ignores_directory_named_result_json(filestore: FileStore, settings: Settings):
+    """A directory squatting on the result path means "no result", not a crash."""
+    (settings.output_dir / "jobdir" / "result.json").mkdir(parents=True)
+    assert filestore.load_result("jobdir") is None
+
+
+def test_get_source_media_path_finds_downloaded_video(filestore: FileStore):
+    path = filestore.save_upload("yt", "video.mp4", b"fake video bytes")
+    assert filestore.get_source_media_path("yt") == path
+
+
+def test_get_source_media_path_ignores_directory_matching_glob(filestore: FileStore):
+    """Path.glob also matches directories; a dir named video.* must not be
+    served as the downloaded media file."""
+    filestore.get_upload_path("yt", "video.mp4").mkdir(parents=True)
+    assert filestore.get_source_media_path("yt") is None
 
 
 def test_save_upload_sanitizes_path_traversal(filestore: FileStore):
@@ -150,6 +169,14 @@ def test_copy_source_for_new_job_independent_of_source_deletion(filestore: FileS
 def test_copy_source_for_new_job_raises_when_source_missing(filestore: FileStore):
     with pytest.raises(FileNotFoundError):
         filestore.copy_source_for_new_job("gone", "meeting.mp3", "version1")
+
+
+def test_copy_source_for_new_job_raises_when_source_is_directory(filestore: FileStore):
+    """A directory at the source-audio path is "audio missing", surfaced as the
+    same clear FileNotFoundError instead of an IsADirectoryError from copy2."""
+    filestore.get_upload_path("root", "meeting.mp3").mkdir(parents=True)
+    with pytest.raises(FileNotFoundError):
+        filestore.copy_source_for_new_job("root", "meeting.mp3", "version1")
 
 
 def test_delete_job_files_raises_on_filesystem_failure(filestore: FileStore, monkeypatch):

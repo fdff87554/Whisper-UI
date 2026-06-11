@@ -51,6 +51,20 @@ class TestTranscribeStage:
         assert "transcription_result" in result
         assert "whisperx_audio" in result
 
+    def test_auto_language_passes_none_to_whisperx(self):
+        """language=auto must reach whisperx as None so it runs detection."""
+        stage = TranscribeStage(model_name="base", compute_type="int8", device="cpu")
+        mock_whisperx = MagicMock()
+        mock_model = MagicMock(transcribe=MagicMock(return_value={"segments": [], "language": "en"}))
+        mock_whisperx.load_model.return_value = mock_model
+        mock_whisperx.load_audio.return_value = "audio_array"
+
+        with patch.dict("sys.modules", {"whisperx": mock_whisperx}):
+            stage.execute({"audio_path": "/tmp/test.wav", "language": "auto", "batch_size": 4})
+
+        assert mock_whisperx.load_model.call_args.kwargs["language"] is None
+        assert mock_model.transcribe.call_args.kwargs["language"] is None
+
     def test_progress_callback_called(self):
         stage = TranscribeStage(device="cpu")
         mock_whisperx = MagicMock()

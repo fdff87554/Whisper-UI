@@ -631,6 +631,20 @@ class TestJobsRoutes:
         assert original.status == JobStatus.COMPLETED
         assert original.result_path == src.result_path
 
+    def test_re_transcribe_accepts_auto_language(self, client, db, filestore):
+        src = _completed_upload_job_with_audio(db, filestore)
+        with (
+            patch("whisper_ui.web.routes.jobs.enqueue_pipeline") as mock_enqueue,
+            patch("whisper_ui.web.routes.jobs.get_audio_duration_seconds", return_value=42.0),
+        ):
+            resp = client.post(
+                f"/jobs/{src.id}/re-transcribe",
+                data={"language": "auto", "model_name": "large-v3"},
+            )
+
+        assert resp.status_code == 204
+        assert mock_enqueue.call_args[0][0].language == "auto"
+
     def test_re_transcribe_clamps_diarization_when_hf_token_absent(self, client, db, filestore, app):
         # Force no hf_token so a posted diarization flag must be clamped to
         # False (honest persisted flag, no no-op sub-job).
@@ -1241,6 +1255,14 @@ class TestUploadPost:
         location = resp.headers["location"]
         assert "error=invalid_language" in location
         assert "value=xx_invalid" in location
+
+    def test_upload_accepts_auto_language(self, client):
+        with patch("whisper_ui.web.routes.upload.enqueue_pipeline") as mock_enqueue:
+            resp = self._upload(client, language="auto")
+        assert resp.status_code == 303
+        assert "error" not in resp.headers["location"]
+        job = mock_enqueue.call_args[0][0]
+        assert job.language == "auto"
 
     def test_upload_invalid_model_redirects(self, client):
         resp = self._upload(client, model_name="nonexistent-model")

@@ -84,6 +84,9 @@ def _build_transcribe_stage(job: Job, runtime: WorkerRuntime, torch_device: str)
             binary=runtime.settings.whispercpp_binary,
             threads=runtime.settings.whispercpp_threads,
             device=runtime.settings.device,
+            vad=runtime.settings.whispercpp_vad,
+            vad_model=runtime.settings.whispercpp_vad_model,
+            max_context=runtime.settings.whispercpp_max_context,
         )
     return TranscribeStage(
         model_name=job.model_name,
@@ -494,7 +497,7 @@ def run_postprocess(parent_job_id: str) -> str:
         build_stage=lambda job, runtime: PostprocessStage(
             convert_to_traditional=job.convert_to_traditional,
         ),
-        output_keys=("transcript_result",),
+        output_keys=("transcript_result", "quality_warning"),
     )
 
 

@@ -59,12 +59,12 @@ class FakeOllamaClient:
         self.closed = True
 
 
-def _make_transcript(texts: list[str]) -> TranscriptResult:
+def _make_transcript(texts: list[str], language: str = "zh") -> TranscriptResult:
     return TranscriptResult(
         segments=[
             Segment(start=float(i), end=float(i + 1), text=text, speaker=f"SPK_{i % 2}") for i, text in enumerate(texts)
         ],
-        language="zh",
+        language=language,
         duration=float(len(texts)),
     )
 
@@ -112,12 +112,12 @@ def test_stage_skipped_when_base_url_empty():
     assert progress[-1] == (1.0, LLM_CORRECTION_SKIPPED)
 
 
-def test_stage_skipped_when_language_not_zh():
+def test_stage_skipped_when_transcript_language_not_zh():
     """The system prompt is crafted for Chinese; other languages must skip
     entirely to avoid feeding Chinese instructions to non-Chinese input.
     """
     stage, client = _make_stage()
-    transcript = _make_transcript(["hello world", "good morning"])
+    transcript = _make_transcript(["hello world", "good morning"], language="en")
     progress, on_progress = _capture_progress()
 
     stage.execute({"transcript_result": transcript, "language": "en"}, on_progress)
@@ -127,17 +127,44 @@ def test_stage_skipped_when_language_not_zh():
     assert progress[-1] == (1.0, LLM_CORRECTION_SKIPPED)
 
 
-def test_stage_skipped_when_language_missing():
-    """Missing language key is treated the same as non-zh: skip the stage.
-    This keeps the pipeline safe when older contexts don't supply the key.
+def test_stage_gates_on_transcript_language_not_context_language():
+    """The gate must read the detected language on the transcript: a job
+    configured zh whose audio was detected as English must still skip.
     """
     stage, client = _make_stage()
-    transcript = _make_transcript(["甲", "乙"])
+    transcript = _make_transcript(["hello world"], language="en")
     progress, on_progress = _capture_progress()
 
-    stage.execute({"transcript_result": transcript}, on_progress)
+    stage.execute({"transcript_result": transcript, "language": "zh"}, on_progress)
 
     assert client.calls == []
+    assert progress[-1] == (1.0, LLM_CORRECTION_SKIPPED)
+
+
+def test_stage_runs_for_zh_transcript_when_context_language_is_auto():
+    """language=auto jobs whose audio detects as zh must still be corrected."""
+    stage, client = _make_stage()
+    transcript = _make_transcript(["甲", "乙"])
+
+    stage.execute({"transcript_result": transcript, "language": "auto"})
+
+    assert client.calls != []
+
+
+def test_stage_skipped_when_quality_gate_flagged_transcript():
+    """Correcting a degenerate (hallucination-loop) transcript wastes hours of
+    LLM time on garbage; the quality warning must short-circuit the stage."""
+    stage, client = _make_stage()
+    transcript = _make_transcript(["歡迎訂閱", "歡迎訂閱"])
+    progress, on_progress = _capture_progress()
+
+    result = stage.execute(
+        {"transcript_result": transcript, "language": "zh", "quality_warning": "轉錄結果異常"},
+        on_progress,
+    )
+
+    assert client.calls == []
+    assert [s.text for s in result["transcript_result"].segments] == ["歡迎訂閱", "歡迎訂閱"]
     assert progress[-1] == (1.0, LLM_CORRECTION_SKIPPED)
 
 
