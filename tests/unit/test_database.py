@@ -308,6 +308,11 @@ def test_reinit_does_not_relog_index_migrations(tmp_path, caplog):
     migrations.init_db(conn)
     conn.close()
 
+    # The first init_db above legitimately logs the index creation; only the
+    # re-run must stay silent. clear() also drops records captured when an
+    # earlier test raised the global log level (caplog captures the whole
+    # test, not just the at_level block).
+    caplog.clear()
     conn = _sqlite3.connect(db_path)
     try:
         with caplog.at_level(_logging.INFO, logger="whisper_ui.storage.migrations"):
@@ -317,6 +322,33 @@ def test_reinit_does_not_relog_index_migrations(tmp_path, caplog):
 
     applied = [r.getMessage() for r in caplog.records if "schema migration applied" in r.getMessage()]
     assert applied == []
+
+
+def test_stray_source_job_id_index_is_dropped_on_upgrade(tmp_path):
+    """v2.10-v2.11 installs created idx_jobs_source_job_id; the index was
+    removed from the migration list in v2.12.0 without a DROP, leaving
+    upgraded deployments with an index fresh installs never get."""
+    import sqlite3 as _sqlite3
+
+    from whisper_ui.storage import migrations
+
+    db_path = tmp_path / "stray.db"
+    conn = _sqlite3.connect(db_path)
+    migrations.init_db(conn)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_source_job_id ON jobs(source_job_id)")
+    conn.commit()
+    conn.close()
+
+    conn = _sqlite3.connect(db_path)
+    try:
+        migrations.init_db(conn)
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_jobs_source_job_id'"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row is None
 
 
 def test_has_active_jobs_empty(db: JobDatabase):

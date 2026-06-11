@@ -81,6 +81,11 @@ _MIGRATIONS: list[str] = [
     # Quality-gate warning for completed-but-degenerate transcripts
     # (hallucination loops). Nullable: clean jobs never set it.
     "ALTER TABLE jobs ADD COLUMN quality_warning TEXT",
+    # idx_jobs_source_job_id shipped in v2.10.0-v2.11.0 and was removed from
+    # this list (with its query) in v2.12.0 without a DROP, so installs that
+    # upgraded through those releases still carry it. Drop it so migrated
+    # and fresh schemas converge.
+    "DROP INDEX IF EXISTS idx_jobs_source_job_id",
 ]
 
 
