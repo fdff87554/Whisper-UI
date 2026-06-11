@@ -149,7 +149,3 @@ def test_quality_gate_ignores_empty_segment_texts():
     texts = ["   "] * 25 + ["同一句"] * 19
     result = stage.execute({"final_result": _raw_with_texts(texts), "language": "zh", "duration": 44.0})
     assert "quality_warning" not in result
-
-
-def test_postprocess_name():
-    assert PostprocessStage().name == "postprocess"

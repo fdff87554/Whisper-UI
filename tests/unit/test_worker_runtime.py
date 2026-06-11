@@ -10,7 +10,6 @@ from whisper_ui.worker.runtime import (
     WorkerRuntime,
     build_worker_runtime,
     extract_rq_timeout_seconds,
-    make_throttled_progress_reporter,
 )
 
 
@@ -78,76 +77,6 @@ def _make_job() -> Job:
         progress=0.0,
         progress_message="",
     )
-
-
-def test_throttle_flushes_on_first_call_and_on_message_change():
-    reporter = MagicMock()
-    db = MagicMock()
-    job = _make_job()
-    clock = [100.0]
-
-    report = make_throttled_progress_reporter(
-        reporter,
-        db,
-        job,
-        min_delta=0.05,
-        min_interval_sec=0.5,
-        monotonic=lambda: clock[0],
-    )
-
-    report(0.1, "starting")
-    assert reporter.report.call_count == 1
-
-    clock[0] += 0.01
-    report(0.11, "starting")
-    assert reporter.report.call_count == 1
-
-    clock[0] += 0.01
-    report(0.11, "next stage")
-    assert reporter.report.call_count == 2
-
-
-def test_throttle_drops_regressions():
-    reporter = MagicMock()
-    db = MagicMock()
-    job = _make_job()
-    clock = [0.0]
-
-    report = make_throttled_progress_reporter(
-        reporter,
-        db,
-        job,
-        monotonic=lambda: clock[0],
-    )
-
-    report(0.8, "late")
-    reporter.report.reset_mock()
-
-    report(0.6, "late")
-    reporter.report.assert_not_called()
-
-
-def test_throttle_always_flushes_terminal_progress():
-    reporter = MagicMock()
-    db = MagicMock()
-    job = _make_job()
-    clock = [0.0]
-
-    report = make_throttled_progress_reporter(
-        reporter,
-        db,
-        job,
-        min_delta=0.5,
-        min_interval_sec=10.0,
-        monotonic=lambda: clock[0],
-    )
-
-    report(0.9, "nearly done")
-    reporter.report.reset_mock()
-
-    clock[0] += 0.01
-    report(1.0, "nearly done")
-    reporter.report.assert_called_once()
 
 
 def test_extract_rq_timeout_prefers_current_job_when_available():

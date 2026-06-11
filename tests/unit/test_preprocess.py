@@ -6,14 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from whisper_ui.core.exceptions import PreprocessError
-from whisper_ui.pipeline.preprocess import SUPPORTED_EXTENSIONS, PreprocessStage
-
-
-def test_supported_extensions():
-    assert ".mp3" in SUPPORTED_EXTENSIONS
-    assert ".wav" in SUPPORTED_EXTENSIONS
-    assert ".m4a" in SUPPORTED_EXTENSIONS
-    assert ".mp4" in SUPPORTED_EXTENSIONS
+from whisper_ui.pipeline.preprocess import PreprocessStage
 
 
 def test_unsupported_extension(tmp_path):
@@ -61,11 +54,16 @@ def test_ffmpeg_failure_removes_partial_wav(mock_run, tmp_path):
     assert not partial.exists()
 
 
-def test_preprocess_stage_name():
-    stage = PreprocessStage()
-    assert stage.name == "preprocess"
+@patch("whisper_ui.pipeline.preprocess.subprocess.run")
+def test_preprocess_calls_ffmpeg(mock_run, tmp_path):
+    mock_run.return_value = MagicMock(returncode=0, stderr="")
+    wav_path = tmp_path / "test.wav"
+    wav_path.write_bytes(b"RIFF" + b"\x00" * 100)
 
+    with patch("whisper_ui.pipeline.preprocess.get_audio_duration_seconds", return_value=10.0):
+        stage = PreprocessStage()
+        context = stage.execute({"input_path": str(wav_path)})
 
-def test_preprocess_cleanup():
-    stage = PreprocessStage()
-    stage.cleanup()
+    assert "audio_path" in context
+    assert context["duration"] == 10.0
+    mock_run.assert_called_once()

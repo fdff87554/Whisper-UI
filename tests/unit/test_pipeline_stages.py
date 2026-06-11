@@ -444,39 +444,6 @@ class TestDiarizeStage:
         ):
             stage.execute({"audio_path": "/tmp/test.wav"})
 
-    def test_heartbeat_refreshes_progress_during_slow_pipeline(self):
-        """A long-running diarization must keep emitting progress updates
-        so Redis TTL stays warm and stale-job-recovery does not reap it.
-        """
-        import time as time_module
-
-        stage = DiarizeStage(hf_token="test-token", device="cpu", heartbeat_interval=1)
-
-        def _slow_diarize(**_kwargs):
-            # Sleep longer than two heartbeat intervals so we are certain
-            # at least one extra progress call fires before we return.
-            time_module.sleep(2.5)
-            return "diarize_segments"
-
-        mock_pipeline_cls = MagicMock()
-        mock_pipeline_cls.return_value = MagicMock(side_effect=_slow_diarize)
-        mock_diarize_module = MagicMock()
-        mock_diarize_module.DiarizationPipeline = mock_pipeline_cls
-
-        progress_calls: list[tuple[float, str]] = []
-
-        with patch.dict("sys.modules", {"whisperx.diarize": mock_diarize_module, "whisperx": MagicMock()}):
-            stage.execute(
-                {"audio_path": "/tmp/test.wav"},
-                on_progress=lambda p, m: progress_calls.append((p, m)),
-            )
-
-        # Expected baseline: loading (0.0) + running (0.2) + done (1.0) = 3 calls.
-        # Heartbeat adds at least one more with the "已執行" phrase.
-        heartbeat_messages = [m for _, m in progress_calls if "已執行" in m]
-        assert len(heartbeat_messages) >= 1
-        assert progress_calls[-1] == (1.0, DIARIZE_DONE)
-
     def test_heartbeat_progress_is_monotonic_and_bounded(self):
         """Elapsed time must map to a non-decreasing curve that never
         reaches 1.0 — DIARIZE_DONE (which reports 1.0) is the only thing
@@ -544,6 +511,9 @@ class TestDiarizeStage:
         assert all(p < _HEARTBEAT_PROGRESS_CAP for p in heartbeat_progress)
         for earlier, later in pairwise(heartbeat_progress):
             assert later >= earlier
+        # Folded in from the removed twin sleep test: the stage still ends
+        # with the genuine DIARIZE_DONE completion call.
+        assert progress_calls[-1] == (1.0, DIARIZE_DONE)
 
     def test_heartbeat_disabled_when_interval_zero(self):
         stage = DiarizeStage(hf_token="test-token", device="cpu", heartbeat_interval=0)
