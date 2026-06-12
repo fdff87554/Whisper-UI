@@ -42,6 +42,20 @@ def test_docx_export_no_speakers():
     assert not any("SPEAKER" in t for t in texts)
 
 
+def test_docx_export_strips_control_chars():
+    # python-docx rejects XML-incompatible control characters outright, so a
+    # single polluted segment (realistically: LLM correction output) used to
+    # fail the whole export with ValueError.
+    result = TranscriptResult(
+        segments=[Segment(start=0.0, end=1.0, text="before\x08after")],
+    )
+    exporter = DocxExporter()
+    data = exporter.export(result)
+    doc = Document(io.BytesIO(data))
+    texts = [p.text for p in doc.paragraphs]
+    assert any("beforeafter" in t for t in texts)
+
+
 def test_docx_export_empty():
     result = TranscriptResult(segments=[])
     exporter = DocxExporter()

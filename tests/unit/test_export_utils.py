@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from whisper_ui.export.utils import format_timestamp
+from whisper_ui.export.utils import format_timestamp, strip_control_chars
 
 
 def test_format_timestamp_comma():
@@ -17,3 +17,15 @@ def test_format_timestamp_dot():
 
 def test_format_timestamp_default_separator():
     assert format_timestamp(1.5) == "00:00:01,500"
+
+
+def test_strip_control_chars_removes_xml_incompatible():
+    assert strip_control_chars("a\x00b\x08c\x1fd") == "abcd"
+
+
+def test_strip_control_chars_keeps_legal_whitespace_and_text():
+    assert strip_control_chars("line1\nline2\ttab\rcr") == "line1\nline2\ttab\rcr"
+
+
+def test_strip_control_chars_preserves_cjk_and_fullwidth():
+    assert strip_control_chars("逐字稿。全形「測試」") == "逐字稿。全形「測試」"
