@@ -1,5 +1,22 @@
 from __future__ import annotations
 
+import re
+
+# C0 control characters that XML 1.0 forbids; tab / newline / carriage
+# return are XML-legal and excluded.
+_XML_INCOMPATIBLE_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def strip_control_chars(text: str) -> str:
+    """Drop control characters that python-docx (XML 1.0) rejects.
+
+    python-docx raises ``ValueError("All strings must be XML compatible")``
+    on these characters, turning one bad segment into a failed DOCX export.
+    Like the newline case in :func:`collapse_newlines`, the realistic source
+    is the optional LLM correction stage, not the ASR output itself.
+    """
+    return _XML_INCOMPATIBLE_CHARS.sub("", text)
+
 
 def format_timestamp(seconds: float, ms_separator: str = ",") -> str:
     h = int(seconds // 3600)

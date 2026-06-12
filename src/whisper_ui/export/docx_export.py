@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from whisper_ui.core.exceptions import ExportError
 from whisper_ui.core.messages import EXPORT_DOCX_HEADING
+from whisper_ui.export.utils import strip_control_chars
 
 if TYPE_CHECKING:
     from whisper_ui.core.models import TranscriptResult
@@ -41,7 +42,7 @@ class DocxExporter:
                 run.bold = True
                 run.font.size = Pt(11)
 
-            p = doc.add_paragraph(seg.text)
+            p = doc.add_paragraph(strip_control_chars(seg.text))
             p.style.font.size = Pt(10)
 
         buf = io.BytesIO()

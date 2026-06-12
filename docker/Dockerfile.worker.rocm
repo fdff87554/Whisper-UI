@@ -13,7 +13,7 @@
 
 ARG ROCM_BASE_IMAGE=rocm/dev-ubuntu-24.04:7.2.1-complete
 ARG AMDGPU_TARGETS=gfx1151
-ARG WHISPER_CPP_REF=v1.8.0
+ARG WHISPER_CPP_REF=v1.8.6
 
 # --- Stage 1: build whisper.cpp (HIP) ---
 FROM ${ROCM_BASE_IMAGE} AS whispercpp-build
