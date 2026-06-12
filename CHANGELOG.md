@@ -7,6 +7,25 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.14.0] - 2026-06-12
+
+Issue-sweep remediation (PR #121).
+
+### Fixed
+
+- whisper.cpp upgraded from v1.8.0 to v1.8.6, fixing a VAD buffer overflow
+  (upstream ggml-org/whisper.cpp#3558) that aborted transcription with heap
+  corruption on files whose VAD segment ends at the audio boundary (#119).
+- whisper-cli failure messages keep the tail of stderr instead of the
+  model-loading banner, so the actual crash cause reaches the UI (#120).
+- DOCX export strips XML-incompatible control characters instead of failing
+  the whole export when a segment carries one.
+
+### Changed
+
+- `uv.lock` records the current project version again (stale at 2.11.0
+  since the v2.12.0 release).
+
 ## [2.13.1] - 2026-06-11
 
 Full-codebase review remediation (PR #115). Highlights below; the PR
