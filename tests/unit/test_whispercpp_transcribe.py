@@ -127,6 +127,19 @@ class TestExecute:
         ):
             stage.execute({"audio_path": "/tmp/a.wav"})
 
+    def test_failure_detail_keeps_stderr_tail(self):
+        # whisper-cli opens stderr with a model-loading banner; a crash after
+        # init (e.g. the #119 VAD abort) lands at the very end. Truncation
+        # must keep the tail, or the UI reports "loading model" as the cause.
+        stderr = "loading-banner " * 50 + "malloc(): invalid size (unsorted)"
+        stage = WhisperCppTranscribeStage()
+        with (
+            _patched_model_paths(),
+            patch(f"{_MODULE}.subprocess.run", return_value=MagicMock(returncode=-6, stderr=stderr)),
+            pytest.raises(TranscriptionError, match=r"malloc\(\): invalid size"),
+        ):
+            stage.execute({"audio_path": "/tmp/a.wav"})
+
     def test_missing_json_raises(self):
         stage = WhisperCppTranscribeStage()
         with (

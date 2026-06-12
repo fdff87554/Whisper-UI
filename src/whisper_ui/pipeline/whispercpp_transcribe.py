@@ -203,7 +203,9 @@ class WhisperCppTranscribeStage:
             if proc.returncode != 0:
                 # Some builds emit diagnostics on stdout; fall back to it.
                 detail = proc.stderr.strip() or proc.stdout.strip()
-                raise TranscriptionError(f"whisper-cli failed (exit {proc.returncode}): {detail[:500]}")
+                # Keep the tail: stderr opens with a model-loading banner, so
+                # the actual cause of a late crash is at the end (#120).
+                raise TranscriptionError(f"whisper-cli failed (exit {proc.returncode}): {detail[-500:]}")
 
             json_path = Path(f"{out_prefix}.json")
             if not json_path.is_file():
