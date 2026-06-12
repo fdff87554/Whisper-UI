@@ -56,9 +56,9 @@ class Settings(BaseSettings):
     whispercpp_vad: bool = True
     # GGML Silero VAD model file, resolved like the main GGML model: a
     # pre-baked copy under the model dir wins, else fetched from the
-    # ggml-org/whisper-vad HF repo and cached under HF_HOME. v5.1.2 is the
-    # newest model the pinned whisper.cpp (v1.8.0) ships download support
-    # for; bump together with WHISPER_CPP_REF in Dockerfile.worker.rocm.
+    # ggml-org/whisper-vad HF repo and cached under HF_HOME. Must be loadable
+    # by the pinned whisper.cpp (WHISPER_CPP_REF in Dockerfile.worker.rocm);
+    # validated against the current pin, so revalidate when bumping either.
     whispercpp_vad_model: str = "ggml-silero-v5.1.2.bin"
     # Maximum text-context tokens carried across 30 s decode windows
     # (whisper-cli ``-mc``). 0 disables conditioning entirely — parity with
