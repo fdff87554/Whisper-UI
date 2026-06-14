@@ -3698,7 +3698,7 @@ wheels = [
 
 [[package]]
 name = "transformers"
-version = "5.10.2"
+version = "5.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
@@ -3711,9 +3711,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8d/38/d5f978bd5091019e89aef29b9a831f5cd70f2598963a3ead8b9570cab592/transformers-5.10.2.tar.gz", hash = "sha256:f9a44b9c8ca9ab1156b467f574d832ea066284299c2fd0ed84641ccb592751fc", size = 8799687, upload-time = "2026-06-04T18:43:49.119Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0c/f9/4552e2ba55db1c943aea0d4c09a32e9cbe5445b9eabe9856900de503dc8f/transformers-5.12.0.tar.gz", hash = "sha256:f0cf42ae1464c2eb41e7e0e66d7fd4b66145f48af17093b4cc0b2e9781faa7f4", size = 8923020, upload-time = "2026-06-12T14:39:20.43Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/73/6f/e1564b0cc182afa05e219a8e09a8e770ffaab879b6b824b56c819bd221da/transformers-5.10.2-py3-none-any.whl", hash = "sha256:8a669db546f82c7c3618cb46ceb0f0afd89292bc70f319c058f8332ec63e268d", size = 11003830, upload-time = "2026-06-04T18:43:45.303Z" },
+    { url = "https://files.pythonhosted.org/packages/ff/1f/d385913c38e900d23b728a4188fee625f2fccb306aeebc59be9d91404a5a/transformers-5.12.0-py3-none-any.whl", hash = "sha256:500be9eb644ede81c3103eee7687fc36d05dd75d1c76686c3820b26396fe7c7c", size = 11150246, upload-time = "2026-06-12T14:39:17.009Z" },
 ]
 
 [[package]]
@@ -4029,7 +4029,7 @@ requires-dist = [
     { name = "python-docx", marker = "extra == 'frontend'", specifier = ">=1.0,<2" },
     { name = "redis", specifier = ">=8.0.0,<9" },
     { name = "rq", specifier = ">=2.9.1,<3" },
-    { name = "transformers", marker = "extra == 'worker'", specifier = ">=5.10.2,<6" },
+    { name = "transformers", marker = "extra == 'worker'", specifier = ">=5.12.0,<6" },
     { name = "whisper-ui", extras = ["frontend", "worker-llm"], marker = "extra == 'dev'" },
     { name = "yt-dlp", marker = "extra == 'frontend'", specifier = ">=2024.5.26" },
     { name = "yt-dlp", marker = "extra == 'worker'", specifier = ">=2024.5.26" },
