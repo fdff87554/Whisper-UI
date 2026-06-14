@@ -41,7 +41,7 @@ worker = [
   "opencc-python-reimplemented>=0.1.7",
   "yt-dlp>=2024.5.26",
   "yt-dlp-ejs>=0.7.0",
-  "gdown>=5.0,<6",
+  "gdown>=6.1.0,<7",
 ]
 # Optional LLM correction stage. Only required when OLLAMA_BASE_URL is set.
 # Workers built without this extra still boot; the LLM stage is gated by the
