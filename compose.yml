@@ -118,10 +118,17 @@ services:
     # sets, pipeline context) — none of it is safe to evict, so an eviction
     # policy would silently corrupt the pipeline. Only the cap VALUE is tunable.
     command: redis-server --appendonly yes --maxmemory "${REDIS_MAXMEMORY:-0}" --maxmemory-policy noeviction ${REDIS_PASSWORD:+--requirepass "${REDIS_PASSWORD}"}
+    # Pass the password as a container env so the healthcheck references it as a
+    # runtime shell variable (the `$$` is compose-escaped to a literal `$`), kept
+    # in double quotes. The value is then data the container shell expands, never
+    # interpolated into the script text — so a password with shell metacharacters
+    # cannot break out (unlike compose-interpolating it into the sh -c string).
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "${REDIS_PASSWORD:+REDISCLI_AUTH=\"${REDIS_PASSWORD}\"} redis-cli ping"]
+      test: ["CMD-SHELL", "[ -z \"$$REDIS_PASSWORD\" ] || export REDISCLI_AUTH=\"$$REDIS_PASSWORD\"; redis-cli ping"]
       interval: 10s
       timeout: 5s
       retries: 5
