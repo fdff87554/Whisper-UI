@@ -22,10 +22,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   process after `WORKER_MAX_IDLE_TIME` seconds of inactivity, instead of holding
   the CUDA/HIP context for the lifetime of the container. Set
   `WORKER_MAX_IDLE_TIME=0` to keep the previous always-resident behaviour.
-- Operator-set values interpolated into container command strings are quoted /
-  validated so a malformed value cannot word-split extra CLI tokens into the
-  command: `WORKER_MAX_IDLE_TIME` (entrypoint), and `OLLAMA_MODEL` /
-  `REDIS_MAXMEMORY` (compose command strings).
+- Operator-set values are kept out of shell parsing so a malformed value cannot
+  inject commands or extra CLI tokens: `WORKER_MAX_IDLE_TIME` is validated in the
+  entrypoint; the `ollama-pull` sidecar runs `ollama pull` in exec form and the
+  redis healthcheck references `REDIS_PASSWORD` as a runtime env var (rather than
+  interpolating either into a `sh -c` string); `REDIS_MAXMEMORY` is quoted in the
+  redis command string so a malformed value fails loudly instead of injecting.
 
 ## [2.14.0] - 2026-06-12
 
