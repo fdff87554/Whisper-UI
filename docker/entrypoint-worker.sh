@@ -54,13 +54,21 @@ case "${WORKER_MAX_IDLE_TIME:-}" in
 	echo "WARNING: ignoring WORKER_MAX_IDLE_TIME='${WORKER_MAX_IDLE_TIME}' — must be a non-negative integer; worker will stay resident" >&2
 	;;
 *)
-	# All digits: normalize with 10# (avoids octal interpretation, strips leading
-	# zeros) so "00" → 0 and "0300" → 300. 0 means disabled, so only pass the flag
-	# when the value is greater than zero.
-	worker_idle_seconds=$((10#${WORKER_MAX_IDLE_TIME}))
-	if [ "${worker_idle_seconds}" -gt 0 ]; then
-		WORKER_MAX_IDLE_ARG="--max-idle-time ${worker_idle_seconds}"
-		echo "Worker will exit after ${worker_idle_seconds}s idle (restart policy reclaims GPU/RSS)"
+	# All digits. bash arithmetic is signed 64-bit, so a value with more than 18
+	# digits can overflow and wrap to a negative or wrong-positive number; reject
+	# it up front (no real idle timeout needs 19+ digits, and any value of ≤ 18
+	# digits is < 10^18 < 2^63, so it never overflows).
+	if [ "${#WORKER_MAX_IDLE_TIME}" -gt 18 ]; then
+		echo "WARNING: ignoring WORKER_MAX_IDLE_TIME='${WORKER_MAX_IDLE_TIME}' — value too large; worker will stay resident" >&2
+	else
+		# Normalize with 10# (avoids octal interpretation, strips leading zeros) so
+		# "00" → 0 and "0300" → 300. 0 means disabled, so only pass the flag when
+		# the value is greater than zero.
+		worker_idle_seconds=$((10#${WORKER_MAX_IDLE_TIME}))
+		if [ "${worker_idle_seconds}" -gt 0 ]; then
+			WORKER_MAX_IDLE_ARG="--max-idle-time ${worker_idle_seconds}"
+			echo "Worker will exit after ${worker_idle_seconds}s idle (restart policy reclaims GPU/RSS)"
+		fi
 	fi
 	;;
 esac

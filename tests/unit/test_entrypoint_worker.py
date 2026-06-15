@@ -94,7 +94,7 @@ def test_idle_flag_is_device_agnostic_but_simpleworker_is_gpu_only(tmp_path: Pat
     assert "--worker-class rq.SimpleWorker" not in argv
 
 
-@pytest.mark.parametrize("bad", ["abc", "-5", "+5", "1e3", "0x10", "300 foo", "  "])
+@pytest.mark.parametrize("bad", ["abc", "-5", "+5", "1e3", "0x10", "300 foo", "  ", "99999999999999999999"])
 def test_invalid_idle_time_is_ignored_with_warning(tmp_path: Path, bad: str) -> None:
     result = _run_entrypoint(tmp_path, {"DEVICE": "rocm", "WORKER_MAX_IDLE_TIME": bad})
     argv = _argv_line(result)
