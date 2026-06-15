@@ -301,7 +301,7 @@ class TestGoogleDriveDownload:
     def test_successful_gdrive_download(self, context, download_dir):
         resolved_file = str(download_dir / "meeting_recording.m4a")
 
-        def mock_download(url, output, quiet=True, fuzzy=False):
+        def mock_download(url, output, quiet=True):
             out_path = Path(output)
             if out_path.is_dir():
                 out_path = out_path / "meeting_recording.m4a"
@@ -319,7 +319,7 @@ class TestGoogleDriveDownload:
         assert result["video_title"] == "meeting_recording"
 
     def test_gdrive_progress_callback(self, context, download_dir):
-        def mock_download(url, output, quiet=True, fuzzy=False):
+        def mock_download(url, output, quiet=True):
             out_path = Path(output) / "audio.mp3"
             out_path.write_bytes(b"fake audio content")
             return str(out_path)
@@ -383,7 +383,7 @@ class TestGoogleDriveDownload:
                 stage.execute(context)
 
     def test_gdrive_empty_file_raises(self, context, download_dir):
-        def mock_download(url, output, quiet=True, fuzzy=False):
+        def mock_download(url, output, quiet=True):
             out_path = Path(output) / "audio.mp3"
             out_path.write_bytes(b"")
             return str(out_path)
@@ -399,7 +399,7 @@ class TestGoogleDriveDownload:
     def test_gdrive_file_exceeding_size_cap_raises_and_deletes(self, context, download_dir):
         # Drive files carry no duration metadata, so the byte cap is the only
         # guard against an oversized file filling the disk.
-        def mock_download(url, output, quiet=True, fuzzy=False):
+        def mock_download(url, output, quiet=True):
             out_path = Path(output) / "audio.mp3"
             out_path.write_bytes(b"x" * 100)
             return str(out_path)
@@ -416,7 +416,7 @@ class TestGoogleDriveDownload:
     def test_gdrive_size_cap_message_uses_fractional_megabytes(self, context, download_dir):
         # Integer division understated both numbers (a sub-MB file read
         # "0 MB"); the message must carry one decimal place.
-        def mock_download(url, output, quiet=True, fuzzy=False):
+        def mock_download(url, output, quiet=True):
             out_path = Path(output) / "audio.mp3"
             out_path.write_bytes(b"x" * int(1.5 * 1024 * 1024))
             return str(out_path)
@@ -430,7 +430,7 @@ class TestGoogleDriveDownload:
                 stage.execute(context)
 
     def test_gdrive_file_within_size_cap_succeeds(self, context, download_dir):
-        def mock_download(url, output, quiet=True, fuzzy=False):
+        def mock_download(url, output, quiet=True):
             out_path = Path(output) / "audio.mp3"
             out_path.write_bytes(b"x" * 100)
             return str(out_path)
@@ -445,7 +445,7 @@ class TestGoogleDriveDownload:
         assert result["input_path"] == str(download_dir / "audio.mp3")
 
     def test_gdrive_size_cap_disabled_by_default(self, context, download_dir):
-        def mock_download(url, output, quiet=True, fuzzy=False):
+        def mock_download(url, output, quiet=True):
             out_path = Path(output) / "audio.mp3"
             out_path.write_bytes(b"x" * 100)
             return str(out_path)
@@ -460,7 +460,7 @@ class TestGoogleDriveDownload:
         assert result["input_path"] == str(download_dir / "audio.mp3")
 
     def test_gdrive_unsupported_extension_raises(self, context, download_dir):
-        def mock_download(url, output, quiet=True, fuzzy=False):
+        def mock_download(url, output, quiet=True):
             out_path = Path(output) / "document.txt"
             out_path.write_bytes(b"some text content")
             return str(out_path)

@@ -30,7 +30,8 @@ logger = logging.getLogger(__name__)
 # different (unsupported) extractor such as Broadcasts / Spaces. The
 # "no suitable extractor" / "broadcast" markers fire when the ["twitter"] pin
 # blocks yt-dlp from re-extracting into a twitter:broadcast / twitter:spaces
-# sub-extractor (verified against yt-dlp 2026.03.17 on a real Broadcast tweet).
+# sub-extractor. The markers are heuristic and not version-specific; this was
+# last verified against yt-dlp 2026.03.17 on a real Broadcast tweet.
 # Deliberately NOT included: bare "unavailable" (matches the transient
 # "HTTP Error 503: Service Unavailable") and HTTP 5xx/429 — those are retryable
 # and must keep the generic "Failed to download" path, not the cookies hint.
@@ -48,12 +49,13 @@ _TWITTER_RESTRICTED_MARKERS = (
 
 # Substrings (lowercase) that mark a *transient* download failure worth
 # retrying with a fresh yt-dlp client. The headline case is X throttling its
-# anonymous guest-token endpoint ("Bad guest token"): yt-dlp 2026.03.17 fetches
-# a new token on every attempt but does not retry the rejection itself, so a
-# clean retry clears the blip (verified on the 129 production host). HTTP 429
-# and 5xx are likewise server-side and retryable. The HTTP codes are matched in
-# their "http error NNN" form so a tweet/video id that merely contains "503"
-# cannot trip a false positive.
+# anonymous guest-token endpoint ("Bad guest token"): yt-dlp fetches a new
+# token on every attempt but does not retry the rejection itself, so a clean
+# retry clears the blip. HTTP 429 and 5xx are likewise server-side and
+# retryable. The HTTP codes are matched in their "http error NNN" form so a
+# tweet/video id that merely contains "503" cannot trip a false positive.
+# (Markers are heuristic, not version-specific; this behaviour was observed on
+# yt-dlp 2026.03.17 on the 129 production host.)
 _RETRYABLE_MARKERS = (
     "guest token",
     "http error 429",
@@ -148,7 +150,12 @@ class DownloadStage:
             if on_progress:
                 on_progress(0.1, DOWNLOAD_GDRIVE_IN_PROGRESS)
 
-            result = gdown.download(gdrive_url, output_path, quiet=True, fuzzy=False)
+            # gdown 6 dropped the ``fuzzy`` flag (it always extracts the file ID
+            # from any Drive URL now) and raises gdown.exceptions.DownloadError
+            # on failure instead of returning None. The None guard stays as
+            # defence; a raised failure falls through to the generic handler
+            # below, whose message already echoes gdown's "share with Anyone" hint.
+            result = gdown.download(url=gdrive_url, output=output_path, quiet=True)
             if result is None:
                 raise DownloadError(
                     "Failed to download from Google Drive. Make sure the file is shared as 'Anyone with the link'."

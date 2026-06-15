@@ -150,6 +150,7 @@ services:
       dockerfile: docker/Dockerfile.worker
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+        DENO_VERSION: ${DENO_VERSION:-2.8.3}
     environment:
       !!merge <<: [*core-env, *timeout-env, *llm-env, *download-env]
       # Queues this worker listens on. The default includes every queue so a
@@ -186,6 +187,7 @@ services:
       dockerfile: docker/Dockerfile.worker.cpu
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+        DENO_VERSION: ${DENO_VERSION:-2.8.3}
     environment:
       !!merge <<: [*core-env, *timeout-env, *llm-env, *download-env]
       # Same broad default as worker-gpu: runs the whole pipeline in a
@@ -220,6 +222,7 @@ services:
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
         AMDGPU_TARGETS: ${AMDGPU_TARGETS:-gfx1151}
+        DENO_VERSION: ${DENO_VERSION:-2.8.3}
     environment:
       !!merge <<: [*core-env, *timeout-env, *llm-env, *download-env]
       WORKER_QUEUES: ${WORKER_ROCM_QUEUES:-whisper:gpu whisper:io whisper:cpu whisper:llm default}
@@ -270,6 +273,7 @@ services:
       dockerfile: docker/Dockerfile.worker.cpu
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+        DENO_VERSION: ${DENO_VERSION:-2.8.3}
     environment:
       # LLM correction runs here when enabled — no GPU required.
       !!merge <<: [*core-env, *timeout-env, *llm-env, *download-env]
@@ -295,6 +299,7 @@ services:
       dockerfile: docker/Dockerfile.worker.cpu
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+        DENO_VERSION: ${DENO_VERSION:-2.8.3}
     environment:
       !!merge <<: [*core-env, *timeout-env, *llm-env]
       WORKER_QUEUES: ${WORKER_LLM_QUEUES:-whisper:llm default}
