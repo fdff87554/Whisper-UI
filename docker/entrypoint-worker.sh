@@ -38,10 +38,22 @@ cuda | rocm)
 	;;
 esac
 
+# Optional idle self-exit. When WORKER_MAX_IDLE_TIME (seconds) is >0 the worker
+# quits after that long without a job; paired with compose `restart:
+# unless-stopped` a fresh process respawns. This is the only way a long-lived
+# SimpleWorker (cuda/rocm) hands its GPU context + RSS back to the OS between
+# sessions — torch.cuda.empty_cache() frees model weights but never the context.
+WORKER_MAX_IDLE_ARG=""
+if [ -n "${WORKER_MAX_IDLE_TIME:-}" ] && [ "${WORKER_MAX_IDLE_TIME}" != "0" ]; then
+	WORKER_MAX_IDLE_ARG="--max-idle-time ${WORKER_MAX_IDLE_TIME}"
+	echo "Worker will exit after ${WORKER_MAX_IDLE_TIME}s idle (restart policy reclaims GPU/RSS)"
+fi
+
 echo "Starting RQ worker on queues: ${WORKER_QUEUES}"
 # shellcheck disable=SC2086
 exec python -m whisper_ui.worker worker \
 	--url "${REDIS_URL:-redis://redis:6379/0}" \
 	--name "whisper-worker-$(hostname)" \
 	${WORKER_CLASS_ARG} \
+	${WORKER_MAX_IDLE_ARG} \
 	${WORKER_QUEUES}

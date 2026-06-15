@@ -58,6 +58,17 @@ x-download-env: &download-env
   YOUTUBE_MAX_DURATION: ${YOUTUBE_MAX_DURATION:-14400}
   TWITTER_MAX_DURATION: ${TWITTER_MAX_DURATION:-14400}
   TWITTER_COOKIES_FILE: ${TWITTER_COOKIES_FILE:-}
+# GPU worker resource lifecycle. cuda / rocm workers run rq.SimpleWorker in one
+# long-lived process, so the GPU context and mapped runtime libraries stay
+# resident until that process exits (per-stage cleanup frees model weights via
+# torch.cuda.empty_cache(), but never the context itself). WORKER_MAX_IDLE_TIME
+# (seconds) makes the worker self-exit after idling that long; the worker's
+# `restart: unless-stopped` then respawns a fresh process, handing the GPU
+# memory + RSS back to the OS. 0 disables (the always-resident behaviour). Only
+# the GPU workers default it on — CPU/io/llm workers fork per job and already
+# release on exit. See README "GPU worker resource lifecycle".
+x-gpu-lifecycle-env: &gpu-lifecycle-env
+  WORKER_MAX_IDLE_TIME: ${WORKER_MAX_IDLE_TIME:-300}
 services:
   frontend:
     image: ghcr.io/fdff87554/whisper-ui-frontend:${WHISPER_UI_VERSION:-latest}
@@ -152,7 +163,7 @@ services:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
         DENO_VERSION: ${DENO_VERSION:-2.8.3}
     environment:
-      !!merge <<: [*core-env, *timeout-env, *llm-env, *download-env]
+      !!merge <<: [*core-env, *timeout-env, *llm-env, *download-env, *gpu-lifecycle-env]
       # Queues this worker listens on. The default includes every queue so a
       # single-profile `docker compose --profile gpu up` still runs the full
       # pipeline end-to-end. For the scaled topology, set
@@ -224,7 +235,7 @@ services:
         AMDGPU_TARGETS: ${AMDGPU_TARGETS:-gfx1151}
         DENO_VERSION: ${DENO_VERSION:-2.8.3}
     environment:
-      !!merge <<: [*core-env, *timeout-env, *llm-env, *download-env]
+      !!merge <<: [*core-env, *timeout-env, *llm-env, *download-env, *gpu-lifecycle-env]
       WORKER_QUEUES: ${WORKER_ROCM_QUEUES:-whisper:gpu whisper:io whisper:cpu whisper:llm default}
       WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
       DEVICE: rocm
