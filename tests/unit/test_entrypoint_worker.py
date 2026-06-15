@@ -30,7 +30,7 @@ def _run_entrypoint(tmp_path: Path, env_overrides: dict[str, str]) -> subprocess
     stub.write_text(f'#!/bin/sh\necho "{_STUB_PREFIX} $*"\n')
     stub.chmod(0o755)
 
-    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", **env_overrides}
+    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ.get('PATH', '')}", **env_overrides}
     return subprocess.run(
         ["bash", str(_ENTRYPOINT)],
         env=env,
