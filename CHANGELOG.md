@@ -7,6 +7,29 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- `WORKER_MAX_IDLE_TIME` lets GPU workers (cuda/rocm, which run the non-forking
+  `SimpleWorker`) self-exit after a spell with no job so the
+  `restart: unless-stopped` policy respawns a fresh process, returning the
+  resident GPU context and host RSS to the OS. Defaulted to `300` seconds for
+  `worker-gpu` / `worker-rocm`; `0` disables, and a non-integer/negative/overlong
+  value is ignored with a warning. See README "GPU worker resource lifecycle".
+
+### Changed
+
+- GPU/ROCm workers now release idle GPU memory and RSS by recycling the worker
+  process after `WORKER_MAX_IDLE_TIME` seconds of inactivity, instead of holding
+  the CUDA/HIP context for the lifetime of the container. Set
+  `WORKER_MAX_IDLE_TIME=0` to keep the previous always-resident behaviour.
+- Operator-set values are kept out of shell parsing so a malformed value cannot
+  inject commands or extra CLI tokens: `WORKER_MAX_IDLE_TIME` is validated in the
+  entrypoint; the `ollama-pull` sidecar runs `ollama pull` in exec form and the
+  redis healthcheck references `REDIS_PASSWORD` as a runtime env var (rather than
+  interpolating either into a `sh -c` string); and the redis server command is
+  built in list form so `REDIS_MAXMEMORY` / `REDIS_PASSWORD` are literal argv
+  elements that cannot re-tokenize into extra redis options.
+
 ## [2.14.0] - 2026-06-12
 
 Issue-sweep remediation (PR #121).
