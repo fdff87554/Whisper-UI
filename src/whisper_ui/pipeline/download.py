@@ -148,7 +148,12 @@ class DownloadStage:
             if on_progress:
                 on_progress(0.1, DOWNLOAD_GDRIVE_IN_PROGRESS)
 
-            result = gdown.download(gdrive_url, output_path, quiet=True, fuzzy=False)
+            # gdown 6 dropped the ``fuzzy`` flag (it always extracts the file ID
+            # from any Drive URL now) and raises gdown.exceptions.DownloadError
+            # on failure instead of returning None. The None guard stays as
+            # defence; a raised failure falls through to the generic handler
+            # below, whose message already echoes gdown's "share with Anyone" hint.
+            result = gdown.download(url=gdrive_url, output=output_path, quiet=True)
             if result is None:
                 raise DownloadError(
                     "Failed to download from Google Drive. Make sure the file is shared as 'Anyone with the link'."
