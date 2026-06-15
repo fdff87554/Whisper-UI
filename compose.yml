@@ -117,7 +117,23 @@ services:
     # only work-queue / DAG state (RQ registries, generation counters, sub-job
     # sets, pipeline context) — none of it is safe to evict, so an eviction
     # policy would silently corrupt the pipeline. Only the cap VALUE is tunable.
-    command: redis-server --appendonly yes --maxmemory "${REDIS_MAXMEMORY:-0}" --maxmemory-policy noeviction ${REDIS_PASSWORD:+--requirepass "${REDIS_PASSWORD}"}
+    # List form (not a shell string): each element is a literal argv token, so an
+    # operator value containing quotes/spaces cannot re-tokenize into extra redis
+    # options — a balanced-quote string command does inject (e.g. a password
+    # `pw" --port 9999 "` would add `--port`). Keeping `redis-server` as argv[0]
+    # lets the official entrypoint still chown /data and drop to the `redis` user.
+    # `--requirepass ""` (empty, when REDIS_PASSWORD is unset) means no auth,
+    # matching the previous omit-when-unset behaviour.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - "${REDIS_MAXMEMORY:-0}"
+      - --maxmemory-policy
+      - noeviction
+      - --requirepass
+      - "${REDIS_PASSWORD:-}"
     # Pass the password as a container env so the healthcheck references it as a
     # runtime shell variable (the `$$` is compose-escaped to a literal `$`), kept
     # in double quotes. The value is then data the container shell expands, never
