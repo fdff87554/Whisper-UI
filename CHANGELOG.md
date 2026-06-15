@@ -26,8 +26,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   inject commands or extra CLI tokens: `WORKER_MAX_IDLE_TIME` is validated in the
   entrypoint; the `ollama-pull` sidecar runs `ollama pull` in exec form and the
   redis healthcheck references `REDIS_PASSWORD` as a runtime env var (rather than
-  interpolating either into a `sh -c` string); `REDIS_MAXMEMORY` is quoted in the
-  redis command string so a malformed value fails loudly instead of injecting.
+  interpolating either into a `sh -c` string); and the redis server command is
+  built in list form so `REDIS_MAXMEMORY` / `REDIS_PASSWORD` are literal argv
+  elements that cannot re-tokenize into extra redis options.
 
 ## [2.14.0] - 2026-06-12
 
