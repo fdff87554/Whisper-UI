@@ -117,7 +117,7 @@ services:
     # only work-queue / DAG state (RQ registries, generation counters, sub-job
     # sets, pipeline context) — none of it is safe to evict, so an eviction
     # policy would silently corrupt the pipeline. Only the cap VALUE is tunable.
-    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-0} --maxmemory-policy noeviction ${REDIS_PASSWORD:+--requirepass "${REDIS_PASSWORD}"}
+    command: redis-server --appendonly yes --maxmemory "${REDIS_MAXMEMORY:-0}" --maxmemory-policy noeviction ${REDIS_PASSWORD:+--requirepass "${REDIS_PASSWORD}"}
     volumes:
       - redis-data:/data
     healthcheck:
@@ -356,7 +356,7 @@ services:
     entrypoint: /bin/sh
     command:
       - -c
-      - 'OLLAMA_HOST=http://ollama:11434 ollama pull ${OLLAMA_MODEL:-gemma4:e4b}'
+      - 'OLLAMA_HOST=http://ollama:11434 ollama pull "${OLLAMA_MODEL:-gemma4:e4b}"'
     depends_on:
       ollama:
         condition: service_healthy
