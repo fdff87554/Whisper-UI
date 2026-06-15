@@ -353,10 +353,14 @@ services:
   ollama-pull:
     profiles: [llm]
     image: ollama/ollama:latest
-    entrypoint: /bin/sh
-    command:
-      - -c
-      - 'OLLAMA_HOST=http://ollama:11434 ollama pull "${OLLAMA_MODEL:-gemma4:e4b}"'
+    # Exec form (no shell): OLLAMA_MODEL reaches `ollama pull` as a single literal
+    # argv element, so a model name containing shell metacharacters cannot be
+    # parsed as a command. (Quoting it inside a `sh -c` string would not — an
+    # embedded `"` closes the quote and injects.)
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["ollama"]
+    command: ["pull", "${OLLAMA_MODEL:-gemma4:e4b}"]
     depends_on:
       ollama:
         condition: service_healthy
