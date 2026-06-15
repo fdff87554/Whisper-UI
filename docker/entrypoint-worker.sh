@@ -44,10 +44,26 @@ esac
 # SimpleWorker (cuda/rocm) hands its GPU context + RSS back to the OS between
 # sessions — torch.cuda.empty_cache() frees model weights but never the context.
 WORKER_MAX_IDLE_ARG=""
-if [ -n "${WORKER_MAX_IDLE_TIME:-}" ] && [ "${WORKER_MAX_IDLE_TIME}" != "0" ]; then
-	WORKER_MAX_IDLE_ARG="--max-idle-time ${WORKER_MAX_IDLE_TIME}"
-	echo "Worker will exit after ${WORKER_MAX_IDLE_TIME}s idle (restart policy reclaims GPU/RSS)"
-fi
+case "${WORKER_MAX_IDLE_TIME:-}" in
+"") ;; # unset → idle self-exit disabled (worker stays resident)
+*[!0-9]*)
+	# Non-digit, negative, or whitespace-containing value. Ignore it (rather than
+	# crash-loop the worker on an invalid rq arg, or word-split an extra token into
+	# the command) and fall back to the resident default. The value is logged so a
+	# misconfiguration is still visible at startup.
+	echo "WARNING: ignoring WORKER_MAX_IDLE_TIME='${WORKER_MAX_IDLE_TIME}' — must be a non-negative integer; worker will stay resident" >&2
+	;;
+*)
+	# All digits: normalize with 10# (avoids octal interpretation, strips leading
+	# zeros) so "00" → 0 and "0300" → 300. 0 means disabled, so only pass the flag
+	# when the value is greater than zero.
+	worker_idle_seconds=$((10#${WORKER_MAX_IDLE_TIME}))
+	if [ "${worker_idle_seconds}" -gt 0 ]; then
+		WORKER_MAX_IDLE_ARG="--max-idle-time ${worker_idle_seconds}"
+		echo "Worker will exit after ${worker_idle_seconds}s idle (restart policy reclaims GPU/RSS)"
+	fi
+	;;
+esac
 
 echo "Starting RQ worker on queues: ${WORKER_QUEUES}"
 # shellcheck disable=SC2086
