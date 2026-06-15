@@ -339,9 +339,9 @@ no work, and `restart: unless-stopped` respawns a fresh process, handing the
 context and RSS back to the OS. It triggers only while idle, so a running job is
 never interrupted and back-to-back jobs stay warm.
 
-| Variable               | Default | Description                                                                                                                                                                                                                                                                 |
-| ---------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WORKER_MAX_IDLE_TIME` | `300`   | Seconds a GPU worker stays alive with no job before exiting so its `restart` policy respawns a fresh process and frees VRAM + RSS. `0` disables (always-resident). Defaulted on only for `worker-gpu` / `worker-rocm`; CPU/io/llm workers fork per job and release on exit. |
+| Variable               | Default | Description                                                                                                                                                                                                                                                                                                                                             |
+| ---------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WORKER_MAX_IDLE_TIME` | `300`   | Seconds a GPU worker stays alive with no job before exiting so its `restart` policy respawns a fresh process and frees VRAM + RSS. `0` disables (always-resident). Must be a non-negative integer; an invalid value is ignored with a warning. Defaulted on only for `worker-gpu` / `worker-rocm`; CPU/io/llm workers fork per job and release on exit. |
 
 > A low value (e.g. `60`) releases resources quickly after each session at the
 > cost of reloading models on the next job; a high value keeps the worker warm

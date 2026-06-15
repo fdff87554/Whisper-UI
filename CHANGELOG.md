@@ -13,8 +13,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `SimpleWorker`) self-exit after a spell with no job so the
   `restart: unless-stopped` policy respawns a fresh process, returning the
   resident GPU context and host RSS to the OS. Defaulted to `300` seconds for
-  `worker-gpu` / `worker-rocm`; `0` disables. See README "GPU worker resource
-  lifecycle".
+  `worker-gpu` / `worker-rocm`; `0` disables, and a non-integer/negative value
+  is ignored with a warning. See README "GPU worker resource lifecycle".
 
 ### Changed
 
@@ -22,6 +22,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   process after `WORKER_MAX_IDLE_TIME` seconds of inactivity, instead of holding
   the CUDA/HIP context for the lifetime of the container. Set
   `WORKER_MAX_IDLE_TIME=0` to keep the previous always-resident behaviour.
+- Operator-set values interpolated into container command strings are quoted /
+  validated so a malformed value cannot word-split extra CLI tokens into the
+  command: `WORKER_MAX_IDLE_TIME` (entrypoint), and `OLLAMA_MODEL` /
+  `REDIS_MAXMEMORY` (compose command strings).
 
 ## [2.14.0] - 2026-06-12
 
