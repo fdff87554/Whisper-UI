@@ -15,16 +15,35 @@ from whisper_ui.web.app import _redact_redis_url
         ("redis://:pw@redis/0", "redis://***@redis/0"),
         # No credential present: returned unchanged.
         ("redis://localhost:6379/0", "redis://localhost:6379/0"),
+        # Credential present but no host -> never echo it back.
+        ("redis://:secret@/0", "<redacted>"),
+        # Password containing '#' breaks the authority parse -> fail safe.
+        ("redis://:pa#ss@redis:6379/0", "<redacted>"),
+        # Password as a query param is dropped along with the rest of the query.
+        ("redis://redis:6379/0?password=secret", "redis://redis:6379/0"),
     ],
 )
 def test_redact_redis_url_strips_password(url: str, expected: str):
     assert _redact_redis_url(url) == expected
 
 
-def test_redact_redis_url_never_leaks_password():
-    assert "supersecret" not in _redact_redis_url("redis://:supersecret@redis:6379/0")
+@pytest.mark.parametrize(
+    "url",
+    [
+        "redis://:supersecret@redis:6379/0",
+        "redis://:secret@/0",
+        "redis://:pa#ss@redis:6379/0",
+        "redis://redis:6379/0?password=supersecret",
+        "redis://:pw@[oops",  # malformed but credentialed
+    ],
+)
+def test_redact_redis_url_never_leaks_password(url: str):
+    redacted = _redact_redis_url(url)
+    assert "secret" not in redacted
+    assert "pa#ss" not in redacted
+    assert "pw" not in redacted
 
 
-def test_redact_redis_url_handles_malformed_input():
-    # Must not raise even on a value that cannot be parsed as a URL.
-    assert _redact_redis_url("redis://[oops") == "<redacted>"
+def test_redact_redis_url_handles_malformed_credentialed_input():
+    # A credentialed URL that cannot be parsed must fail safe, never raise.
+    assert _redact_redis_url("redis://:pw@[oops") == "<redacted>"

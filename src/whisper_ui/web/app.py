@@ -50,21 +50,30 @@ _UPLOAD_RETENTION_BATCH_LIMIT = 200
 
 
 def _redact_redis_url(url: str) -> str:
-    """Return a redis URL safe to log, with any password stripped.
+    """Return a redis URL safe to log, with any password removed.
 
     compose builds ``REDIS_URL`` as ``redis://:<password>@host:port/db`` when
-    ``REDIS_PASSWORD`` is set, so logging the raw value would leak the
-    credential into stderr / the json-file log driver. Keep scheme +
-    host:port/path and replace the userinfo with ``***`` when present.
+    ``REDIS_PASSWORD`` is set; a password can also arrive as a ``password=``
+    query param. Either way it must never reach the logs. When the URL carries
+    a credential we rebuild it as ``scheme://***@host:port/path`` (dropping the
+    userinfo and the query string, which may itself carry the password); a URL
+    with no detectable credential is returned unchanged. A credentialed URL
+    whose host cannot be cleanly parsed (e.g. a password containing ``#`` or a
+    missing host) falls back to ``"<redacted>"`` so a malformed value never
+    leaks the secret.
     """
+    has_userinfo = "@" in url
+    if not has_userinfo and "password=" not in url.lower():
+        return url
     try:
         parts = urlsplit(url)
     except ValueError:
         return "<redacted>"
-    if "@" not in url or not parts.hostname:
-        return url
+    if not parts.hostname:
+        return "<redacted>"
     netloc = f"{parts.hostname}:{parts.port}" if parts.port else parts.hostname
-    return f"{parts.scheme}://***@{netloc}{parts.path}"
+    userinfo = "***@" if has_userinfo else ""
+    return f"{parts.scheme}://{userinfo}{netloc}{parts.path}"
 
 
 def _run_retention_sweep(db_path, filestore, threshold_iso: str, limit: int) -> int:
