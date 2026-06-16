@@ -7,6 +7,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.16.0] - 2026-06-16
+
 Pre-release review remediation.
 
 ### Added
@@ -895,7 +897,8 @@ Error` JSON body while logging the full traceback, so an
   classification, missing-job handling) are now covered by unit tests
   in `test_pipeline_dispatcher.py` and `test_stage_tasks.py`.
 
-[Unreleased]: https://github.com/fdff87554/Whisper-UI/compare/v2.15.0...HEAD
+[Unreleased]: https://github.com/fdff87554/Whisper-UI/compare/v2.16.0...HEAD
+[2.16.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.16.0
 [2.15.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.15.0
 [2.14.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.14.0
 [2.13.1]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.13.1
