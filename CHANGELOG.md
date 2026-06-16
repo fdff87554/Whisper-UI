@@ -7,6 +7,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.15.0] - 2026-06-16
+
+GPU worker idle resource release + compose shell-injection hardening (PR #130).
+
 ### Added
 
 - `WORKER_MAX_IDLE_TIME` lets GPU workers (cuda/rocm, which run the non-forking
