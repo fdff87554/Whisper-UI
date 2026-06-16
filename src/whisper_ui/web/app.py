@@ -6,6 +6,7 @@ import logging
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
@@ -46,6 +47,24 @@ _UPLOAD_RETENTION_CHECK_INTERVAL = 3600  # once per hour is enough for a daily-g
 # outage left thousands of expired COMPLETED jobs piled up. 200/hour =
 # 4800/day, which already comfortably exceeds any plausible deployment.
 _UPLOAD_RETENTION_BATCH_LIMIT = 200
+
+
+def _redact_redis_url(url: str) -> str:
+    """Return a redis URL safe to log, with any password stripped.
+
+    compose builds ``REDIS_URL`` as ``redis://:<password>@host:port/db`` when
+    ``REDIS_PASSWORD`` is set, so logging the raw value would leak the
+    credential into stderr / the json-file log driver. Keep scheme +
+    host:port/path and replace the userinfo with ``***`` when present.
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return "<redacted>"
+    if "@" not in url or not parts.hostname:
+        return url
+    netloc = f"{parts.hostname}:{parts.port}" if parts.port else parts.hostname
+    return f"{parts.scheme}://***@{netloc}{parts.path}"
 
 
 def _run_retention_sweep(db_path, filestore, threshold_iso: str, limit: int) -> int:
@@ -124,7 +143,7 @@ async def lifespan(app: FastAPI):
     try:
         app.state.redis.ping()
     except RedisError:
-        logger.warning("Redis is not reachable at %s — job submission will fail", settings.redis_url)
+        logger.warning("Redis is not reachable at %s — job submission will fail", _redact_redis_url(settings.redis_url))
 
     async def _stale_job_checker():
         while True:
