@@ -275,6 +275,7 @@ async def bulk_job_action(
 
     succeeded = 0
     failed = 0
+    deleted_keys: list[str] = []
     for job_id in job_ids:
         job = db.get_job(job_id, owner_id=owner_id)
         if job is None:
@@ -299,8 +300,14 @@ async def bulk_job_action(
                 failed += 1
                 continue
             db.delete_job(job.id)
-            redis.delete(f"job:{job.id}")
+            deleted_keys.append(f"job:{job.id}")
             succeeded += 1
+
+    # Collapse the per-job progress-key deletes into a single round-trip so a
+    # large bulk delete does not run up to MAX_BULK_ACTION_IDS blocking
+    # redis.delete calls on the event loop.
+    if deleted_keys:
+        redis.delete(*deleted_keys)
 
     logger.info(
         "bulk action complete: action=%s user_id=%s succeeded=%d failed=%d total=%d",
