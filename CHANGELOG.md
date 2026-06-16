@@ -34,6 +34,13 @@ GPU worker idle resource release + compose shell-injection hardening (PR #130).
   built in list form so `REDIS_MAXMEMORY` / `REDIS_PASSWORD` are literal argv
   elements that cannot re-tokenize into extra redis options.
 
+### Security
+
+- Bump transitive deps to clear newly-published `pip-audit` advisories:
+  `starlette` 1.1.0 → 1.3.1 (CVE-2026-54282, CVE-2026-54283) and
+  `python-multipart` 0.0.28 → 0.0.32 (CVE-2026-53538, CVE-2026-53539,
+  CVE-2026-53540). fastapi is unchanged (0.136.3 already allows these).
+
 ## [2.14.0] - 2026-06-12
 
 Issue-sweep remediation (PR #121).
