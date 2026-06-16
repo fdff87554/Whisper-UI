@@ -15,6 +15,7 @@ histogram is a documented follow-up.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -103,4 +104,8 @@ async def metrics(db: DbDep, redis: RedisDep) -> Response:
     # globals, no double-registration across scrapes.
     registry = CollectorRegistry()
     registry.register(WhisperCollector(db, redis))
-    return Response(generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
+    # generate_latest drives the collector, which makes ~16 blocking sync-Redis
+    # round-trips plus a SQLite scan; offload it so a slow scrape (or a Redis
+    # hiccup) does not stall the event loop for every other request.
+    payload = await asyncio.to_thread(generate_latest, registry)
+    return Response(payload, media_type=CONTENT_TYPE_LATEST)
