@@ -318,6 +318,39 @@ manually before restart: `redis-cli -n 0 FLUSHDB` against the
 `REDIS_URL` Redis only clears RQ state (uploads, the SQLite DB, and
 saved transcripts are untouched).
 
+### GPU worker resource lifecycle (advanced)
+
+GPU workers (`cuda` / `rocm`) run RQ's non-forking `SimpleWorker`: every job
+executes in one long-lived process, because a CUDA/HIP context cannot be
+re-initialised in a forked child. CPU workers keep RQ's default forking
+`Worker`, where each job runs in a work-horse child that exits on completion, so
+the OS reclaims its memory automatically.
+
+The trade-off is that a `SimpleWorker` never exits on its own. Each pipeline
+stage releases its model after running (`del` + `gc.collect()` +
+`torch.cuda.empty_cache()`), which returns the model weights to the driver's
+free pool — but `empty_cache()` cannot destroy the process's CUDA/HIP context or
+the mapped GPU runtime libraries (cuBLAS / MIOpen / rocBLAS, etc.). Those stay
+resident, so a GPU worker holds a baseline of VRAM and host RSS between jobs
+until the process restarts.
+
+`WORKER_MAX_IDLE_TIME` closes that gap: the worker self-exits after a spell with
+no work, and `restart: unless-stopped` respawns a fresh process, handing the
+context and RSS back to the OS. It triggers only while idle, so a running job is
+never interrupted and back-to-back jobs stay warm.
+
+| Variable               | Default | Description                                                                                                                                                                                                                                                                                                                                             |
+| ---------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WORKER_MAX_IDLE_TIME` | `300`   | Seconds a GPU worker stays alive with no job before exiting so its `restart` policy respawns a fresh process and frees VRAM + RSS. `0` disables (always-resident). Must be a non-negative integer; an invalid value is ignored with a warning. Defaulted on only for `worker-gpu` / `worker-rocm`; CPU/io/llm workers fork per job and release on exit. |
+
+> A low value (e.g. `60`) releases resources quickly after each session at the
+> cost of reloading models on the next job; a high value keeps the worker warm
+> for longer. Within a single pipeline run the GPU sub-jobs (transcribe/align
+> and diarize) run back-to-back with no idle gap, so the default `300` never
+> restarts mid-run. On AMD/ROCm only diarization and alignment run in-process
+> (transcription shells out to whisper.cpp, which already frees on exit), so the
+> resident baseline is smaller than on CUDA.
+
 ### Queue / Timeout tuning (advanced)
 
 The RQ job timeout is derived from the probed audio duration
@@ -417,6 +450,13 @@ Override either variable in `.env` if your topology differs.
 GPU to stay resident. On an 8 GB or shared GPU (e.g. running Whisper on the same
 card), use `gemma4:e2b` (~7.2 GB), point `OLLAMA_BASE_URL` at an external Ollama
 server, or split Whisper and Ollama onto separate GPUs as above.
+
+> **VRAM retention vs reload latency:** `OLLAMA_KEEP_ALIVE` (default `30m`) sets
+> how long Ollama keeps the model resident in VRAM after the last correction
+> request. On a GPU shared with Whisper, a long keep-alive holds several GB
+> hostage between jobs — lower it (e.g. `5m`, or `0` to unload immediately) to
+> free VRAM for transcription; raise it only on a dedicated LLM GPU where reload
+> latency matters more than footprint.
 
 **Tuning (all optional):**
 

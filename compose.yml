@@ -58,6 +58,17 @@ x-download-env: &download-env
   YOUTUBE_MAX_DURATION: ${YOUTUBE_MAX_DURATION:-14400}
   TWITTER_MAX_DURATION: ${TWITTER_MAX_DURATION:-14400}
   TWITTER_COOKIES_FILE: ${TWITTER_COOKIES_FILE:-}
+# GPU worker resource lifecycle. cuda / rocm workers run rq.SimpleWorker in one
+# long-lived process, so the GPU context and mapped runtime libraries stay
+# resident until that process exits (per-stage cleanup frees model weights via
+# torch.cuda.empty_cache(), but never the context itself). WORKER_MAX_IDLE_TIME
+# (seconds) makes the worker self-exit after idling that long; the worker's
+# `restart: unless-stopped` then respawns a fresh process, handing the GPU
+# memory + RSS back to the OS. 0 disables (the always-resident behaviour). Only
+# the GPU workers default it on — CPU/io/llm workers fork per job and already
+# release on exit. See README "GPU worker resource lifecycle".
+x-gpu-lifecycle-env: &gpu-lifecycle-env
+  WORKER_MAX_IDLE_TIME: ${WORKER_MAX_IDLE_TIME:-300}
 services:
   frontend:
     image: ghcr.io/fdff87554/whisper-ui-frontend:${WHISPER_UI_VERSION:-latest}
@@ -106,11 +117,34 @@ services:
     # only work-queue / DAG state (RQ registries, generation counters, sub-job
     # sets, pipeline context) — none of it is safe to evict, so an eviction
     # policy would silently corrupt the pipeline. Only the cap VALUE is tunable.
-    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-0} --maxmemory-policy noeviction ${REDIS_PASSWORD:+--requirepass "${REDIS_PASSWORD}"}
+    # List form (not a shell string): each element is a literal argv token, so an
+    # operator value containing quotes/spaces cannot re-tokenize into extra redis
+    # options — a balanced-quote string command does inject (e.g. a password
+    # `pw" --port 9999 "` would add `--port`). Keeping `redis-server` as argv[0]
+    # lets the official entrypoint still chown /data and drop to the `redis` user.
+    # `--requirepass ""` (empty, when REDIS_PASSWORD is unset) means no auth,
+    # matching the previous omit-when-unset behaviour.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - "${REDIS_MAXMEMORY:-0}"
+      - --maxmemory-policy
+      - noeviction
+      - --requirepass
+      - "${REDIS_PASSWORD:-}"
+    # Pass the password as a container env so the healthcheck references it as a
+    # runtime shell variable (the `$$` is compose-escaped to a literal `$`), kept
+    # in double quotes. The value is then data the container shell expands, never
+    # interpolated into the script text — so a password with shell metacharacters
+    # cannot break out (unlike compose-interpolating it into the sh -c string).
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "${REDIS_PASSWORD:+REDISCLI_AUTH=\"${REDIS_PASSWORD}\"} redis-cli ping"]
+      test: ["CMD-SHELL", "[ -z \"$$REDIS_PASSWORD\" ] || export REDISCLI_AUTH=\"$$REDIS_PASSWORD\"; redis-cli ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -152,7 +186,7 @@ services:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
         DENO_VERSION: ${DENO_VERSION:-2.8.3}
     environment:
-      !!merge <<: [*core-env, *timeout-env, *llm-env, *download-env]
+      !!merge <<: [*core-env, *timeout-env, *llm-env, *download-env, *gpu-lifecycle-env]
       # Queues this worker listens on. The default includes every queue so a
       # single-profile `docker compose --profile gpu up` still runs the full
       # pipeline end-to-end. For the scaled topology, set
@@ -224,7 +258,7 @@ services:
         AMDGPU_TARGETS: ${AMDGPU_TARGETS:-gfx1151}
         DENO_VERSION: ${DENO_VERSION:-2.8.3}
     environment:
-      !!merge <<: [*core-env, *timeout-env, *llm-env, *download-env]
+      !!merge <<: [*core-env, *timeout-env, *llm-env, *download-env, *gpu-lifecycle-env]
       WORKER_QUEUES: ${WORKER_ROCM_QUEUES:-whisper:gpu whisper:io whisper:cpu whisper:llm default}
       WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
       DEVICE: rocm
@@ -342,10 +376,14 @@ services:
   ollama-pull:
     profiles: [llm]
     image: ollama/ollama:latest
-    entrypoint: /bin/sh
-    command:
-      - -c
-      - 'OLLAMA_HOST=http://ollama:11434 ollama pull ${OLLAMA_MODEL:-gemma4:e4b}'
+    # Exec form (no shell): OLLAMA_MODEL reaches `ollama pull` as a single literal
+    # argv element, so a model name containing shell metacharacters cannot be
+    # parsed as a command. (Quoting it inside a `sh -c` string would not — an
+    # embedded `"` closes the quote and injects.)
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["ollama"]
+    command: ["pull", "${OLLAMA_MODEL:-gemma4:e4b}"]
     depends_on:
       ollama:
         condition: service_healthy
