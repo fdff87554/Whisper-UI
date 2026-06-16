@@ -303,11 +303,12 @@ async def bulk_job_action(
             deleted_keys.append(f"job:{job.id}")
             succeeded += 1
 
-    # Collapse the per-job progress-key deletes into a single round-trip so a
-    # large bulk delete does not run up to MAX_BULK_ACTION_IDS blocking
-    # redis.delete calls on the event loop.
+    # Collapse the per-job progress-key deletes into one offloaded round-trip:
+    # delete routes push all offloadable I/O (the filestore reclaim above and
+    # this Redis cleanup) off the event loop; only the single-connection SQLite
+    # delete stays on it. Avoids up to MAX_BULK_ACTION_IDS blocking calls.
     if deleted_keys:
-        redis.delete(*deleted_keys)
+        await asyncio.to_thread(redis.delete, *deleted_keys)
 
     logger.info(
         "bulk action complete: action=%s user_id=%s succeeded=%d failed=%d total=%d",
@@ -475,7 +476,7 @@ async def delete_job(job_id: str, db: DbDep, filestore: FileStoreDep, redis: Red
         )
         return Response(status_code=500)
     db.delete_job(job.id)
-    redis.delete(f"job:{job.id}")
+    await asyncio.to_thread(redis.delete, f"job:{job.id}")
     logger.info(
         "job deleted: job_id=%s user_id=%s filename=%r status_at_delete=%s",
         job.id,
@@ -526,6 +527,7 @@ async def delete_batch(batch_id: str, db: DbDep, filestore: FileStoreDep, redis:
 
     deleted = 0
     failed = 0
+    deleted_keys: list[str] = []
     for job in all_jobs:
         if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
             continue
@@ -545,8 +547,13 @@ async def delete_batch(batch_id: str, db: DbDep, filestore: FileStoreDep, redis:
             failed += 1
             continue
         db.delete_job(job.id)
-        redis.delete(f"job:{job.id}")
+        deleted_keys.append(f"job:{job.id}")
         deleted += 1
+
+    # One offloaded round-trip for all progress keys (mirrors bulk_job_action)
+    # rather than a blocking redis.delete per job inside the loop.
+    if deleted_keys:
+        await asyncio.to_thread(redis.delete, *deleted_keys)
 
     logger.info(
         "batch deleted: batch_id=%s user_id=%s deleted=%d failed=%d total=%d",
