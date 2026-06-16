@@ -325,6 +325,13 @@ class RedisProgressReporter:
         return int(result) != 0
 
     @staticmethod
+    def _decode_hash(data: dict) -> dict[str, str]:
+        return {
+            k.decode() if isinstance(k, bytes) else k: v.decode() if isinstance(v, bytes) else v
+            for k, v in data.items()
+        }
+
+    @staticmethod
     def get_progress(redis: Redis, job_id: str) -> dict[str, str]:
         key = f"job:{job_id}"
         try:
@@ -334,7 +341,34 @@ class RedisProgressReporter:
             return {}
         if not data:
             return {}
+        return RedisProgressReporter._decode_hash(data)
+
+    @staticmethod
+    def get_progress_batch(redis: Redis, job_ids: list[str]) -> dict[str, dict[str, str]]:
+        """Fetch progress hashes for many jobs in a single Redis round-trip.
+
+        The job list / dashboard poll (every few seconds) needs progress for
+        every active job on the page. Pipelining one HGETALL per id collapses
+        what was N serial round-trips into one. Mirrors get_progress's decode
+        and empty-hash contract; jobs with no progress hash are simply absent
+        from the returned mapping.
+        """
+        if not job_ids:
+            return {}
+        try:
+            pipe = redis.pipeline()
+            for job_id in job_ids:
+                pipe.hgetall(f"job:{job_id}")
+            results = pipe.execute()
+        except RedisError:
+            logger.warning("Redis batch progress read failed", exc_info=True)
+            return {}
+        # redis-py guarantees one result per queued command, so lengths match
+        # in production; strict=False keeps this read-only polled path from
+        # ever raising on an unexpected shape — a missing entry just degrades
+        # to "no progress" for that job, like the per-key path returning {}.
         return {
-            k.decode() if isinstance(k, bytes) else k: v.decode() if isinstance(v, bytes) else v
-            for k, v in data.items()
+            job_id: RedisProgressReporter._decode_hash(data)
+            for job_id, data in zip(job_ids, results, strict=False)
+            if data
         }

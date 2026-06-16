@@ -49,11 +49,8 @@ def _group_jobs_by_batch(jobs: list[Job]) -> list[tuple[str, list[Job]]]:
 
 
 def _get_progress_data(redis, jobs: list[Job]) -> dict[str, dict[str, str]]:
-    data = {}
-    for job in jobs:
-        if job.status in (JobStatus.QUEUED, JobStatus.PROCESSING):
-            data[job.id] = RedisProgressReporter.get_progress(redis, job.id)
-    return data
+    active_ids = [job.id for job in jobs if job.status in (JobStatus.QUEUED, JobStatus.PROCESSING)]
+    return RedisProgressReporter.get_progress_batch(redis, active_ids)
 
 
 def _build_media_available_map(filestore, jobs: list[Job]) -> dict[str, bool]:

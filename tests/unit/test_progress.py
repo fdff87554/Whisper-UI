@@ -471,6 +471,26 @@ def test_get_progress_decodes_bytes():
     assert result["status"] == "processing"
 
 
+def test_get_progress_batch_pipelines_and_omits_missing():
+    import fakeredis
+
+    redis = fakeredis.FakeRedis()
+    redis.hset("job:a", mapping={"progress": "0.5", "status": "processing"})
+    redis.hset("job:c", mapping={"progress": "1.0", "status": "completed"})
+
+    result = RedisProgressReporter.get_progress_batch(redis, ["a", "b", "c"])
+
+    assert result["a"] == {"progress": "0.5", "status": "processing"}
+    assert result["c"] == {"progress": "1.0", "status": "completed"}
+    assert "b" not in result  # a job with no progress hash is simply absent
+
+
+def test_get_progress_batch_empty_input_skips_redis():
+    mock_redis = MagicMock()
+    assert RedisProgressReporter.get_progress_batch(mock_redis, []) == {}
+    mock_redis.pipeline.assert_not_called()
+
+
 class _FakeClock:
     """Monotonic clock stub so throttle tests are not flaky under CI load."""
 
