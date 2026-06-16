@@ -21,6 +21,9 @@ from whisper_ui.web.app import _redact_redis_url
         ("redis://:pa#ss@redis:6379/0", "<redacted>"),
         # Password as a query param is dropped along with the rest of the query.
         ("redis://redis:6379/0?password=secret", "redis://redis:6379/0"),
+        # A malformed port makes SplitResult.port raise -> fail safe, never raise.
+        ("redis://:pw@host:invalidport/0", "<redacted>"),
+        ("redis://:pw@host:99999/0", "<redacted>"),
     ],
 )
 def test_redact_redis_url_strips_password(url: str, expected: str):

@@ -67,11 +67,14 @@ def _redact_redis_url(url: str) -> str:
         return url
     try:
         parts = urlsplit(url)
+        if not parts.hostname:
+            return "<redacted>"
+        # SplitResult.port parses lazily and raises ValueError on a malformed
+        # or out-of-range port, so the hostname/port assembly must stay inside
+        # the try to keep this helper fail-safe (never raise, never leak).
+        netloc = f"{parts.hostname}:{parts.port}" if parts.port else parts.hostname
     except ValueError:
         return "<redacted>"
-    if not parts.hostname:
-        return "<redacted>"
-    netloc = f"{parts.hostname}:{parts.port}" if parts.port else parts.hostname
     userinfo = "***@" if has_userinfo else ""
     return f"{parts.scheme}://{userinfo}{netloc}{parts.path}"
 
