@@ -19,6 +19,12 @@ def strip_control_chars(text: str) -> str:
 
 
 def format_timestamp(seconds: float, ms_separator: str = ",") -> str:
+    # Clamp negatives: floor-division/modulo on a negative float borrows and
+    # produces an invalid timecode like "-1:59:59,500" that corrupts the cue
+    # and any downstream subtitle parser. The normal pipeline emits only
+    # non-negative offsets, so this just hardens against a degenerate segment,
+    # matching the defensive posture of the sibling cue-text helpers.
+    seconds = max(0.0, seconds)
     h = int(seconds // 3600)
     m = int((seconds % 3600) // 60)
     s = int(seconds % 60)
