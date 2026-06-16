@@ -154,6 +154,37 @@ def is_locked(
     return locked
 
 
+def _register_ip_key(ip: str) -> str:
+    return f"auth:rl:register:ip:{ip}"
+
+
+def register_is_locked(redis: Redis, *, ip: str, max_attempts: int) -> bool:
+    """Return True when open registration from this IP should be refused.
+
+    A single per-IP counter (separate from the login counters) bounds
+    automated account creation and the username-taken enumeration oracle.
+    Counters are not modified — the caller records the attempt separately so
+    a probe that crosses the threshold is still counted.
+    """
+    count = int(redis.get(_register_ip_key(ip)) or 0)
+    locked = count >= max_attempts
+    if locked:
+        logger.debug("register rate-limit short-circuit: ip=%s count=%d/%d", ip, count, max_attempts)
+    return locked
+
+
+def record_register_attempt(redis: Redis, *, ip: str, window_seconds: int) -> None:
+    """Increment the per-IP registration counter (TTL set on the first hit).
+
+    Like :func:`check_and_increment`, the window is set with ``EXPIRE NX`` so
+    it slides from the first attempt of a burst rather than each subsequent one.
+    """
+    pipe = redis.pipeline()
+    pipe.incr(_register_ip_key(ip))
+    pipe.expire(_register_ip_key(ip), window_seconds, nx=True)
+    pipe.execute()
+
+
 def reset_user(redis: Redis, username: str) -> None:
     """Clear the per-user counter on successful login.
 

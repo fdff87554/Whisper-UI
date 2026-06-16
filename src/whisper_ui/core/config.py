@@ -92,6 +92,11 @@ class Settings(BaseSettings):
     # NATs should either raise this or enable TRUST_PROXY_HEADERS so the
     # per-IP key uses each user's real address.
     max_login_attempts_per_ip: int = 20
+    # Per-IP cap on *open* (non-bootstrap) registration attempts within the
+    # ``login_lockout_seconds`` window. Bounds scripted account creation and
+    # the username-taken enumeration oracle; the first-run bootstrap admin is
+    # never throttled so an instance can always be initialised.
+    max_register_attempts_per_ip: int = 10
     # When true, the session cookie is only sent over HTTPS. Default False so
     # the bundled compose profiles work over plain HTTP; production deployments
     # behind a TLS-terminating proxy should set ``SESSION_HTTPS_ONLY=true``.

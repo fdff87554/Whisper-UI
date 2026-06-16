@@ -245,6 +245,7 @@ AUTH_REGISTER_LINK = "尚未有帳號？前往註冊"
 AUTH_SIGNED_IN_AS = "登入身分：{username}"
 AUTH_ADMIN_BADGE = "管理員"
 AUTH_RATE_LIMITED = "嘗試次數過多，請於 {minutes} 分鐘後再試。"
+AUTH_REGISTER_RATE_LIMITED = "註冊次數過多，請稍後再試。"
 
 # -- Admin --
 ADMIN_USERS_HEADER = "使用者管理"

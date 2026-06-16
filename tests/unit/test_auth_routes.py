@@ -275,6 +275,34 @@ def test_register_first_account_becomes_admin(app, db):
     assert app.state.bootstrap_done is True
 
 
+def test_register_rate_limited_per_ip_after_threshold(app, db, test_admin):
+    """Open registration is bounded per IP; the attempt past the cap is refused."""
+    app.state.settings.max_register_attempts_per_ip = 2
+    client = _anon_client(app)
+
+    for name in ("userone", "usertwo"):
+        resp = client.post("/register", data={"username": name, "password": "password123"})
+        assert resp.status_code == 302  # both consume a per-IP slot
+
+    blocked = client.post("/register", data={"username": "userthree", "password": "password123"})
+    assert blocked.status_code == 302
+    assert blocked.headers["location"] == "/register?error=rate_limited"
+    # The over-limit attempt is rejected before any account is created.
+    assert users_repo.get_user_by_username(db.conn, "userthree") is None
+
+
+def test_register_bootstrap_admin_is_never_rate_limited(app, db):
+    """With no admin yet, the bootstrap account must be creatable regardless of the cap."""
+    app.state.settings.max_register_attempts_per_ip = 0
+    client = _anon_client(app)
+
+    resp = client.post("/register", data={"username": "founder", "password": "password123"})
+
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/"
+    assert users_repo.get_user_by_username(db.conn, "founder") is not None
+
+
 def test_register_page_redirects_to_login_when_signup_closed(app, db, test_admin):
     """With an admin present and ALLOW_REGISTRATION off, the form is hidden."""
     app.state.settings.allow_registration = False

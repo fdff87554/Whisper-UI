@@ -268,6 +268,8 @@ def _register_error_message(error: str) -> str | None:
         return ui_labels.AUTH_USERNAME_INVALID
     if error == "password_short":
         return ui_labels.AUTH_PASSWORD_TOO_SHORT
+    if error == "rate_limited":
+        return ui_labels.AUTH_REGISTER_RATE_LIMITED
     return None
 
 
@@ -275,6 +277,7 @@ def _register_error_message(error: str) -> str | None:
 async def register_submit(
     request: Request,
     db: DbDep,
+    redis: RedisDep,
     settings: SettingsDep,
     username: Annotated[str, Form()],
     password: Annotated[str, Form()],
@@ -299,10 +302,25 @@ async def register_submit(
         # Closed signup: refuse even hand-crafted POSTs that skip the form.
         return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
 
+    # Rate-limit open registration per IP so account creation and the
+    # username-taken oracle are bounded the way login attempts are. Bootstrap
+    # is never throttled — the first admin must be creatable.
+    ip = _client_ip(request, trust_proxy_headers=settings.trust_proxy_headers)
+    if not bootstrap and rate_limit.register_is_locked(
+        redis, ip=ip, max_attempts=settings.max_register_attempts_per_ip
+    ):
+        logger.warning("register rate-limited: ip=%s", ip)
+        return _redirect_after_auth(request, "/register?error=rate_limited")
+
     if not USERNAME_PATTERN.fullmatch(username):
         return _redirect_after_auth(request, "/register?error=username_invalid")
     if len(password) < MIN_PASSWORD_LENGTH:
         return _redirect_after_auth(request, "/register?error=password_short")
+
+    # Count this attempt against the per-IP window before the DB/argon2 work so
+    # both successful creates and username-taken probes are bounded.
+    if not bootstrap:
+        rate_limit.record_register_attempt(redis, ip=ip, window_seconds=settings.login_lockout_seconds)
 
     try:
         user = users_repo.create_user(
