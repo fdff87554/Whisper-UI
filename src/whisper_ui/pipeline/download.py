@@ -18,7 +18,12 @@ from whisper_ui.core.messages import (
     DOWNLOAD_SOURCE_TRANSIENT,
     DOWNLOAD_TWITTER_RESTRICTED,
 )
-from whisper_ui.core.url_validation import extract_gdrive_file_id, is_google_drive_url, is_twitter_url
+from whisper_ui.core.url_validation import (
+    extract_gdrive_file_id,
+    is_google_drive_url,
+    is_twitter_url,
+    is_valid_gdrive_file_id,
+)
 
 if TYPE_CHECKING:
     from whisper_ui.pipeline.base import ProgressCallback
@@ -140,7 +145,10 @@ class DownloadStage:
 
         parsed = urlparse(source_url)
         file_id = extract_gdrive_file_id(parsed.path, parse_qs(parsed.query))
-        if not file_id:
+        # Re-validate at this boundary rather than trusting that source_url is
+        # always the canonical, regex-checked URL the submit route produced —
+        # the same defense-in-depth posture as the yt-dlp allowed_extractors pin.
+        if not file_id or not is_valid_gdrive_file_id(file_id):
             raise DownloadError("Could not extract Google Drive file ID from URL.")
 
         gdrive_url = f"https://drive.google.com/uc?id={file_id}"

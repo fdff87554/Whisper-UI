@@ -222,6 +222,16 @@ def extract_gdrive_file_id(path: str, qs: dict[str, list[str]]) -> str | None:
     return None
 
 
+def is_valid_gdrive_file_id(file_id: str) -> bool:
+    """Return True when *file_id* matches the canonical Drive file-ID shape.
+
+    Lets a consumer re-check an id it extracted itself (e.g. the worker
+    download stage) without depending on ``validate_google_drive_url`` having
+    already run, keeping that boundary self-validating.
+    """
+    return bool(_GDRIVE_FILE_ID_RE.match(file_id))
+
+
 def validate_twitter_url(url: str) -> str:
     """Validate a Twitter/X status URL and return a canonical URL.
 

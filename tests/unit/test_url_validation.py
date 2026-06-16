@@ -10,6 +10,7 @@ from whisper_ui.core.url_validation import (
     YouTubeURLError,
     is_google_drive_url,
     is_twitter_url,
+    is_valid_gdrive_file_id,
     is_youtube_playlist_url,
     validate_google_drive_url,
     validate_twitter_url,
@@ -332,3 +333,17 @@ class TestIsTwitterURL:
 
     def test_empty_string(self):
         assert is_twitter_url("") is False
+
+
+class TestIsValidGdriveFileId:
+    def test_accepts_canonical_id(self):
+        assert is_valid_gdrive_file_id("1A2b3C4d5E6f") is True
+
+    def test_rejects_too_short(self):
+        assert is_valid_gdrive_file_id("short") is False
+
+    def test_rejects_path_traversal_chars(self):
+        assert is_valid_gdrive_file_id("../../etc/passwd") is False
+
+    def test_rejects_empty(self):
+        assert is_valid_gdrive_file_id("") is False
