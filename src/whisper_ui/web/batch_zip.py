@@ -16,15 +16,21 @@ def _zip_entry_base(job: Job) -> str:
     """Choose a ZIP entry base name that is safe across OSes.
 
     For uploaded media we keep the user's filename (already basename-
-    sanitised at upload time) so the ZIP is self-describing. For URL
-    jobs the canonical source URL is stored as ``job.filename`` and can
-    contain characters like ``?`` and ``=`` (e.g. a YouTube
-    ``watch?v=abc`` URL) that confuse Windows ZIP tools — so we fall back
-    to the job id, which is the same identifier the viewer URL uses.
+    sanitised at upload time) so the ZIP is self-describing, but strip any
+    residual path separators and leading dots: ``PurePosixPath(...).name``
+    leaves backslashes intact on POSIX, so a name like ``..\\..\\evil`` would
+    otherwise survive into the entry and could Zip-Slip on a permissive
+    Windows extractor. Only the separators are touched so ordinary names
+    (spaces, parentheses, CJK characters) are preserved. For URL jobs the
+    canonical source URL is stored as ``job.filename`` and can contain
+    characters like ``?`` and ``=`` (e.g. a YouTube ``watch?v=abc`` URL) that
+    confuse Windows ZIP tools — so we fall back to the job id, which is the
+    same identifier the viewer URL uses.
     """
     if job.source_url:
         return job.id
-    return Path(job.filename).stem or job.id
+    base = Path(job.filename).stem.replace("\\", "_").replace("/", "_").lstrip(". ")
+    return base or job.id
 
 
 def create_batch_zip(
