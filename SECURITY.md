@@ -28,8 +28,10 @@ deployment:
   the initial admin (`web/app.py`, `web/auth.py`).
 - **CSRF protection**: state-changing requests are rejected unless `Origin`
   (or `Referer` as fallback) matches the request `Host` (`web/auth.py`).
-- **Rate limiting**: per-username and per-IP login throttling backed by
-  Redis (`web/rate_limit.py`, `web/routes/auth_routes.py`).
+- **Rate limiting**: per-username and per-IP login throttling, plus per-IP
+  throttling of open (non-bootstrap) registration to bound automated account
+  creation and the username-taken enumeration oracle, backed by Redis
+  (`web/rate_limit.py`, `web/routes/auth_routes.py`).
 - **Per-user authorization**: jobs are scoped to their `owner_id`; non-admin
   users only see their own transcripts, downloads, and delete actions
   (`web/routes/jobs.py`, `web/routes/viewer.py`).
@@ -47,7 +49,7 @@ deployment:
   job IDs (`web/routes/upload.py`, `storage/filestore.py`).
 - **URL ingest whitelist**: link downloads accept only YouTube, Google Drive,
   and Twitter/X URLs from fixed host sets; each URL is canonicalised from the
-  extracted ID before download (`web/url_validation.py`). The YouTube and
+  extracted ID before download (`core/url_validation.py`). The YouTube and
   Twitter/X paths additionally pin yt-dlp's `allowed_extractors`, so a crafted
   link can never fall back to the generic extractor and reach an arbitrary
   (e.g. internal) host (`pipeline/download.py`). Optional X login cookies are an
@@ -55,6 +57,11 @@ deployment:
 - **Template autoescape**: enabled (FastAPI / Jinja2 default).
 - **Error surface**: unhandled exceptions return a generic 500; tracebacks
   go to the operator log only (`web/app.py`).
+- **Log hygiene**: failed-login and registration events mask the submitted
+  username (`mask_username`) since it is attacker-controlled and occasionally
+  credential-adjacent, and the Redis URL is redacted before logging so a
+  configured password never reaches the logs; authenticated users are still
+  recorded in full via the structured access log.
 
 Even with the above, the application is **not** designed to face the
 open internet directly. Place it behind a reverse proxy that terminates
