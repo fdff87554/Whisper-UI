@@ -123,9 +123,10 @@ def _banded_progress(
 ) -> ProgressCallback:
     """Wrap a throttled reporter so stages can emit local [0, 1] progress.
 
-    Each stage's local progress is linearly mapped into its global band
-    using the same formula the single-process orchestrator applies, so a
-    stage written for either runner reports identically.
+    Each stage's local progress is linearly mapped into its global band using
+    the same formula as the single-process test orchestrator in
+    ``tests/helpers/orchestrator.py``, so a stage reports identically whether
+    driven by the production RQ DAG or that test helper.
     """
     start, end = band
     span = end - start
@@ -146,9 +147,9 @@ def _execute_stage(
 ) -> dict[str, Any]:
     """Run a stage and convert non-timeout failures into ``PipelineError``.
 
-    Matches the single-process orchestrator's contract so stage tasks
-    emit the same error shape ``finalize_failure`` already knows how to
-    classify.
+    Emits the same error shape ``finalize_failure`` already knows how to
+    classify — the contract shared with the single-process test orchestrator
+    in ``tests/helpers/orchestrator.py``.
     """
     try:
         updated = stage.execute(context, on_progress=on_progress)
