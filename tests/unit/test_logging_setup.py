@@ -15,10 +15,30 @@ from whisper_ui.core.logging_setup import (
     _resolve_json,
     current_request_id,
     current_user_id,
+    mask_username,
     reset_request_context,
     set_request_context,
     setup_logging,
 )
+
+
+@pytest.mark.parametrize(
+    ("raw", "masked"),
+    [
+        ("alice", "a***e"),
+        ("bob", "b***b"),
+        ("ab", "**"),
+        ("x", "**"),
+        ("", ""),
+    ],
+)
+def test_mask_username_keeps_only_first_and_last(raw, masked):
+    assert mask_username(raw) == masked
+
+
+def test_mask_username_never_returns_the_full_value():
+    secret = "supersecretlogin"
+    assert secret not in mask_username(secret)
 
 
 @pytest.fixture(autouse=True)

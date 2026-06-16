@@ -7,6 +7,45 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+Pre-release review remediation.
+
+### Added
+
+- `MAX_REGISTER_ATTEMPTS_PER_IP` (default 10) rate-limits open, non-bootstrap
+  registration per IP, bounding scripted account creation and the
+  username-taken enumeration oracle. The bootstrap admin is never throttled.
+
+### Changed
+
+- `url_validation` moved from `web/` to `core/` so the pipeline and worker
+  layers no longer import upward into `web`, matching the documented layer
+  rule. No behaviour change.
+- The Google Drive download stage re-validates the file ID at its own boundary
+  rather than trusting the caller-supplied URL (defense-in-depth).
+- Job-progress reads on the polled job-list / dashboard are batched into one
+  Redis pipeline; bulk delete collapses its progress-key deletes into a single
+  round-trip; `/metrics` collection is offloaded off the event loop. Added
+  `idx_jobs_status_updated_at` and `idx_jobs_batch_id` for the hot job queries.
+
+### Fixed
+
+- A corrupt or truncated `result.json` now degrades to the "no result" page
+  instead of turning every viewer / export / download interaction with that
+  job into a 500; results are also written atomically.
+- The login `next=` parameter no longer accepts the `/\evil.example` backslash
+  form that browsers normalise into an off-site open redirect.
+- Negative segment offsets can no longer emit an invalid SRT/VTT timecode.
+- Batch-export ZIP entry names strip residual path separators so a crafted
+  uploaded filename cannot Zip-Slip on a permissive extractor.
+
+### Security
+
+- The Redis password is redacted from the "Redis is not reachable" startup
+  warning.
+- Failed-login and registration logs mask the submitted username and the
+  unknown-user line drops to DEBUG, since the value is attacker-controlled and
+  occasionally credential-adjacent.
+
 ## [2.15.0] - 2026-06-16
 
 GPU worker idle resource release + compose shell-injection hardening (PR #130).
@@ -856,4 +895,24 @@ Error` JSON body while logging the full traceback, so an
   classification, missing-job handling) are now covered by unit tests
   in `test_pipeline_dispatcher.py` and `test_stage_tasks.py`.
 
+[Unreleased]: https://github.com/fdff87554/Whisper-UI/compare/v2.15.0...HEAD
+[2.15.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.15.0
+[2.14.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.14.0
+[2.13.1]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.13.1
+[2.13.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.13.0
+[2.12.1]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.12.1
+[2.12.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.12.0
+[2.11.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.11.0
+[2.10.1]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.10.1
+[2.10.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.10.0
+[2.9.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.9.0
+[2.8.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.8.0
+[2.7.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.7.0
+[2.6.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.6.0
+[2.5.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.5.0
+[2.4.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.4.0
+[2.3.1]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.3.1
+[2.3.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.3.0
+[2.2.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.2.0
+[2.1.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.1.0
 [2.0.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.0.0

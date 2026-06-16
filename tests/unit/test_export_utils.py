@@ -19,6 +19,12 @@ def test_format_timestamp_default_separator():
     assert format_timestamp(1.5) == "00:00:01,500"
 
 
+def test_format_timestamp_clamps_negative_to_zero():
+    # A negative offset must not borrow into an invalid "-1:59:59,500" timecode.
+    assert format_timestamp(-0.5) == "00:00:00,000"
+    assert format_timestamp(-1.2, ".") == "00:00:00.000"
+
+
 def test_strip_control_chars_removes_xml_incompatible():
     assert strip_control_chars("a\x00b\x08c\x1fd") == "abcd"
 

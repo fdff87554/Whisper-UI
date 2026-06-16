@@ -79,6 +79,23 @@ def reset_user_id(token: Token[str]) -> None:
     _user_id_var.reset(token)
 
 
+def mask_username(username: str) -> str:
+    """Mask a username for failed-auth logging so logs don't retain raw PII.
+
+    Keeps the first and last character for correlation (``alice`` -> ``a***e``);
+    two characters or fewer are fully masked. Used on the attacker-controllable
+    login / registration failure paths — on a failed login a user sometimes
+    types a password into the username field, so the raw value can be
+    credential-adjacent. Successfully authenticated users are still recorded in
+    full via the access-log ``user_id`` context var.
+    """
+    if not username:
+        return ""
+    if len(username) <= 2:
+        return "**"
+    return f"{username[0]}***{username[-1]}"
+
+
 def current_request_id() -> str:
     """Return the request_id for the current context (or '-' if unset)."""
     return _request_id_var.get()

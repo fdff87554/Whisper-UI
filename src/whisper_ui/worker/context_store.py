@@ -142,6 +142,10 @@ class PipelineContextStore:
 
     @property
     def generation_key(self) -> str:
+        # Test-support accessor: production reads the generation counter via
+        # pipeline_dispatcher._current_generation() (sub-jobs read their own
+        # generation from RQ meta), not through the store. Exposed so tests can
+        # seed/inspect the counter key.
         return self._generation_key
 
     def initialize(self, context: dict[str, Any]) -> None:
@@ -218,7 +222,13 @@ class PipelineContextStore:
         return int(result) == 1
 
     def get_generation(self) -> int | None:
-        """Return the current generation, or None if none has been set yet."""
+        """Return the current generation, or None if none has been set yet.
+
+        Test-support accessor — production code reads the counter through
+        ``pipeline_dispatcher._current_generation()`` (it constructs the same
+        key independently), so keep the two key derivations in sync if either
+        changes.
+        """
         raw = self._redis.get(self._generation_key)
         if raw is None:
             return None

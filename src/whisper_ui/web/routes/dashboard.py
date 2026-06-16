@@ -17,7 +17,7 @@ def _get_active_jobs_with_progress(db, redis, owner_id: int | None) -> tuple[lis
     processing = db.list_jobs_filtered(status=JobStatus.PROCESSING.value, limit=5, owner_id=owner_id)
     queued = db.list_jobs_filtered(status=JobStatus.QUEUED.value, limit=5, owner_id=owner_id)
     active_jobs = (processing + queued)[:5]
-    progress_data = {job.id: RedisProgressReporter.get_progress(redis, job.id) for job in active_jobs}
+    progress_data = RedisProgressReporter.get_progress_batch(redis, [job.id for job in active_jobs])
     return active_jobs, progress_data
 
 

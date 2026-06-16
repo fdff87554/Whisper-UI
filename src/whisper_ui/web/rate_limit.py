@@ -16,16 +16,20 @@ Keys live under ``auth:rl:`` so production operators can clear them with
 
 Logging policy: every check_and_increment writes a DEBUG line with both
 counter values, the thresholds, and which counter (if any) tripped, so
-operators can replay an attack timeline by lifting LOG_LEVEL to DEBUG.
+operators can replay an attack timeline (by IP) when LOG_LEVEL is DEBUG.
 A WARNING is emitted once on the request that actually trips the limit,
 naming the dimension that hit it ("user" vs "ip" vs "both") so security
-review does not have to cross-reference counter values manually.
+review does not have to cross-reference counter values manually. Usernames
+are masked (see :func:`mask_username`) since these lines log the raw,
+attacker-supplied value on the unauthenticated failure path.
 """
 
 from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
+
+from whisper_ui.core.logging_setup import mask_username
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -101,8 +105,8 @@ def check_and_increment(
     )
 
     logger.debug(
-        "rate-limit attempt username=%r ip=%s user_count=%d/%d ip_count=%d/%d tripped=%s",
-        username,
+        "rate-limit attempt username=%s ip=%s user_count=%d/%d ip_count=%d/%d tripped=%s",
+        mask_username(username),
         ip,
         user_count,
         max_user_attempts,
@@ -112,9 +116,9 @@ def check_and_increment(
     )
     if tripped is not None:
         logger.warning(
-            "rate-limit tripped on %s counter: username=%r ip=%s user_count=%d/%d ip_count=%d/%d",
+            "rate-limit tripped on %s counter: username=%s ip=%s user_count=%d/%d ip_count=%d/%d",
             tripped,
-            username,
+            mask_username(username),
             ip,
             user_count,
             max_user_attempts,
@@ -143,8 +147,8 @@ def is_locked(
     locked = user_count >= max_user_attempts or ip_count >= max_ip_attempts
     if locked:
         logger.debug(
-            "rate-limit short-circuit: username=%r ip=%s user_count=%d/%d ip_count=%d/%d",
-            username,
+            "rate-limit short-circuit: username=%s ip=%s user_count=%d/%d ip_count=%d/%d",
+            mask_username(username),
             ip,
             user_count,
             max_user_attempts,
@@ -152,6 +156,37 @@ def is_locked(
             max_ip_attempts,
         )
     return locked
+
+
+def _register_ip_key(ip: str) -> str:
+    return f"auth:rl:register:ip:{ip}"
+
+
+def register_is_locked(redis: Redis, *, ip: str, max_attempts: int) -> bool:
+    """Return True when open registration from this IP should be refused.
+
+    A single per-IP counter (separate from the login counters) bounds
+    automated account creation and the username-taken enumeration oracle.
+    Counters are not modified — the caller records the attempt separately so
+    a probe that crosses the threshold is still counted.
+    """
+    count = int(redis.get(_register_ip_key(ip)) or 0)
+    locked = count >= max_attempts
+    if locked:
+        logger.debug("register rate-limit short-circuit: ip=%s count=%d/%d", ip, count, max_attempts)
+    return locked
+
+
+def record_register_attempt(redis: Redis, *, ip: str, window_seconds: int) -> None:
+    """Increment the per-IP registration counter (TTL set on the first hit).
+
+    Like :func:`check_and_increment`, the window is set with ``EXPIRE NX`` so
+    it slides from the first attempt of a burst rather than each subsequent one.
+    """
+    pipe = redis.pipeline()
+    pipe.incr(_register_ip_key(ip))
+    pipe.expire(_register_ip_key(ip), window_seconds, nx=True)
+    pipe.execute()
 
 
 def reset_user(redis: Redis, username: str) -> None:

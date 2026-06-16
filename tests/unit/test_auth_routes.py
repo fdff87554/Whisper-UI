@@ -177,6 +177,20 @@ def test_login_next_parameter_only_accepts_relative_path(app, test_user):
     assert resp.headers["location"] == "/"  # absolute next was discarded
 
 
+def test_login_next_parameter_rejects_backslash_open_redirect(app, test_user):
+    client = _anon_client(app)
+
+    # "/\evil.example" passes a naive startswith("//") check but browsers
+    # normalise "\" to "/", resolving it off-site. It must be discarded.
+    resp = client.post(
+        "/login",
+        data={"username": "alice", "password": "password123", "next": "/\\evil.example"},
+    )
+
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/"
+
+
 def test_login_next_parameter_relative_path_respected(app, test_user):
     client = _anon_client(app)
 
@@ -259,6 +273,34 @@ def test_register_first_account_becomes_admin(app, db):
     assert created is not None
     assert created.is_admin is True
     assert app.state.bootstrap_done is True
+
+
+def test_register_rate_limited_per_ip_after_threshold(app, db, test_admin):
+    """Open registration is bounded per IP; the attempt past the cap is refused."""
+    app.state.settings.max_register_attempts_per_ip = 2
+    client = _anon_client(app)
+
+    for name in ("userone", "usertwo"):
+        resp = client.post("/register", data={"username": name, "password": "password123"})
+        assert resp.status_code == 302  # both consume a per-IP slot
+
+    blocked = client.post("/register", data={"username": "userthree", "password": "password123"})
+    assert blocked.status_code == 302
+    assert blocked.headers["location"] == "/register?error=rate_limited"
+    # The over-limit attempt is rejected before any account is created.
+    assert users_repo.get_user_by_username(db.conn, "userthree") is None
+
+
+def test_register_bootstrap_admin_is_never_rate_limited(app, db):
+    """With no admin yet, the bootstrap account must be creatable regardless of the cap."""
+    app.state.settings.max_register_attempts_per_ip = 0
+    client = _anon_client(app)
+
+    resp = client.post("/register", data={"username": "founder", "password": "password123"})
+
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/"
+    assert users_repo.get_user_by_username(db.conn, "founder") is not None
 
 
 def test_register_page_redirects_to_login_when_signup_closed(app, db, test_admin):

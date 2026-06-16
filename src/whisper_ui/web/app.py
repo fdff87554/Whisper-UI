@@ -6,6 +6,7 @@ import logging
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
@@ -46,6 +47,36 @@ _UPLOAD_RETENTION_CHECK_INTERVAL = 3600  # once per hour is enough for a daily-g
 # outage left thousands of expired COMPLETED jobs piled up. 200/hour =
 # 4800/day, which already comfortably exceeds any plausible deployment.
 _UPLOAD_RETENTION_BATCH_LIMIT = 200
+
+
+def _redact_redis_url(url: str) -> str:
+    """Return a redis URL safe to log, with any password removed.
+
+    compose builds ``REDIS_URL`` as ``redis://:<password>@host:port/db`` when
+    ``REDIS_PASSWORD`` is set; a password can also arrive as a ``password=``
+    query param. Either way it must never reach the logs. When the URL carries
+    a credential we rebuild it as ``scheme://***@host:port/path`` (dropping the
+    userinfo and the query string, which may itself carry the password); a URL
+    with no detectable credential is returned unchanged. A credentialed URL
+    whose host cannot be cleanly parsed (e.g. a password containing ``#`` or a
+    missing host) falls back to ``"<redacted>"`` so a malformed value never
+    leaks the secret.
+    """
+    has_userinfo = "@" in url
+    if not has_userinfo and "password=" not in url.lower():
+        return url
+    try:
+        parts = urlsplit(url)
+        if not parts.hostname:
+            return "<redacted>"
+        # SplitResult.port parses lazily and raises ValueError on a malformed
+        # or out-of-range port, so the hostname/port assembly must stay inside
+        # the try to keep this helper fail-safe (never raise, never leak).
+        netloc = f"{parts.hostname}:{parts.port}" if parts.port else parts.hostname
+    except ValueError:
+        return "<redacted>"
+    userinfo = "***@" if has_userinfo else ""
+    return f"{parts.scheme}://{userinfo}{netloc}{parts.path}"
 
 
 def _run_retention_sweep(db_path, filestore, threshold_iso: str, limit: int) -> int:
@@ -124,7 +155,7 @@ async def lifespan(app: FastAPI):
     try:
         app.state.redis.ping()
     except RedisError:
-        logger.warning("Redis is not reachable at %s — job submission will fail", settings.redis_url)
+        logger.warning("Redis is not reachable at %s — job submission will fail", _redact_redis_url(settings.redis_url))
 
     async def _stale_job_checker():
         while True:

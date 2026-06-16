@@ -31,6 +31,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Form, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
+from whisper_ui.core.logging_setup import mask_username
 from whisper_ui.storage import users_repo
 from whisper_ui.ui import labels as ui_labels
 from whisper_ui.web import rate_limit
@@ -46,13 +47,17 @@ MIN_PASSWORD_LENGTH = 8
 def _safe_next(next_url: str | None) -> str:
     """Return ``next_url`` only if it is a same-origin relative path.
 
-    Rejects absolute URLs, protocol-relative (``//evil.example``), and
-    anything not starting with ``/``. This prevents open redirect attacks
-    via the ``?next=`` query param.
+    Rejects absolute URLs, protocol-relative (``//evil.example``), the
+    backslash variant (``/\\evil.example``), and anything not starting with
+    ``/``. This prevents open redirect attacks via the ``?next=`` query param.
     """
     if not next_url:
         return "/"
-    if not next_url.startswith("/") or next_url.startswith("//"):
+    # Browsers normalise "\" to "/" in the authority component, so a value like
+    # "/\evil.example" resolves to "//evil.example" -> an off-site redirect.
+    # Decide on the normalised form so that variant is rejected like "//host".
+    normalized = next_url.replace("\\", "/")
+    if not normalized.startswith("/") or normalized.startswith("//"):
         return "/"
     return next_url
 
@@ -166,7 +171,7 @@ async def login_submit(
         max_user_attempts=settings.max_login_attempts,
         max_ip_attempts=settings.max_login_attempts_per_ip,
     ):
-        logger.warning("login rate-limited: username=%r ip=%s", username, ip)
+        logger.warning("login rate-limited: username=%s ip=%s", mask_username(username), ip)
         return _login_error_redirect(request, next_url, "rate_limited")
 
     user_row = users_repo.get_user_by_username(db.conn, username)
@@ -176,7 +181,7 @@ async def login_submit(
         # branch takes a comparable wall-clock time to the wrong-password
         # branch below.
         users_repo.dummy_verify(password)
-        logger.info("login failed: unknown username %r", username)
+        logger.debug("login failed: unknown username %s", mask_username(username))
         _record_failure(redis, settings, username=username, ip=ip)
         return _login_error_redirect(request, next_url, "invalid")
 
@@ -186,7 +191,7 @@ async def login_submit(
     # enumeration leak. Verifying first means the inactive branch is only
     # reachable by someone who can already authenticate as the user.
     if not users_repo.verify_password(user_row, password):
-        logger.info("login failed: wrong password for %r", user_row.username)
+        logger.info("login failed: wrong password for %s", mask_username(user_row.username))
         _record_failure(redis, settings, username=user_row.username, ip=ip)
         return _login_error_redirect(request, next_url, "invalid")
 
@@ -264,6 +269,8 @@ def _register_error_message(error: str) -> str | None:
         return ui_labels.AUTH_USERNAME_INVALID
     if error == "password_short":
         return ui_labels.AUTH_PASSWORD_TOO_SHORT
+    if error == "rate_limited":
+        return ui_labels.AUTH_REGISTER_RATE_LIMITED
     return None
 
 
@@ -271,6 +278,7 @@ def _register_error_message(error: str) -> str | None:
 async def register_submit(
     request: Request,
     db: DbDep,
+    redis: RedisDep,
     settings: SettingsDep,
     username: Annotated[str, Form()],
     password: Annotated[str, Form()],
@@ -295,10 +303,25 @@ async def register_submit(
         # Closed signup: refuse even hand-crafted POSTs that skip the form.
         return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
 
+    # Rate-limit open registration per IP so account creation and the
+    # username-taken oracle are bounded the way login attempts are. Bootstrap
+    # is never throttled — the first admin must be creatable.
+    ip = _client_ip(request, trust_proxy_headers=settings.trust_proxy_headers)
+    if not bootstrap and rate_limit.register_is_locked(
+        redis, ip=ip, max_attempts=settings.max_register_attempts_per_ip
+    ):
+        logger.warning("register rate-limited: ip=%s", ip)
+        return _redirect_after_auth(request, "/register?error=rate_limited")
+
     if not USERNAME_PATTERN.fullmatch(username):
         return _redirect_after_auth(request, "/register?error=username_invalid")
     if len(password) < MIN_PASSWORD_LENGTH:
         return _redirect_after_auth(request, "/register?error=password_short")
+
+    # Count this attempt against the per-IP window before the DB/argon2 work so
+    # both successful creates and username-taken probes are bounded.
+    if not bootstrap:
+        rate_limit.record_register_attempt(redis, ip=ip, window_seconds=settings.login_lockout_seconds)
 
     try:
         user = users_repo.create_user(
@@ -308,7 +331,7 @@ async def register_submit(
             is_admin=bootstrap,
         )
     except sqlite3.IntegrityError:
-        logger.info("register failed: username %r already taken", username)
+        logger.info("register failed: username %s already taken", mask_username(username))
         return _redirect_after_auth(request, "/register?error=username_taken")
 
     # Flip the bootstrap latch immediately so subsequent requests skip the

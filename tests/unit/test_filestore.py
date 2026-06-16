@@ -51,6 +51,44 @@ def test_load_result_ignores_directory_named_result_json(filestore: FileStore, s
     assert filestore.load_result("jobdir") is None
 
 
+def test_load_result_returns_none_on_truncated_json(filestore: FileStore, settings: Settings):
+    """A half-written result.json degrades to "no result" instead of raising."""
+    job_dir = settings.output_dir / "corrupt"
+    job_dir.mkdir(parents=True)
+    (job_dir / "result.json").write_text('{"segments": [{"start": 0.0, "end"', encoding="utf-8")
+    assert filestore.load_result("corrupt") is None
+
+
+def test_load_result_returns_none_on_non_dict_json(filestore: FileStore, settings: Settings):
+    """Valid JSON whose top level is not an object degrades to "no result", not a 500."""
+    for name, payload in [("listjson", "[]"), ("strjson", '"oops"'), ("numjson", "5")]:
+        job_dir = settings.output_dir / name
+        job_dir.mkdir(parents=True)
+        (job_dir / "result.json").write_text(payload, encoding="utf-8")
+        assert filestore.load_result(name) is None
+
+
+def test_load_result_returns_none_on_unexpected_segment_key(filestore: FileStore, settings: Settings):
+    """A segment object with an unknown key (strict Segment(**s)) is treated as missing."""
+    job_dir = settings.output_dir / "badkey"
+    job_dir.mkdir(parents=True)
+    (job_dir / "result.json").write_text(
+        '{"segments": [{"start": 0.0, "end": 1.0, "text": "hi", "bogus": 1}], "language": "zh"}',
+        encoding="utf-8",
+    )
+    assert filestore.load_result("badkey") is None
+
+
+def test_save_result_is_atomic_and_leaves_no_temp_file(filestore: FileStore, settings: Settings):
+    """save_result renames a temp file into place, leaving no .tmp residue."""
+    result = TranscriptResult(segments=[Segment(start=0.0, end=1.0, text="hi")], language="zh", duration=1.0)
+    filestore.save_result("atomic", result)
+    job_dir = settings.output_dir / "atomic"
+    assert (job_dir / "result.json").is_file()
+    assert not (job_dir / "result.json.tmp").exists()
+    assert filestore.load_result("atomic") is not None
+
+
 def test_get_source_media_path_finds_downloaded_video(filestore: FileStore):
     path = save_upload(filestore, "yt", "video.mp4", b"fake video bytes")
     assert filestore.get_source_media_path("yt") == path

@@ -47,15 +47,34 @@ class FileStore:
         job_dir = self._output_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
         dest = job_dir / "result.json"
-        dest.write_text(json.dumps(result.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+        # Write to a temp file then atomically rename: a crash / disk-full /
+        # kill mid-write must never leave a half-written result.json that every
+        # later read would choke on (see load_result for the read-side guard).
+        tmp = job_dir / "result.json.tmp"
+        tmp.write_text(json.dumps(result.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(dest)
         return dest
 
     def load_result(self, job_id: str) -> TranscriptResult | None:
         path = self._output_dir / job_id / "result.json"
         if not path.is_file():
             return None
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return TranscriptResult.from_dict(data)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                # Valid JSON but the wrong top-level shape (e.g. a bare list or
+                # string) would make from_dict raise AttributeError on
+                # data.get(...); degrade to "no result" instead of 500-ing.
+                logger.warning("result.json for job_id=%s is not a JSON object; treating as missing", job_id)
+                return None
+            return TranscriptResult.from_dict(data)
+        except (json.JSONDecodeError, TypeError, ValueError, OSError):
+            # A corrupt/truncated result.json (legacy non-atomic write that was
+            # interrupted, or an out-of-band edit) must degrade to the "no
+            # result" path that the viewer/export routes already handle, not
+            # raise and turn every interaction with the job into a 500.
+            logger.warning("failed to load result.json for job_id=%s; treating as missing", job_id, exc_info=True)
+            return None
 
     def get_upload_path(self, job_id: str, filename: str) -> Path:
         return self._upload_dir / job_id / Path(filename).name

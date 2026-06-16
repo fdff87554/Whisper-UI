@@ -352,6 +352,23 @@ def test_stray_source_job_id_index_is_dropped_on_upgrade(tmp_path):
     assert row is None
 
 
+def test_hot_path_indexes_are_created(tmp_path):
+    """The polled job-list / dashboard / sweep queries get supporting indexes."""
+    import sqlite3 as _sqlite3
+
+    from whisper_ui.storage import migrations
+
+    conn = _sqlite3.connect(tmp_path / "idx.db")
+    try:
+        migrations.init_db(conn)
+        names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+    finally:
+        conn.close()
+
+    assert "idx_jobs_status_updated_at" in names
+    assert "idx_jobs_batch_id" in names
+
+
 def test_has_active_jobs_empty(db: JobDatabase):
     assert db.has_active_jobs() is False
 
