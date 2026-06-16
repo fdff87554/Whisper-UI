@@ -20,8 +20,10 @@ def _seed_jobs(db: JobDatabase, statuses: list[JobStatus]) -> None:
 
 
 def _scrape(db: JobDatabase, redis) -> str:
+    # status_counts is computed on the caller side (the route does this on the
+    # event-loop thread); the collector only renders precomputed counts + Redis.
     registry = CollectorRegistry()
-    registry.register(WhisperCollector(db, redis))
+    registry.register(WhisperCollector(db.get_status_counts(), redis))
     return generate_latest(registry).decode()
 
 

@@ -35,8 +35,6 @@ if TYPE_CHECKING:
 
     from redis import Redis
 
-    from whisper_ui.storage.database import JobDatabase
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -55,8 +53,11 @@ class WhisperCollector:
     scrape returns 200.
     """
 
-    def __init__(self, db: JobDatabase, redis: Redis) -> None:
-        self._db = db
+    def __init__(self, status_counts: dict[str, int], redis: Redis) -> None:
+        # status_counts is computed by the caller on the event-loop thread that
+        # owns the shared SQLite connection; the collector itself must not touch
+        # that connection because collect() runs in a worker thread.
+        self._status_counts = status_counts
         self._redis = redis
 
     def collect(self) -> Iterator[GaugeMetricFamily]:
@@ -65,12 +66,8 @@ class WhisperCollector:
             "Job rows by status (from SQLite).",
             labels=["status"],
         )
-        try:
-            counts = self._db.get_status_counts()
-            for status in _STATUSES:
-                jobs.add_metric([status], counts.get(status, 0))
-        except Exception:
-            logger.exception("metrics: get_status_counts failed; emitting empty whisper_jobs_total")
+        for status in _STATUSES:
+            jobs.add_metric([status], self._status_counts.get(status, 0))
         yield jobs
 
         depth = GaugeMetricFamily("whisper_queue_depth", "Jobs waiting in each RQ queue.", labels=["queue"])
@@ -98,14 +95,25 @@ class WhisperCollector:
         yield workers
 
 
-@router.get("/metrics")
-async def metrics(db: DbDep, redis: RedisDep) -> Response:
+def _render_metrics(status_counts: dict[str, int], redis: Redis) -> bytes:
     # A fresh per-request registry keeps the collector stateless — no module
     # globals, no double-registration across scrapes.
     registry = CollectorRegistry()
-    registry.register(WhisperCollector(db, redis))
-    # generate_latest drives the collector, which makes ~16 blocking sync-Redis
-    # round-trips plus a SQLite scan; offload it so a slow scrape (or a Redis
-    # hiccup) does not stall the event loop for every other request.
-    payload = await asyncio.to_thread(generate_latest, registry)
+    registry.register(WhisperCollector(status_counts, redis))
+    return generate_latest(registry)
+
+
+@router.get("/metrics")
+async def metrics(db: DbDep, redis: RedisDep) -> Response:
+    # get_status_counts is a single fast indexed query — run it on the event
+    # loop, which owns the shared SQLite connection (the collector must not
+    # touch that connection from the worker thread below). Only the ~15
+    # blocking Redis/RQ round-trips are offloaded, which is what needs to leave
+    # the event loop.
+    try:
+        status_counts = db.get_status_counts()
+    except Exception:
+        logger.exception("metrics: get_status_counts failed; emitting empty whisper_jobs_total")
+        status_counts = {}
+    payload = await asyncio.to_thread(_render_metrics, status_counts, redis)
     return Response(payload, media_type=CONTENT_TYPE_LATEST)
