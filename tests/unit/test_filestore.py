@@ -59,6 +59,15 @@ def test_load_result_returns_none_on_truncated_json(filestore: FileStore, settin
     assert filestore.load_result("corrupt") is None
 
 
+def test_load_result_returns_none_on_non_dict_json(filestore: FileStore, settings: Settings):
+    """Valid JSON whose top level is not an object degrades to "no result", not a 500."""
+    for name, payload in [("listjson", "[]"), ("strjson", '"oops"'), ("numjson", "5")]:
+        job_dir = settings.output_dir / name
+        job_dir.mkdir(parents=True)
+        (job_dir / "result.json").write_text(payload, encoding="utf-8")
+        assert filestore.load_result(name) is None
+
+
 def test_load_result_returns_none_on_unexpected_segment_key(filestore: FileStore, settings: Settings):
     """A segment object with an unknown key (strict Segment(**s)) is treated as missing."""
     job_dir = settings.output_dir / "badkey"
