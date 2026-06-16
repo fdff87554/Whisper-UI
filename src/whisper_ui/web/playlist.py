@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from whisper_ui.core.constants import YT_DLP_SOCKET_TIMEOUT
-from whisper_ui.web.url_validation import YouTubeURLError, validate_youtube_url
+from whisper_ui.core.url_validation import YouTubeURLError, validate_youtube_url
 
 logger = logging.getLogger(__name__)
 

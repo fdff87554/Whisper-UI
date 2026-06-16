@@ -24,6 +24,7 @@ from rq.timeouts import BaseTimeoutException
 from whisper_ui.core.device import torch_device_for
 from whisper_ui.core.exceptions import PipelineError
 from whisper_ui.core.models import JobStatus
+from whisper_ui.core.url_validation import is_twitter_url
 from whisper_ui.pipeline.align import AlignStage
 from whisper_ui.pipeline.assign_speakers import AssignSpeakersStage
 from whisper_ui.pipeline.diarize import DiarizeStage
@@ -36,7 +37,6 @@ from whisper_ui.pipeline.progress_bands import (
 )
 from whisper_ui.pipeline.transcribe import TranscribeStage
 from whisper_ui.pipeline.whispercpp_transcribe import WhisperCppTranscribeStage
-from whisper_ui.web.url_validation import is_twitter_url
 from whisper_ui.worker.context_store import PipelineContextStore
 from whisper_ui.worker.runtime import (
     WorkerRuntime,

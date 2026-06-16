@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from whisper_ui.web.url_validation import (
+from whisper_ui.core.url_validation import (
     GoogleDriveURLError,
     PlaylistURLError,
     TwitterURLError,

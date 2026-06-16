@@ -18,7 +18,7 @@ from whisper_ui.core.messages import (
     DOWNLOAD_SOURCE_TRANSIENT,
     DOWNLOAD_TWITTER_RESTRICTED,
 )
-from whisper_ui.web.url_validation import extract_gdrive_file_id, is_google_drive_url, is_twitter_url
+from whisper_ui.core.url_validation import extract_gdrive_file_id, is_google_drive_url, is_twitter_url
 
 if TYPE_CHECKING:
     from whisper_ui.pipeline.base import ProgressCallback
