@@ -177,6 +177,20 @@ def test_login_next_parameter_only_accepts_relative_path(app, test_user):
     assert resp.headers["location"] == "/"  # absolute next was discarded
 
 
+def test_login_next_parameter_rejects_backslash_open_redirect(app, test_user):
+    client = _anon_client(app)
+
+    # "/\evil.example" passes a naive startswith("//") check but browsers
+    # normalise "\" to "/", resolving it off-site. It must be discarded.
+    resp = client.post(
+        "/login",
+        data={"username": "alice", "password": "password123", "next": "/\\evil.example"},
+    )
+
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/"
+
+
 def test_login_next_parameter_relative_path_respected(app, test_user):
     client = _anon_client(app)
 

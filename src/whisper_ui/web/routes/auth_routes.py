@@ -46,13 +46,17 @@ MIN_PASSWORD_LENGTH = 8
 def _safe_next(next_url: str | None) -> str:
     """Return ``next_url`` only if it is a same-origin relative path.
 
-    Rejects absolute URLs, protocol-relative (``//evil.example``), and
-    anything not starting with ``/``. This prevents open redirect attacks
-    via the ``?next=`` query param.
+    Rejects absolute URLs, protocol-relative (``//evil.example``), the
+    backslash variant (``/\\evil.example``), and anything not starting with
+    ``/``. This prevents open redirect attacks via the ``?next=`` query param.
     """
     if not next_url:
         return "/"
-    if not next_url.startswith("/") or next_url.startswith("//"):
+    # Browsers normalise "\" to "/" in the authority component, so a value like
+    # "/\evil.example" resolves to "//evil.example" -> an off-site redirect.
+    # Decide on the normalised form so that variant is rejected like "//host".
+    normalized = next_url.replace("\\", "/")
+    if not normalized.startswith("/") or normalized.startswith("//"):
         return "/"
     return next_url
 
