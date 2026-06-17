@@ -324,6 +324,30 @@
   color: var(--color-primary);
 }
 
+/* Interactive card hover-lift — a small rise plus shadow on hover for clickable
+   cards, reinforcing their affordance. Pairs with the existing color/border
+   hover. The lift is disabled under prefers-reduced-motion (shadow stays). */
+.card-hover-lift {
+  transition-property: color, background-color, border-color, box-shadow, transform;
+  transition-duration: 200ms;
+  transition-timing-function: cubic-bezier(0, 0, 0.2, 1);
+}
+.card-hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 4px 6px -1px oklch(25% 0.02 260 / 0.08),
+    0 2px 4px -2px oklch(25% 0.02 260 / 0.06);
+}
+.card-hover-lift:active {
+  transform: translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .card-hover-lift:hover,
+  .card-hover-lift:active {
+    transform: none;
+  }
+}
+
 /* Dialog animations */
 dialog::backdrop {
   backdrop-filter: blur(4px);

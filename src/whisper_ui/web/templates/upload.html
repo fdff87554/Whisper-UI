@@ -75,7 +75,7 @@
     </div>
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
       <button type="button"
-              class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary"
+              class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary card-hover-lift"
               :class="activePreset === 'meeting' ? 'border-primary' : 'border-line'"
               :aria-pressed="(activePreset === 'meeting').toString()"
               @click="applyPreset('meeting')">
@@ -85,7 +85,7 @@
         </div>
       </button>
       <button type="button"
-              class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary"
+              class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary card-hover-lift"
               :class="activePreset === 'podcast' ? 'border-primary' : 'border-line'"
               :aria-pressed="(activePreset === 'podcast').toString()"
               @click="applyPreset('podcast')">
@@ -95,7 +95,7 @@
         </div>
       </button>
       <button type="button"
-              class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary"
+              class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary card-hover-lift"
               :class="activePreset === 'interview' ? 'border-primary' : 'border-line'"
               :aria-pressed="(activePreset === 'interview').toString()"
               @click="applyPreset('interview')">
@@ -105,7 +105,7 @@
         </div>
       </button>
       <button type="button"
-              class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary"
+              class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary card-hover-lift"
               :class="activePreset === 'lecture' ? 'border-primary' : 'border-line'"
               :aria-pressed="(activePreset === 'lecture').toString()"
               @click="applyPreset('lecture')">
