@@ -1,3 +1,4 @@
+{% from "_icons.html" import icon_check %}
 {# htmx fragment: active jobs on dashboard.
 
    The wrapper div lives inside the fragment (not the parent page) so every
@@ -81,21 +82,25 @@
           </span>
         </div>
 
-        {# Stage pill row — derived from progress message; non-color cue
-           for users who don't read 中文 fluently and want a quick overview. #}
-        <div class="flex flex-wrap items-center gap-1 mb-2 text-xs">
+        {# Stage stepper — connected nodes (download → … → export) derived from
+           the progress message. The node shape (check / pulse / number) and the
+           filled connector are a non-color progress cue, and the labels stay
+           readable for users not following the 中文 status text. #}
+        <ol class="stage-pipeline mb-3" aria-label="{{ labels.DASHBOARD_HERO_IN_FLIGHT }}">
           {% for key in _stage_keys %}
           {%- set is_current = (loop.index0 == _stage_idx) -%}
           {%- set is_done = (loop.index0 < _stage_idx) -%}
-          <span class="px-2 py-0.5 rounded-full
-            {% if is_current %}bg-primary text-primary-content
-            {% elif is_done %}bg-base-300 opacity-70
-            {% else %}border border-line opacity-50{% endif %}">
-            {{ _stage_labels[key] }}
-          </span>
-          {% if not loop.last %}<span class="opacity-30">›</span>{% endif %}
+          <li class="stage{% if is_current %} stage--active{% elif is_done %} stage--done{% endif %}"
+              {% if is_current %}aria-current="step"{% endif %}>
+            <span class="stage__dot">
+              {%- if is_done %}{{ icon_check("w-3.5 h-3.5") }}
+              {%- elif is_current %}<span class="status-pulse"></span>
+              {%- else %}{{ loop.index }}{% endif -%}
+            </span>
+            <span class="stage__label">{{ _stage_labels[key] }}</span>
+          </li>
           {% endfor %}
-        </div>
+        </ol>
 
         <progress class="progress progress-primary w-full" value="{{ progress_pct }}" max="100"></progress>
         <div class="flex justify-between text-sm opacity-60 mt-1">

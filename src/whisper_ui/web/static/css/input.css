@@ -231,6 +231,84 @@
   pointer-events: none;
 }
 
+/* Active-job stage stepper — connected nodes whose shape (check / pulse dot /
+   number) and filled connector convey progress without relying on color. */
+.stage-pipeline {
+  display: flex;
+  align-items: flex-start;
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+}
+.stage {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  text-align: center;
+}
+/* Connector segment leading into each node, drawn behind the dots. */
+.stage::before {
+  content: "";
+  position: absolute;
+  top: 0.6875rem;
+  left: -50%;
+  width: 100%;
+  height: 2px;
+  background: var(--color-line);
+  z-index: 0;
+}
+.stage:first-child::before {
+  display: none;
+}
+.stage--done::before,
+.stage--active::before {
+  background: var(--color-primary);
+}
+.stage__dot {
+  position: relative;
+  z-index: 1;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 9999px;
+  border: 2px solid var(--color-line);
+  background: var(--color-base-100);
+  color: var(--color-base-content);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6875rem;
+  line-height: 1;
+  opacity: 0.6;
+}
+.stage--done .stage__dot {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-primary-content);
+  opacity: 1;
+}
+.stage--active .stage__dot {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  opacity: 1;
+}
+.stage__label {
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  opacity: 0.6;
+}
+.stage--done .stage__label {
+  opacity: 1;
+}
+.stage--active .stage__label {
+  opacity: 1;
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
 /* Dialog animations */
 dialog::backdrop {
   backdrop-filter: blur(4px);
