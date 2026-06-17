@@ -381,6 +381,16 @@
   }
 }
 
+/* Mobile bottom nav — translucent fill + backdrop blur so content scrolling
+   beneath stays faintly visible (frosted dock), matching the sticky-footer
+   blur already used elsewhere. Falls back to a near-opaque fill where
+   backdrop-filter is unsupported. */
+.dock {
+  background-color: color-mix(in oklch, var(--color-base-100) 85%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
 /* Dialog animations */
 dialog::backdrop {
   backdrop-filter: blur(4px);
