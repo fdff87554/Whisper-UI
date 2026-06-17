@@ -1,4 +1,4 @@
-{% from "_icons.html" import icon_home, icon_upload, icon_list, icon_sun, icon_moon, icon_panel_left %}
+{% from "_icons.html" import icon_home, icon_upload, icon_list, icon_sun, icon_moon, icon_panel_left, icon_log_out %}
 {# Desktop sidebar (>= lg) and tablet icon rail (md-lg) #}
 <div class="flex flex-col h-full bg-base-200">
   {# Logo: mark on rail; mark + wordmark on full sidebar #}
@@ -103,6 +103,7 @@
     <form method="post" action="/logout">
       <button type="submit" class="btn btn-ghost btn-sm w-full justify-start gap-2"
               title="{{ labels.AUTH_LOGOUT_BUTTON }}">
+        {{ icon_log_out("w-4 h-4 shrink-0") }}
         <span class="sidebar-label sr-only lg:not-sr-only">{{ labels.AUTH_LOGOUT_BUTTON }}</span>
       </button>
     </form>
