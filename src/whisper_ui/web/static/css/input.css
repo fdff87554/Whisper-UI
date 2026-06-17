@@ -152,6 +152,26 @@
   border-left-color: oklch(58% 0.2 25);
 }
 
+/* Alert accent bar — a left bar (position + width) layered on the daisyUI soft
+   alert and paired with a distinct per-variant icon (see _alert.html), so the
+   variant is conveyed by shape and position, not color alone. The bar uses the
+   vivid variant color, which reads against the soft (tinted) alert surface. */
+.alert {
+  border-left-width: 4px;
+}
+.alert-info {
+  border-left-color: var(--color-info);
+}
+.alert-success {
+  border-left-color: var(--color-success);
+}
+.alert-warning {
+  border-left-color: var(--color-warning);
+}
+.alert-error {
+  border-left-color: var(--color-error);
+}
+
 /* Status pulse — animated dot rendered next to the processing badge so
    colorblind users have a non-color cue that work is actively in flight.
    The animation is short and low-amplitude to avoid distraction. */

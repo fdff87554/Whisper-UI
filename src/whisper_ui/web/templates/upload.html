@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon_upload, icon_folder_open, icon_link, icon_x %}
+{% from "_alert.html" import alert %}
 
 {% block content %}
 <h1 class="text-2xl font-medium mb-2">{{ labels.UPLOAD_HEADER }}</h1>
@@ -8,7 +9,7 @@
 
 {% set error = request.query_params.get('error', '') %}
 {% if error %}
-<div class="alert alert-error mb-4">
+{% set upload_error_msg %}
   {% if error == 'no_file' %}
   {{ labels.UPLOAD_NO_FILE }}
   {% elif error == 'no_files' %}
@@ -44,7 +45,8 @@
   {% elif error == 'all_invalid_urls' %}
   {{ labels.UPLOAD_URL_ALL_INVALID }}
   {% endif %}
-</div>
+{% endset %}
+{{ alert('error', upload_error_msg|trim, 'mb-4') }}
 {% endif %}
 
 <form method="post"
