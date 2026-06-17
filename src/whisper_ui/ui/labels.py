@@ -10,6 +10,8 @@ PAGE_UPLOAD = "上傳"
 NAV_DASHBOARD = "首頁"
 NAV_UPLOAD = "上傳"
 NAV_JOBS = "任務"
+NAV_COLLAPSE_SIDEBAR = "收合側欄"
+NAV_EXPAND_SIDEBAR = "展開側欄"
 
 # -- Dashboard --
 DASHBOARD_HEADER = "總覽"

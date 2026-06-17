@@ -1,8 +1,11 @@
 <!DOCTYPE html>
 <html lang="zh-Hant"
-      x-data="{ theme: $persist(
-        window.matchMedia('(prefers-color-scheme: dark)').matches ? 'whisper-dark' : 'whisper-light'
-      ).as('whisper-ui-theme') }"
+      x-data="{
+        theme: $persist(
+          window.matchMedia('(prefers-color-scheme: dark)').matches ? 'whisper-dark' : 'whisper-light'
+        ).as('whisper-ui-theme'),
+        sidebarCollapsed: $persist(false).as('whisper-ui-sidebar-collapsed')
+      }"
       :data-theme="theme">
 <head>
   <meta charset="utf-8">
@@ -81,10 +84,12 @@
   {# Page loading bar #}
   <div id="page-loader"></div>
 
-  {# App shell: sidebar + main content #}
-  <div class="flex min-h-screen">
+  {# App shell: sidebar + main content. sidebar-collapsed (set by the sidebar
+     toggle, desktop only) narrows the full sidebar to the icon rail; the CSS
+     overrides for it sit above the lg: width utilities by selector specificity. #}
+  <div class="flex min-h-screen" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
     {# Sidebar — hidden on mobile, icon rail on tablet, full on desktop #}
-    <aside class="hidden md:flex md:w-14 lg:w-60 flex-col fixed inset-y-0 left-0 z-40 transition-colors duration-200 border-r border-line bg-base-200">
+    <aside class="app-aside hidden md:flex md:w-14 lg:w-60 flex-col fixed inset-y-0 left-0 z-40 border-r border-line bg-base-200">
       {% include "_sidebar.html" %}
     </aside>
 

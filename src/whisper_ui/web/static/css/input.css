@@ -348,6 +348,39 @@
   }
 }
 
+/* Sidebar collapse (desktop only) — the responsive defaults (icon rail at md,
+   full sidebar at lg) stay on the Tailwind width utilities; these rules add the
+   width transition and the user-driven .sidebar-collapsed override. The
+   override selector (specificity 0,2,0) beats the lg: utilities (0,1,0), so no
+   !important is needed. Tablet/mobile are unaffected (the override is lg-only). */
+.app-aside {
+  transition:
+    width 200ms ease,
+    background-color 200ms ease,
+    border-color 200ms ease;
+}
+.main-content {
+  transition: margin-left 200ms ease;
+}
+@media (min-width: 1024px) {
+  .sidebar-collapsed .app-aside {
+    width: 3.5rem;
+  }
+  .sidebar-collapsed .main-content {
+    margin-left: 3.5rem;
+  }
+  .sidebar-collapsed .sidebar-label,
+  .sidebar-collapsed .sidebar-collapsible {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-aside,
+  .main-content {
+    transition: none;
+  }
+}
+
 /* Dialog animations */
 dialog::backdrop {
   backdrop-filter: blur(4px);
