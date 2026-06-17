@@ -7,6 +7,42 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.17.0] - 2026-06-17
+
+UI alignment with the Whisper UI design system (non-destructive presentation
+changes only — no data/schema migration).
+
+### Added
+
+- Dashboard in-flight "hero" card: a faint teal-tinted focus surface with a
+  waveform watermark so the processing job stands out from neutral cards.
+- Active-job stage stepper (download → preprocess → recognise → diarise →
+  correct → export) with connected done/active/pending nodes, replacing the
+  flat stage pills.
+- Quick-action cards get soft-tinted icon tiles, and interactive cards lift on
+  hover (disabled under `prefers-reduced-motion`).
+- First-run onboarding empty state gains a call-to-action button.
+- The register form gets a password show/hide toggle (matching login).
+- Manual sidebar collapse toggle (desktop), with the collapsed state persisted.
+- The mobile bottom nav is now a frosted (backdrop-blurred) bar.
+- The sidebar logout control now has an icon, so it stays visible in the
+  icon rail.
+
+### Changed
+
+- Alerts use the daisyUI soft style with a distinct per-variant Lucide icon and
+  a left accent bar, so the variant is conveyed by shape and position, not
+  color alone (colorblind-safe). Server alerts render via a shared `_alert.html`
+  macro.
+- Sidebar rail controls (collapse / theme / logout) are centered via a
+  `.sidebar-action` class instead of relying on a `justify-start` utility.
+
+### Fixed
+
+- The toast store normalizes an unknown notification `type` to `info`, and the
+  toast icon lookup is guarded, so a stray category can no longer render an
+  `"undefined"` icon or an uncolored toast.
+
 ## [2.16.0] - 2026-06-16
 
 Pre-release review remediation.
@@ -897,7 +933,8 @@ Error` JSON body while logging the full traceback, so an
   classification, missing-job handling) are now covered by unit tests
   in `test_pipeline_dispatcher.py` and `test_stage_tasks.py`.
 
-[Unreleased]: https://github.com/fdff87554/Whisper-UI/compare/v2.16.0...HEAD
+[Unreleased]: https://github.com/fdff87554/Whisper-UI/compare/v2.17.0...HEAD
+[2.17.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.17.0
 [2.16.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.16.0
 [2.15.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.15.0
 [2.14.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.14.0
