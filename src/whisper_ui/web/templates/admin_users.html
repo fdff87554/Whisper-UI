@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_alert.html" import alert %}
 
 {% block title %}{{ labels.ADMIN_USERS_HEADER }} — Whisper UI{% endblock %}
 
@@ -7,7 +8,7 @@
 <p class="text-sm opacity-60 mb-6">{{ labels.ADMIN_USERS_DESCRIPTION }}</p>
 
 {% if error_message %}
-<div class="alert alert-error mb-4" role="alert">{{ error_message }}</div>
+{{ alert('error', error_message, 'mb-4') }}
 {% endif %}
 
 {# Single-dimension client-side filter chips: 全部 / Admin / User / Active /

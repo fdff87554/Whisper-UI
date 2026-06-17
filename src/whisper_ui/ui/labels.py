@@ -10,6 +10,8 @@ PAGE_UPLOAD = "上傳"
 NAV_DASHBOARD = "首頁"
 NAV_UPLOAD = "上傳"
 NAV_JOBS = "任務"
+NAV_COLLAPSE_SIDEBAR = "收合側欄"
+NAV_EXPAND_SIDEBAR = "展開側欄"
 
 # -- Dashboard --
 DASHBOARD_HEADER = "總覽"
@@ -38,6 +40,7 @@ DASHBOARD_ONBOARDING_TITLE = "歡迎使用 Whisper UI"
 DASHBOARD_ONBOARDING_STEP1 = "上傳第一支音訊或影片檔"
 DASHBOARD_ONBOARDING_STEP2 = "等待系統辨識並產生轉錄結果"
 DASHBOARD_ONBOARDING_STEP3 = "下載 SRT／DOCX 等格式或直接複製文字"
+DASHBOARD_ONBOARDING_CTA = "上傳第一支檔案"
 DASHBOARD_SPARKLINE_TITLE = "近 7 日新增"
 
 # -- Upload page --

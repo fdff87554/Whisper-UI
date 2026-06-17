@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_icons.html" import icon_eye, icon_file_audio, icon_folder_open, icon_link %}
+{% from "_icons.html" import icon_eye, icon_upload, icon_file_audio, icon_folder_open, icon_link %}
 
 {% block content %}
 {# Time-aware greeting — hour is read on the client so the user's local
@@ -35,11 +35,11 @@
    full-card click target (Fitts) leading to the matching upload tab. #}
 <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
   <a href="/upload?mode=files"
-     class="card bg-base-200 border border-line hover:border-primary/40 hover:bg-base-300 focus-visible:border-primary transition-colors"
+     class="card bg-base-200 border border-line hover:border-primary/40 hover:bg-base-300 focus-visible:border-primary transition-colors card-hover-lift"
      hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true">
     <div class="card-body p-4">
       <div class="flex items-center gap-3">
-        {{ icon_file_audio("w-6 h-6 text-primary opacity-80") }}
+        <span class="quick-tile">{{ icon_file_audio("w-5 h-5") }}</span>
         <div class="flex-1 min-w-0">
           <div class="font-medium">{{ labels.DASHBOARD_QUICK_ACTION_FILE }}</div>
           <div class="text-xs opacity-60 truncate">{{ labels.DASHBOARD_QUICK_ACTION_FILE_DESC }}</div>
@@ -48,11 +48,11 @@
     </div>
   </a>
   <a href="/upload?mode=folder"
-     class="card bg-base-200 border border-line hover:border-primary/40 hover:bg-base-300 focus-visible:border-primary transition-colors"
+     class="card bg-base-200 border border-line hover:border-primary/40 hover:bg-base-300 focus-visible:border-primary transition-colors card-hover-lift"
      hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true">
     <div class="card-body p-4">
       <div class="flex items-center gap-3">
-        {{ icon_folder_open("w-6 h-6 text-primary opacity-80") }}
+        <span class="quick-tile">{{ icon_folder_open("w-5 h-5") }}</span>
         <div class="flex-1 min-w-0">
           <div class="font-medium">{{ labels.DASHBOARD_QUICK_ACTION_FOLDER }}</div>
           <div class="text-xs opacity-60 truncate">{{ labels.DASHBOARD_QUICK_ACTION_FOLDER_DESC }}</div>
@@ -61,11 +61,11 @@
     </div>
   </a>
   <a href="/upload?mode=url"
-     class="card bg-base-200 border border-line hover:border-primary/40 hover:bg-base-300 focus-visible:border-primary transition-colors"
+     class="card bg-base-200 border border-line hover:border-primary/40 hover:bg-base-300 focus-visible:border-primary transition-colors card-hover-lift"
      hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true">
     <div class="card-body p-4">
       <div class="flex items-center gap-3">
-        {{ icon_link("w-6 h-6 text-primary opacity-80") }}
+        <span class="quick-tile">{{ icon_link("w-5 h-5") }}</span>
         <div class="flex-1 min-w-0">
           <div class="font-medium">{{ labels.DASHBOARD_QUICK_ACTION_URL }}</div>
           <div class="text-xs opacity-60 truncate">{{ labels.DASHBOARD_QUICK_ACTION_URL_DESC }}</div>
@@ -119,7 +119,7 @@
   <h2 class="text-lg font-medium mb-3">{{ labels.DASHBOARD_RECENT_SECTION }}</h2>
   <div class="flex flex-col gap-2">
     {% for job in recent_completed %}
-    <a href="/viewer/{{ job.id }}" class="card bg-base-200 border border-line hover:border-primary/30 transition-colors">
+    <a href="/viewer/{{ job.id }}" class="card bg-base-200 border border-line hover:border-primary/30 transition-colors card-hover-lift">
       <div class="card-body p-4">
         <div class="flex items-center justify-between gap-4">
           <div class="flex-1 min-w-0">
@@ -160,6 +160,12 @@
         <span class="pt-0.5 opacity-80">{{ labels.DASHBOARD_ONBOARDING_STEP3 }}</span>
       </li>
     </ol>
+    <a href="/upload?mode=files"
+       hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true"
+       class="btn btn-primary gap-2 mt-6 w-full sm:w-auto">
+      {{ icon_upload("w-4 h-4") }}
+      {{ labels.DASHBOARD_ONBOARDING_CTA }}
+    </a>
   </div>
 </section>
 {% endif %}

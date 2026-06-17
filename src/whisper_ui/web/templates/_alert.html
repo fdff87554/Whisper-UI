@@ -1,0 +1,17 @@
+{% from "_icons.html" import icon_info, icon_circle_check, icon_triangle_alert, icon_circle_alert %}
+{#
+  Semantic alert — the daisyUI soft variant plus a distinct per-variant Lucide
+  icon and (via input.css) a left accent bar. The meaning is therefore carried
+  by shape and position, not color alone, which keeps it legible for colorblind
+  users. `variant` is one of: info | success | warning | error.
+#}
+{% macro alert(variant, message, extra_class="") %}
+<div class="alert alert-{{ variant }} alert-soft{% if extra_class %} {{ extra_class }}{% endif %}" role="alert">
+  {%- if variant == 'success' -%}{{ icon_circle_check("w-5 h-5 shrink-0") }}
+  {%- elif variant == 'warning' -%}{{ icon_triangle_alert("w-5 h-5 shrink-0") }}
+  {%- elif variant == 'error' -%}{{ icon_circle_alert("w-5 h-5 shrink-0") }}
+  {%- else -%}{{ icon_info("w-5 h-5 shrink-0") }}
+  {%- endif -%}
+  <span>{{ message }}</span>
+</div>
+{% endmacro %}

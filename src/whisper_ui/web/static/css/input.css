@@ -152,6 +152,26 @@
   border-left-color: oklch(58% 0.2 25);
 }
 
+/* Alert accent bar — a left bar (position + width) layered on the daisyUI soft
+   alert and paired with a distinct per-variant icon (see _alert.html), so the
+   variant is conveyed by shape and position, not color alone. The bar uses the
+   vivid variant color, which reads against the soft (tinted) alert surface. */
+.alert {
+  border-left-width: 4px;
+}
+.alert-info {
+  border-left-color: var(--color-info);
+}
+.alert-success {
+  border-left-color: var(--color-success);
+}
+.alert-warning {
+  border-left-color: var(--color-warning);
+}
+.alert-error {
+  border-left-color: var(--color-error);
+}
+
 /* Status pulse — animated dot rendered next to the processing badge so
    colorblind users have a non-color cue that work is actively in flight.
    The animation is short and low-amplitude to avoid distraction. */
@@ -187,6 +207,207 @@
 .transcript-container {
   max-height: 70vh;
   overflow-y: auto;
+}
+
+/* Dashboard in-flight "hero" — a faint teal-tinted surface that lifts the
+   currently-processing job above the neutral cards around it, with a subtle
+   waveform watermark for brand warmth. Tint and border use color-mix over the
+   theme tokens so they track light/dark; the border is mixed with --color-line
+   (never a surface fill) to stay clear of the issue #61 border/surface coupling. */
+.dashboard-hero {
+  position: relative;
+  overflow: hidden;
+  background-color: color-mix(in oklch, var(--color-primary) 6%, var(--color-base-200));
+  border-color: color-mix(in oklch, var(--color-primary) 22%, var(--color-line));
+}
+.dashboard-hero__mark {
+  position: absolute;
+  right: -14px;
+  bottom: -20px;
+  width: 140px;
+  height: 140px;
+  color: var(--color-primary);
+  opacity: 0.07;
+  pointer-events: none;
+}
+
+/* Active-job stage stepper — connected nodes whose shape (check / pulse dot /
+   number) and filled connector convey progress without relying on color. */
+.stage-pipeline {
+  display: flex;
+  align-items: flex-start;
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+}
+.stage {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  text-align: center;
+}
+/* Connector segment leading into each node, drawn behind the dots. */
+.stage::before {
+  content: "";
+  position: absolute;
+  top: 0.6875rem;
+  left: -50%;
+  width: 100%;
+  height: 2px;
+  background: var(--color-line);
+  z-index: 0;
+}
+.stage:first-child::before {
+  display: none;
+}
+.stage--done::before,
+.stage--active::before {
+  background: var(--color-primary);
+}
+.stage__dot {
+  position: relative;
+  z-index: 1;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 9999px;
+  border: 2px solid var(--color-line);
+  background: var(--color-base-100);
+  color: var(--color-base-content);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6875rem;
+  line-height: 1;
+  opacity: 0.6;
+}
+.stage--done .stage__dot {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-primary-content);
+  opacity: 1;
+}
+.stage--active .stage__dot {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  opacity: 1;
+}
+.stage__label {
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  opacity: 0.6;
+}
+.stage--done .stage__label {
+  opacity: 1;
+}
+.stage--active .stage__label {
+  opacity: 1;
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+/* Quick-action icon tile — a soft-tinted rounded square behind the dashboard
+   quick-action icons, giving the entry points more presence and a clearer
+   tap affordance without adding color noise elsewhere. */
+.quick-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--radius-field);
+  background: color-mix(in oklch, var(--color-primary) 12%, transparent);
+  color: var(--color-primary);
+}
+
+/* Interactive card hover-lift — a small rise plus shadow on hover for clickable
+   cards, reinforcing their affordance. Pairs with the existing color/border
+   hover. The lift is disabled under prefers-reduced-motion (shadow stays). */
+.card-hover-lift {
+  transition-property: color, background-color, border-color, box-shadow, transform;
+  transition-duration: 200ms;
+  transition-timing-function: cubic-bezier(0, 0, 0.2, 1);
+}
+.card-hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 4px 6px -1px oklch(25% 0.02 260 / 0.08),
+    0 2px 4px -2px oklch(25% 0.02 260 / 0.06);
+}
+.card-hover-lift:active {
+  transform: translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .card-hover-lift:hover,
+  .card-hover-lift:active {
+    transform: none;
+  }
+}
+
+/* Sidebar collapse (desktop only) — the responsive defaults (icon rail at md,
+   full sidebar at lg) stay on the Tailwind width utilities; these rules add the
+   width transition and the user-driven .sidebar-collapsed override. The
+   override selector (specificity 0,2,0) beats the lg: utilities (0,1,0), so no
+   !important is needed. Tablet/mobile are unaffected (the override is lg-only). */
+.app-aside {
+  transition:
+    width 200ms ease,
+    background-color 200ms ease,
+    border-color 200ms ease;
+}
+.main-content {
+  transition: margin-left 200ms ease;
+}
+@media (min-width: 1024px) {
+  .sidebar-collapsed .app-aside {
+    width: 3.5rem;
+  }
+  .sidebar-collapsed .main-content {
+    margin-left: 3.5rem;
+  }
+  .sidebar-collapsed .sidebar-label,
+  .sidebar-collapsed .sidebar-collapsible {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-aside,
+  .main-content {
+    transition: none;
+  }
+}
+
+/* Sidebar action buttons (collapse toggle / theme / logout). With labels shown
+   the icon+label is left-aligned; in the icon rail (tablet) or when the desktop
+   sidebar is collapsed, the lone icon is centered to match the centered nav-rail
+   icons. daisyUI .btn defaults to center, so the labels-shown state is set here
+   explicitly rather than relying on a justify-start utility. */
+.sidebar-action {
+  justify-content: flex-start;
+}
+@media (min-width: 768px) and (max-width: 1023px) {
+  .sidebar-action {
+    justify-content: center;
+  }
+}
+@media (min-width: 1024px) {
+  .sidebar-collapsed .sidebar-action {
+    justify-content: center;
+  }
+}
+
+/* Mobile bottom nav — translucent fill + backdrop blur so content scrolling
+   beneath stays faintly visible (frosted dock), matching the sticky-footer
+   blur already used elsewhere. Falls back to a near-opaque fill where
+   backdrop-filter is unsupported. */
+.dock {
+  background-color: color-mix(in oklch, var(--color-base-100) 85%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 /* Dialog animations */

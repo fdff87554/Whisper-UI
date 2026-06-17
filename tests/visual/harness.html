@@ -24,12 +24,24 @@
         <div class="card-body">light card</div>
       </div>
       <span id="spk-light" class="speaker-1">speaker</span>
+      <!-- Soft alert: the left accent bar must stay distinct from the tinted
+           surface (the colorblind-safe cue layered on the daisyUI color). -->
+      <div id="alert-light" class="alert alert-error alert-soft"><span>alert</span></div>
+      <!-- Dashboard hero: the tinted focus surface must differ from a plain
+           base-200 card so the in-flight job reads as the focal point. -->
+      <div id="hero-light" class="card dashboard-hero border">
+        <div class="card-body">hero</div>
+      </div>
     </section>
     <section data-theme="whisper-dark">
       <div id="card-dark" class="card bg-base-200 border border-line">
         <div class="card-body">dark card</div>
       </div>
       <span id="spk-dark" class="speaker-1">speaker</span>
+      <div id="alert-dark" class="alert alert-error alert-soft"><span>alert</span></div>
+      <div id="hero-dark" class="card dashboard-hero border">
+        <div class="card-body">hero</div>
+      </div>
     </section>
   </body>
 </html>

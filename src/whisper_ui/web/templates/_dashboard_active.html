@@ -1,3 +1,4 @@
+{% from "_icons.html" import icon_check %}
 {# htmx fragment: active jobs on dashboard.
 
    The wrapper div lives inside the fragment (not the parent page) so every
@@ -41,7 +42,7 @@
     {%- else %}{% set _stage = 'transcribe' %}{% endif -%}
     {%- set _stage_idx = _stage_keys.index(_stage) -%}
     <div id="dashboard-active-{{ job.id }}"
-         class="card bg-base-200 border border-line mb-2"
+         class="card dashboard-hero border mb-2"
          x-data="{
            {# Single-quoted literal, not |tojson: tojson would wrap the
               timestamp in literal double quotes and terminate this
@@ -63,6 +64,15 @@
              return this.etaTemplate.replace('{minutes}', minutes);
            }
          }">
+      {# Faint waveform watermark — brand warmth on the focus card. #}
+      <svg class="dashboard-hero__mark" viewBox="0 0 100 100" fill="none"
+           stroke="currentColor" stroke-width="6" stroke-linecap="round" aria-hidden="true">
+        <line x1="12" y1="40" x2="12" y2="60"/>
+        <line x1="30" y1="25" x2="30" y2="75"/>
+        <line x1="48" y1="15" x2="48" y2="85"/>
+        <line x1="66" y1="30" x2="66" y2="70"/>
+        <line x1="84" y1="42" x2="84" y2="58"/>
+      </svg>
       <div class="card-body p-4">
         <div class="flex items-center justify-between gap-4 mb-2">
           <span class="font-medium truncate flex-1 min-w-0">{{ job.filename }}</span>
@@ -72,21 +82,25 @@
           </span>
         </div>
 
-        {# Stage pill row — derived from progress message; non-color cue
-           for users who don't read 中文 fluently and want a quick overview. #}
-        <div class="flex flex-wrap items-center gap-1 mb-2 text-xs">
+        {# Stage stepper — connected nodes (download → … → export) derived from
+           the progress message. The node shape (check / pulse / number) and the
+           filled connector are a non-color progress cue, and the labels stay
+           readable for users not following the 中文 status text. #}
+        <ol class="stage-pipeline mb-3" aria-label="{{ labels.DASHBOARD_HERO_IN_FLIGHT }}">
           {% for key in _stage_keys %}
           {%- set is_current = (loop.index0 == _stage_idx) -%}
           {%- set is_done = (loop.index0 < _stage_idx) -%}
-          <span class="px-2 py-0.5 rounded-full
-            {% if is_current %}bg-primary text-primary-content
-            {% elif is_done %}bg-base-300 opacity-70
-            {% else %}border border-line opacity-50{% endif %}">
-            {{ _stage_labels[key] }}
-          </span>
-          {% if not loop.last %}<span class="opacity-30">›</span>{% endif %}
+          <li class="stage{% if is_current %} stage--active{% elif is_done %} stage--done{% endif %}"
+              {% if is_current %}aria-current="step"{% endif %}>
+            <span class="stage__dot">
+              {%- if is_done %}{{ icon_check("w-3.5 h-3.5") }}
+              {%- elif is_current %}<span class="status-pulse"></span>
+              {%- else %}{{ loop.index }}{% endif -%}
+            </span>
+            <span class="stage__label">{{ _stage_labels[key] }}</span>
+          </li>
           {% endfor %}
-        </div>
+        </ol>
 
         <progress class="progress progress-primary w-full" value="{{ progress_pct }}" max="100"></progress>
         <div class="flex justify-between text-sm opacity-60 mt-1">

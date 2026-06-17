@@ -1,9 +1,18 @@
-{# Toast notification container — managed by Alpine.js store #}
+{% from "_icons.html" import icon_info, icon_circle_check, icon_triangle_alert, icon_circle_alert %}
+{# Toast notification container — managed by Alpine.js store.
+   Per-variant icons are rendered once into hidden <template>s (reusing the
+   Lucide macros as the single source) and cloned per toast via x-html, so the
+   variant is conveyed by shape, not color alone — matching the static alerts. #}
+<template id="toast-icon-info">{{ icon_info("w-5 h-5 shrink-0") }}</template>
+<template id="toast-icon-success">{{ icon_circle_check("w-5 h-5 shrink-0") }}</template>
+<template id="toast-icon-warning">{{ icon_triangle_alert("w-5 h-5 shrink-0") }}</template>
+<template id="toast-icon-error">{{ icon_circle_alert("w-5 h-5 shrink-0") }}</template>
+
 <div class="toast toast-end toast-top z-[9999] mt-2 hidden md:flex flex-col"
      x-data
      x-show="$store.toasts.items.length > 0">
   <template x-for="t in $store.toasts.items" :key="t.id">
-    <div class="alert shadow-lg max-w-sm"
+    <div class="alert alert-soft shadow-lg max-w-sm"
          :class="{
            'alert-success': t.type === 'success',
            'alert-error': t.type === 'error',
@@ -16,6 +25,7 @@
          x-transition:leave="transition ease-in duration-150"
          x-transition:leave-start="opacity-100"
          x-transition:leave-end="opacity-0 translate-x-4">
+      <span x-html="document.getElementById('toast-icon-' + (t.type || 'info'))?.innerHTML || ''"></span>
       <span x-text="t.message"></span>
       <button class="btn btn-ghost btn-xs" @click="$store.toasts.remove(t.id)">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -28,7 +38,7 @@
      x-data
      x-show="$store.toasts.items.length > 0">
   <template x-for="t in $store.toasts.items" :key="t.id">
-    <div class="alert shadow-lg max-w-sm text-sm"
+    <div class="alert alert-soft shadow-lg max-w-sm text-sm"
          :class="{
            'alert-success': t.type === 'success',
            'alert-error': t.type === 'error',
@@ -36,6 +46,7 @@
            'alert-info': t.type === 'info' || !t.type
          }"
          x-transition>
+      <span x-html="document.getElementById('toast-icon-' + (t.type || 'info'))?.innerHTML || ''"></span>
       <span x-text="t.message"></span>
     </div>
   </template>

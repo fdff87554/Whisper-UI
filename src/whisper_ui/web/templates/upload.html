@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon_upload, icon_folder_open, icon_link, icon_x %}
+{% from "_alert.html" import alert %}
 
 {% block content %}
 <h1 class="text-2xl font-medium mb-2">{{ labels.UPLOAD_HEADER }}</h1>
@@ -8,7 +9,7 @@
 
 {% set error = request.query_params.get('error', '') %}
 {% if error %}
-<div class="alert alert-error mb-4">
+{% set upload_error_msg %}
   {% if error == 'no_file' %}
   {{ labels.UPLOAD_NO_FILE }}
   {% elif error == 'no_files' %}
@@ -44,7 +45,8 @@
   {% elif error == 'all_invalid_urls' %}
   {{ labels.UPLOAD_URL_ALL_INVALID }}
   {% endif %}
-</div>
+{% endset %}
+{{ alert('error', upload_error_msg|trim, 'mb-4') }}
 {% endif %}
 
 <form method="post"
@@ -73,7 +75,7 @@
     </div>
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
       <button type="button"
-              class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary"
+              class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary card-hover-lift"
               :class="activePreset === 'meeting' ? 'border-primary' : 'border-line'"
               :aria-pressed="(activePreset === 'meeting').toString()"
               @click="applyPreset('meeting')">
@@ -83,7 +85,7 @@
         </div>
       </button>
       <button type="button"
-              class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary"
+              class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary card-hover-lift"
               :class="activePreset === 'podcast' ? 'border-primary' : 'border-line'"
               :aria-pressed="(activePreset === 'podcast').toString()"
               @click="applyPreset('podcast')">
@@ -93,7 +95,7 @@
         </div>
       </button>
       <button type="button"
-              class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary"
+              class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary card-hover-lift"
               :class="activePreset === 'interview' ? 'border-primary' : 'border-line'"
               :aria-pressed="(activePreset === 'interview').toString()"
               @click="applyPreset('interview')">
@@ -103,7 +105,7 @@
         </div>
       </button>
       <button type="button"
-              class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary"
+              class="card bg-base-200 border text-left transition-colors hover:bg-base-300 focus-visible:border-primary card-hover-lift"
               :class="activePreset === 'lecture' ? 'border-primary' : 'border-line'"
               :aria-pressed="(activePreset === 'lecture').toString()"
               @click="applyPreset('lecture')">

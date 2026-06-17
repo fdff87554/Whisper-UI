@@ -1,4 +1,5 @@
 {% from "_icons.html" import icon_eye, icon_eye_off %}
+{% from "_alert.html" import alert %}
 <!DOCTYPE html>
 <html lang="zh-Hant"
       x-data="{ theme: $persist(
@@ -24,9 +25,7 @@
       <p class="text-sm opacity-60 mb-6">{{ labels.AUTH_LOGIN_DESCRIPTION }}</p>
 
       {% if error_message %}
-      <div class="alert alert-error mb-4" role="alert">
-        {{ error_message }}
-      </div>
+      {{ alert('error', error_message, 'mb-4') }}
       {% endif %}
 
       <form method="post" action="/login" class="space-y-4">

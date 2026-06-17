@@ -1,4 +1,4 @@
-{% from "_icons.html" import icon_home, icon_upload, icon_list, icon_sun, icon_moon %}
+{% from "_icons.html" import icon_home, icon_upload, icon_list, icon_sun, icon_moon, icon_panel_left, icon_log_out %}
 {# Desktop sidebar (>= lg) and tablet icon rail (md-lg) #}
 <div class="flex flex-col h-full bg-base-200">
   {# Logo: mark on rail; mark + wordmark on full sidebar #}
@@ -6,7 +6,22 @@
     <img src="{{ url_for('static', path='images/logo-mark.svg') }}"
          alt="Whisper UI" width="32" height="32"
          class="w-8 h-8 shrink-0" />
-    <span class="font-bold text-lg whitespace-nowrap overflow-hidden text-ellipsis hidden lg:block">Whisper UI</span>
+    <span class="sidebar-collapsible font-bold text-lg whitespace-nowrap overflow-hidden text-ellipsis hidden lg:block">Whisper UI</span>
+  </div>
+
+  {# Collapse toggle — desktop only (tablet is always an icon rail, mobile uses
+     the bottom nav). Its own row, like the theme/logout buttons, so it never
+     reads as part of the brand or the logout control. #}
+  <div class="px-2 pt-3 hidden lg:block">
+    <button type="button"
+            class="btn btn-ghost btn-sm w-full gap-2 sidebar-action"
+            @click="sidebarCollapsed = !sidebarCollapsed"
+            :aria-expanded="(!sidebarCollapsed).toString()"
+            :aria-label="sidebarCollapsed ? '{{ labels.NAV_EXPAND_SIDEBAR }}' : '{{ labels.NAV_COLLAPSE_SIDEBAR }}'"
+            :title="sidebarCollapsed ? '{{ labels.NAV_EXPAND_SIDEBAR }}' : '{{ labels.NAV_COLLAPSE_SIDEBAR }}'">
+      {{ icon_panel_left("w-4 h-4 shrink-0") }}
+      <span class="sidebar-label">{{ labels.NAV_COLLAPSE_SIDEBAR }}</span>
+    </button>
   </div>
 
   {# Navigation #}
@@ -64,7 +79,7 @@
 
   {# Theme toggle #}
   <div class="p-4 border-t border-line">
-    <button class="btn btn-ghost btn-sm w-full justify-start gap-2"
+    <button class="btn btn-ghost btn-sm w-full gap-2 sidebar-action"
             :aria-label="theme === 'whisper-light' ? '{{ labels.THEME_TOGGLE_DARK }}' : '{{ labels.THEME_TOGGLE_LIGHT }}'"
             @click="theme = theme === 'whisper-light' ? 'whisper-dark' : 'whisper-light'">
       <template x-if="theme === 'whisper-light'">
@@ -79,15 +94,16 @@
   {# Current user + logout — only rendered when a user is on request.state. #}
   {% if request.state and request.state.user %}
   <div class="p-4 border-t border-line">
-    <div class="hidden lg:block text-xs opacity-70 mb-2 truncate" title="{{ request.state.user.username }}">
+    <div class="sidebar-collapsible hidden lg:block text-xs opacity-70 mb-2 truncate" title="{{ request.state.user.username }}">
       {{ labels.AUTH_SIGNED_IN_AS.format(username=request.state.user.username) }}
       {% if request.state.user.is_admin %}
       <span class="badge badge-sm badge-primary ml-1">{{ labels.AUTH_ADMIN_BADGE }}</span>
       {% endif %}
     </div>
     <form method="post" action="/logout">
-      <button type="submit" class="btn btn-ghost btn-sm w-full justify-start gap-2"
+      <button type="submit" class="btn btn-ghost btn-sm w-full gap-2 sidebar-action"
               title="{{ labels.AUTH_LOGOUT_BUTTON }}">
+        {{ icon_log_out("w-4 h-4 shrink-0") }}
         <span class="sidebar-label sr-only lg:not-sr-only">{{ labels.AUTH_LOGOUT_BUTTON }}</span>
       </button>
     </form>
