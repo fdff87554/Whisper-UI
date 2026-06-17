@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_icons.html" import icon_eye, icon_file_audio, icon_folder_open, icon_link %}
+{% from "_icons.html" import icon_eye, icon_upload, icon_file_audio, icon_folder_open, icon_link %}
 
 {% block content %}
 {# Time-aware greeting — hour is read on the client so the user's local
@@ -160,6 +160,12 @@
         <span class="pt-0.5 opacity-80">{{ labels.DASHBOARD_ONBOARDING_STEP3 }}</span>
       </li>
     </ol>
+    <a href="/upload?mode=files"
+       hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true"
+       class="btn btn-primary gap-2 mt-6 w-full sm:w-auto">
+      {{ icon_upload("w-4 h-4") }}
+      {{ labels.DASHBOARD_ONBOARDING_CTA }}
+    </a>
   </div>
 </section>
 {% endif %}
