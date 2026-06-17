@@ -39,7 +39,7 @@
      hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true">
     <div class="card-body p-4">
       <div class="flex items-center gap-3">
-        {{ icon_file_audio("w-6 h-6 text-primary opacity-80") }}
+        <span class="quick-tile">{{ icon_file_audio("w-5 h-5") }}</span>
         <div class="flex-1 min-w-0">
           <div class="font-medium">{{ labels.DASHBOARD_QUICK_ACTION_FILE }}</div>
           <div class="text-xs opacity-60 truncate">{{ labels.DASHBOARD_QUICK_ACTION_FILE_DESC }}</div>
@@ -52,7 +52,7 @@
      hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true">
     <div class="card-body p-4">
       <div class="flex items-center gap-3">
-        {{ icon_folder_open("w-6 h-6 text-primary opacity-80") }}
+        <span class="quick-tile">{{ icon_folder_open("w-5 h-5") }}</span>
         <div class="flex-1 min-w-0">
           <div class="font-medium">{{ labels.DASHBOARD_QUICK_ACTION_FOLDER }}</div>
           <div class="text-xs opacity-60 truncate">{{ labels.DASHBOARD_QUICK_ACTION_FOLDER_DESC }}</div>
@@ -65,7 +65,7 @@
      hx-boost="true" hx-target="#page-content" hx-select="#page-content" hx-swap="outerHTML transition:true">
     <div class="card-body p-4">
       <div class="flex items-center gap-3">
-        {{ icon_link("w-6 h-6 text-primary opacity-80") }}
+        <span class="quick-tile">{{ icon_link("w-5 h-5") }}</span>
         <div class="flex-1 min-w-0">
           <div class="font-medium">{{ labels.DASHBOARD_QUICK_ACTION_URL }}</div>
           <div class="text-xs opacity-60 truncate">{{ labels.DASHBOARD_QUICK_ACTION_URL_DESC }}</div>

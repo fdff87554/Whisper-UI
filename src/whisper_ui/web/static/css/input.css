@@ -309,6 +309,21 @@
   font-weight: 500;
 }
 
+/* Quick-action icon tile — a soft-tinted rounded square behind the dashboard
+   quick-action icons, giving the entry points more presence and a clearer
+   tap affordance without adding color noise elsewhere. */
+.quick-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--radius-field);
+  background: color-mix(in oklch, var(--color-primary) 12%, transparent);
+  color: var(--color-primary);
+}
+
 /* Dialog animations */
 dialog::backdrop {
   backdrop-filter: blur(4px);
