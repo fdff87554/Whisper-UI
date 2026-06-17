@@ -70,7 +70,12 @@
       _id: 0,
       add(toast) {
         const id = ++this._id;
-        this.items.push({ id, message: toast.message, type: toast.type || 'info' });
+        // Normalize the category to a known variant so the :class mapping and
+        // the icon-template lookup in _toast.html always resolve (an unknown
+        // type would otherwise render no color and an "undefined" icon).
+        const valid = ['info', 'success', 'warning', 'error'];
+        const type = valid.includes(toast.type) ? toast.type : 'info';
+        this.items.push({ id, message: toast.message, type });
         setTimeout(() => this.remove(id), 5000);
       },
       remove(id) {
