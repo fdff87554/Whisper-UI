@@ -14,7 +14,7 @@
      reads as part of the brand or the logout control. #}
   <div class="px-2 pt-3 hidden lg:block">
     <button type="button"
-            class="btn btn-ghost btn-sm w-full justify-start gap-2"
+            class="btn btn-ghost btn-sm w-full gap-2 sidebar-action"
             @click="sidebarCollapsed = !sidebarCollapsed"
             :aria-expanded="(!sidebarCollapsed).toString()"
             :aria-label="sidebarCollapsed ? '{{ labels.NAV_EXPAND_SIDEBAR }}' : '{{ labels.NAV_COLLAPSE_SIDEBAR }}'"
@@ -79,7 +79,7 @@
 
   {# Theme toggle #}
   <div class="p-4 border-t border-line">
-    <button class="btn btn-ghost btn-sm w-full justify-start gap-2"
+    <button class="btn btn-ghost btn-sm w-full gap-2 sidebar-action"
             :aria-label="theme === 'whisper-light' ? '{{ labels.THEME_TOGGLE_DARK }}' : '{{ labels.THEME_TOGGLE_LIGHT }}'"
             @click="theme = theme === 'whisper-light' ? 'whisper-dark' : 'whisper-light'">
       <template x-if="theme === 'whisper-light'">
@@ -101,7 +101,7 @@
       {% endif %}
     </div>
     <form method="post" action="/logout">
-      <button type="submit" class="btn btn-ghost btn-sm w-full justify-start gap-2"
+      <button type="submit" class="btn btn-ghost btn-sm w-full gap-2 sidebar-action"
               title="{{ labels.AUTH_LOGOUT_BUTTON }}">
         {{ icon_log_out("w-4 h-4 shrink-0") }}
         <span class="sidebar-label sr-only lg:not-sr-only">{{ labels.AUTH_LOGOUT_BUTTON }}</span>

@@ -381,6 +381,25 @@
   }
 }
 
+/* Sidebar action buttons (collapse toggle / theme / logout). With labels shown
+   the icon+label is left-aligned; in the icon rail (tablet) or when the desktop
+   sidebar is collapsed, the lone icon is centered to match the centered nav-rail
+   icons. daisyUI .btn defaults to center, so the labels-shown state is set here
+   explicitly rather than relying on a justify-start utility. */
+.sidebar-action {
+  justify-content: flex-start;
+}
+@media (min-width: 768px) and (max-width: 1023px) {
+  .sidebar-action {
+    justify-content: center;
+  }
+}
+@media (min-width: 1024px) {
+  .sidebar-collapsed .sidebar-action {
+    justify-content: center;
+  }
+}
+
 /* Mobile bottom nav — translucent fill + backdrop blur so content scrolling
    beneath stays faintly visible (frosted dock), matching the sticky-footer
    blur already used elsewhere. Falls back to a near-opaque fill where
