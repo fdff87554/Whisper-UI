@@ -3698,7 +3698,7 @@ wheels = [
 
 [[package]]
 name = "transformers"
-version = "5.12.0"
+version = "5.12.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
@@ -3711,9 +3711,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0c/f9/4552e2ba55db1c943aea0d4c09a32e9cbe5445b9eabe9856900de503dc8f/transformers-5.12.0.tar.gz", hash = "sha256:f0cf42ae1464c2eb41e7e0e66d7fd4b66145f48af17093b4cc0b2e9781faa7f4", size = 8923020, upload-time = "2026-06-12T14:39:20.43Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/aa/7c/8240f612819718100a9346dc28dea6a11370c3ca9c8c6eabadd3dea4ef29/transformers-5.12.1.tar.gz", hash = "sha256:679ee731c8225347889ad4fb3b2c926a62e9da3b7d284e9d12c791da7272466b", size = 8924054, upload-time = "2026-06-15T17:27:50.604Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ff/1f/d385913c38e900d23b728a4188fee625f2fccb306aeebc59be9d91404a5a/transformers-5.12.0-py3-none-any.whl", hash = "sha256:500be9eb644ede81c3103eee7687fc36d05dd75d1c76686c3820b26396fe7c7c", size = 11150246, upload-time = "2026-06-12T14:39:17.009Z" },
+    { url = "https://files.pythonhosted.org/packages/df/56/bbd60dd8668055803bf8ba55a81f9b8a8b31497f620109a9671d26a2076d/transformers-5.12.1-py3-none-any.whl", hash = "sha256:2a5e109d2021265df7098ffbb738295acaf5ad256f12cbc586db2ea4dcbb1a8a", size = 11150587, upload-time = "2026-06-15T17:27:46.679Z" },
 ]
 
 [[package]]
@@ -3955,7 +3955,7 @@ wheels = [
 
 [[package]]
 name = "whisper-ui"
-version = "2.16.0"
+version = "2.17.0"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
@@ -4029,7 +4029,7 @@ requires-dist = [
     { name = "python-docx", marker = "extra == 'frontend'", specifier = ">=1.0,<2" },
     { name = "redis", specifier = ">=8.0.0,<9" },
     { name = "rq", specifier = ">=2.9.1,<3" },
-    { name = "transformers", marker = "extra == 'worker'", specifier = ">=5.12.0,<6" },
+    { name = "transformers", marker = "extra == 'worker'", specifier = ">=5.12.1,<6" },
     { name = "whisper-ui", extras = ["frontend", "worker-llm"], marker = "extra == 'dev'" },
     { name = "yt-dlp", marker = "extra == 'frontend'", specifier = ">=2026.6.9" },
     { name = "yt-dlp", marker = "extra == 'worker'", specifier = ">=2026.6.9" },
