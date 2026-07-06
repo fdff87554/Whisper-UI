@@ -103,8 +103,8 @@ class FileStore:
         if path is not None:
             return path
         if filepath:
-            p = Path(filepath)
-            if p.is_file():
+            p = Path(filepath).resolve()
+            if p.is_file() and self._upload_dir.resolve() in p.parents:
                 return p
         return None
 
