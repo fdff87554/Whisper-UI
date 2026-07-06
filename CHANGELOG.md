@@ -7,6 +7,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.19.0] - 2026-07-07
+
+Transcript sharing via public links.
+
+### Added
+
+- Share button on the viewer page: generates a unique public link that anyone
+  can open without logging in to view the transcript and play back media.
+- Public shared viewer (`/shared/{token}`) with read-only transcript display,
+  media player, segment sync, search, and keyboard shortcuts.
+- Revoke sharing: the transcript owner can disable the link at any time.
+- New DB migration: `share_token` column with unique index on the jobs table.
+
 ## [2.18.0] - 2026-07-06
 
 Inline media playback on the viewer page, synchronized with the transcript.

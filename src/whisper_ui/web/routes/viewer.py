@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -151,4 +152,38 @@ async def media_download(job_id: str, db: DbDep, filestore: FileStoreDep, user: 
         path=media_path,
         media_type=mime,
         headers={"Content-Disposition": make_content_disposition(filename, "inline")},
+    )
+
+
+@router.post("/viewer/{job_id}/share")
+async def share_create(job_id: str, db: DbDep, user: CurrentUserDep):
+    validate_hex_id(job_id, "job_id")
+    job = db.get_job(job_id, owner_id=owner_filter(user))
+    if job is None or job.status != JobStatus.COMPLETED:
+        raise HTTPException(status_code=404)
+
+    if not job.share_token:
+        job.share_token = secrets.token_urlsafe(16)
+        db.update_job(job)
+
+    return Response(
+        status_code=200,
+        headers={"HX-Trigger": '{"showToast": {"message": "已產生分享連結", "type": "success"}}', "HX-Refresh": "true"},
+    )
+
+
+@router.delete("/viewer/{job_id}/share")
+async def share_revoke(job_id: str, db: DbDep, user: CurrentUserDep):
+    validate_hex_id(job_id, "job_id")
+    job = db.get_job(job_id, owner_id=owner_filter(user))
+    if job is None:
+        raise HTTPException(status_code=404)
+
+    if job.share_token:
+        job.share_token = None
+        db.update_job(job)
+
+    return Response(
+        status_code=200,
+        headers={"HX-Refresh": "true"},
     )

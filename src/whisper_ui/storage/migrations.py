@@ -6,7 +6,7 @@ import sqlite3
 
 logger = logging.getLogger(__name__)
 
-_CREATE_INDEX_RE = re.compile(r"CREATE INDEX IF NOT EXISTS (\w+)", re.IGNORECASE)
+_CREATE_INDEX_RE = re.compile(r"CREATE (?:UNIQUE )?INDEX IF NOT EXISTS (\w+)", re.IGNORECASE)
 _DROP_INDEX_RE = re.compile(r"DROP INDEX IF EXISTS (\w+)", re.IGNORECASE)
 
 
@@ -94,6 +94,8 @@ _MIGRATIONS: list[str] = [
     # write-light table; high-leverage as job history grows.
     "CREATE INDEX IF NOT EXISTS idx_jobs_status_updated_at ON jobs(status, updated_at)",
     "CREATE INDEX IF NOT EXISTS idx_jobs_batch_id ON jobs(batch_id)",
+    "ALTER TABLE jobs ADD COLUMN share_token TEXT",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_share_token ON jobs(share_token)",
 ]
 
 

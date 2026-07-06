@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_icons.html" import icon_copy, icon_check, icon_search, icon_download %}
+{% from "_icons.html" import icon_copy, icon_check, icon_search, icon_download, icon_link %}
 {% from "_alert.html" import alert %}
 
 {% block content %}
@@ -197,6 +197,34 @@
           <span class="flex items-center gap-1 text-success">{{ icon_check("w-4 h-4") }} {{ labels.VIEWER_COPIED }}</span>
         </template>
       </button>
+
+      {# Share button #}
+      {% if job.share_token %}
+      <div class="flex items-center gap-1" x-data="{ linkCopied: false }">
+        <button class="btn btn-sm btn-ghost gap-1"
+                @click="
+                  navigator.clipboard.writeText(window.location.origin + '/shared/{{ job.share_token }}')
+                    .then(() => { linkCopied = true; setTimeout(() => linkCopied = false, 2000) });
+                ">
+          <template x-if="!linkCopied">
+            <span class="flex items-center gap-1">{{ icon_link("w-4 h-4") }} {{ labels.VIEWER_SHARE_COPY_LINK }}</span>
+          </template>
+          <template x-if="linkCopied">
+            <span class="flex items-center gap-1 text-success">{{ icon_check("w-4 h-4") }} {{ labels.VIEWER_SHARE_LINK_COPIED }}</span>
+          </template>
+        </button>
+        <button class="btn btn-sm btn-ghost text-error"
+                hx-delete="/viewer/{{ job.id }}/share"
+                hx-confirm="{{ labels.VIEWER_SHARE_REVOKE_CONFIRM }}">
+          {{ labels.VIEWER_SHARE_REVOKE }}
+        </button>
+      </div>
+      {% else %}
+      <button class="btn btn-sm btn-ghost gap-1"
+              hx-post="/viewer/{{ job.id }}/share">
+        {{ icon_link("w-4 h-4") }} {{ labels.VIEWER_SHARE }}
+      </button>
+      {% endif %}
     </div>
 
     {% if search_disabled %}
