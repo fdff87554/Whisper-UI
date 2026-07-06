@@ -86,9 +86,7 @@ async def viewer_page(request: Request, db: DbDep, filestore: FileStoreDep, user
     # while the transcript stays — checking here keeps the template free
     # of file-system access and avoids the 404 dead-click the button
     # would otherwise produce.
-    media_path = (
-        filestore.get_any_media_path(job_id, job.filepath if job else None) if job is not None else None
-    )
+    media_path = filestore.get_any_media_path(job_id, job.filepath if job else None) if job is not None else None
     media_available = media_path is not None
     media_is_video = media_available and media_path.suffix.lower() in _VIDEO_EXTENSIONS
 
