@@ -91,6 +91,7 @@ class Job:
     # by a direct upload. Used only to group transcript versions in the UI;
     # it carries no foreign-key constraint and never gates deletion.
     source_job_id: str | None = None
+    share_token: str | None = None
 
     def touch(self) -> None:
         self.updated_at = datetime.now(UTC).isoformat()
