@@ -203,7 +203,7 @@
       <div class="flex items-center gap-1" x-data="{ linkCopied: false }">
         <button class="btn btn-sm btn-ghost gap-1"
                 @click="
-                  navigator.clipboard.writeText(window.location.origin + '/shared/{{ job.share_token }}')
+                  window.whisperCopy(window.location.origin + '/shared/{{ job.share_token }}')
                     .then(() => { linkCopied = true; setTimeout(() => linkCopied = false, 2000) });
                 ">
           <template x-if="!linkCopied">
@@ -370,6 +370,20 @@
     } catch (_) {
       return escapeHtml(text);
     }
+  };
+  window.whisperCopy = function(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    return Promise.resolve();
   };
 })();
 </script>
