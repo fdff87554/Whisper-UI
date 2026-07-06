@@ -17,11 +17,17 @@ _MEDIA_MIME_TYPES: dict[str, str] = {
     ".mp4": "video/mp4",
     ".webm": "video/webm",
     ".mkv": "video/x-matroska",
+    ".mp3": "audio/mpeg",
     ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".flac": "audio/flac",
+    ".wma": "audio/x-ms-wma",
     ".opus": "audio/opus",
     ".ogg": "audio/ogg",
     ".wav": "audio/wav",
 }
+
+_VIDEO_EXTENSIONS = {".mp4", ".webm", ".mkv"}
 
 router = APIRouter()
 
@@ -80,9 +86,11 @@ async def viewer_page(request: Request, db: DbDep, filestore: FileStoreDep, user
     # while the transcript stays — checking here keeps the template free
     # of file-system access and avoids the 404 dead-click the button
     # would otherwise produce.
-    media_available = (
-        job is not None and job.source_url is not None and filestore.get_source_media_path(job_id) is not None
+    media_path = (
+        filestore.get_any_media_path(job_id, job.filepath if job else None) if job is not None else None
     )
+    media_available = media_path is not None
+    media_is_video = media_available and media_path.suffix.lower() in _VIDEO_EXTENSIONS
 
     return templates.TemplateResponse(
         request=request,
@@ -95,6 +103,7 @@ async def viewer_page(request: Request, db: DbDep, filestore: FileStoreDep, user
             "speaker_colors": speaker_colors,
             "search_disabled": search_disabled,
             "media_available": media_available,
+            "media_is_video": media_is_video,
         },
     )
 
@@ -129,10 +138,10 @@ async def export_download(job_id: str, format_name: str, db: DbDep, filestore: F
 async def media_download(job_id: str, db: DbDep, filestore: FileStoreDep, user: CurrentUserDep):
     validate_hex_id(job_id, "job_id")
     job = db.get_job(job_id, owner_id=owner_filter(user))
-    if job is None or not job.source_url:
+    if job is None:
         raise HTTPException(status_code=404)
 
-    media_path = filestore.get_source_media_path(job_id)
+    media_path = filestore.get_any_media_path(job_id, job.filepath)
     if media_path is None or not media_path.is_file():
         raise HTTPException(status_code=404)
 
@@ -143,5 +152,5 @@ async def media_download(job_id: str, db: DbDep, filestore: FileStoreDep, user: 
     return FileResponse(
         path=media_path,
         media_type=mime,
-        headers={"Content-Disposition": make_content_disposition(filename, "attachment")},
+        headers={"Content-Disposition": make_content_disposition(filename, "inline")},
     )

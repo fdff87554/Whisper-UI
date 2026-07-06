@@ -203,10 +203,56 @@
 .speaker-7 { color: var(--speaker-7); }
 .speaker-8 { color: var(--speaker-8); }
 
+/* Media player wrapper */
+.player-wrapper {
+  border-radius: var(--radius-box);
+  overflow: hidden;
+  background: var(--color-base-300);
+  margin-bottom: 1rem;
+}
+.player-wrapper video {
+  max-height: 40vh;
+  width: 100%;
+  object-fit: contain;
+  display: block;
+}
+.player-wrapper audio {
+  width: 100%;
+  display: block;
+}
+
 /* Transcript reading experience */
 .transcript-container {
   max-height: 70vh;
   overflow-y: auto;
+}
+.has-player .transcript-container {
+  max-height: 50vh;
+}
+
+/* Active segment highlight during media playback */
+.segment-active {
+  background: color-mix(in oklch, var(--color-primary) 10%, transparent);
+  border-left: 3px solid var(--color-primary);
+  padding-left: calc(0.75rem - 3px);
+}
+
+/* Clickable timestamp in player mode */
+.timestamp-btn {
+  cursor: pointer;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 2px;
+  transition: text-decoration-color 0.15s;
+}
+.timestamp-btn:hover {
+  text-decoration-color: var(--color-primary);
+  color: var(--color-primary);
 }
 
 /* Dashboard in-flight "hero" — a faint teal-tinted surface that lifts the

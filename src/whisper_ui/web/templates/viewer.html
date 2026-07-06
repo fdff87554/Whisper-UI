@@ -52,12 +52,32 @@
 <p class="text-sm opacity-50 mb-4">{{ labels.VIEWER_METADATA.format(minutes=minutes, seconds=seconds, segments=result.segments|length, language=result.language) }}</p>
 {% endif %}
 
+{% if media_available %}
+<div class="player-wrapper">
+  {% if media_is_video %}
+  <video id="media-player" controls preload="metadata">
+    <source src="/viewer/{{ job.id }}/media">
+    <p>{{ labels.VIEWER_PLAYER_UNAVAILABLE }}</p>
+  </video>
+  {% else %}
+  <audio id="media-player" controls preload="metadata" class="p-2">
+    <source src="/viewer/{{ job.id }}/media">
+    <p>{{ labels.VIEWER_PLAYER_UNAVAILABLE }}</p>
+  </audio>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if result.segments %}
 {% set _speaker_glyphs = ['●', '▲', '■', '◆', '★', '✦', '◉', '♦'] %}
-<div x-data="{
+<div class="{{ 'has-player' if media_available else '' }}" x-data="{
   search: '',
   activeIndex: 0,
   shortcutsOpen: false,
+  currentSegIdx: -1,
+  playerReady: false,
+  _segments: [],
+  _lastScrollTime: 0,
   get matchCount() {
     if (!this.search) return {{ result.segments|length }};
     const q = this.search.toLowerCase();
@@ -86,8 +106,54 @@
         .then(() => $store.toasts.add({ message: '{{ labels.VIEWER_SEGMENT_COPIED }}', type: 'success' }));
     }
   },
-  clearSearch() { this.search = ''; }
-}"
+  clearSearch() { this.search = ''; },
+  initPlayer() {
+    const player = document.getElementById('media-player');
+    if (!player) return;
+    const segs = Array.from(document.querySelectorAll('.segment[data-start]'));
+    this._segments = segs.map(el => ({
+      start: parseFloat(el.dataset.start),
+      end: parseFloat(el.dataset.end)
+    }));
+    player.addEventListener('canplay', () => { this.playerReady = true; });
+    player.addEventListener('timeupdate', () => { this._onTimeUpdate(player.currentTime); });
+  },
+  _onTimeUpdate(t) {
+    const segs = this._segments;
+    let idx = -1;
+    let lo = 0, hi = segs.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (segs[mid].start <= t) { idx = mid; lo = mid + 1; }
+      else { hi = mid - 1; }
+    }
+    if (idx >= 0 && t > segs[idx].end) idx = -1;
+    if (idx === this.currentSegIdx) return;
+    this.currentSegIdx = idx;
+    if (idx < 0) return;
+    const now = Date.now();
+    if (now - this._lastScrollTime < 1000) return;
+    this._lastScrollTime = now;
+    const el = document.querySelector('[data-seg-idx=\"' + idx + '\"]');
+    if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  },
+  seekTo(time) {
+    const player = document.getElementById('media-player');
+    if (!player) return;
+    player.currentTime = time;
+    player.play();
+  },
+  togglePlayPause() {
+    const player = document.getElementById('media-player');
+    if (!player) return;
+    if (player.paused) player.play(); else player.pause();
+  },
+  seekDelta(delta) {
+    const player = document.getElementById('media-player');
+    if (!player) return;
+    player.currentTime = Math.max(0, player.currentTime + delta);
+  }
+}" x-init="initPlayer()"
 @keydown.window="
   const tag = document.activeElement.tagName;
   const inField = tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement.isContentEditable;
@@ -97,6 +163,9 @@
   else if (!inField && $event.key === 'ArrowUp') { $event.preventDefault(); navigateSegments(-1); }
   {# Bare c only: Ctrl+C / Cmd+C is the user copying their own selection and must not be hijacked. #}
   else if (!inField && !$event.ctrlKey && !$event.metaKey && ($event.key === 'c' || $event.key === 'C')) { copyActive(); }
+  else if (!inField && $event.key === ' ' && document.getElementById('media-player')) { $event.preventDefault(); togglePlayPause(); }
+  else if (!inField && ($event.key === 'j' || $event.key === 'J') && document.getElementById('media-player')) { $event.preventDefault(); seekDelta(-5); }
+  else if (!inField && ($event.key === 'l' || $event.key === 'L') && document.getElementById('media-player')) { $event.preventDefault(); seekDelta(5); }
 ">
   {# Sticky toolbar #}
   <div class="sticky top-0 z-10 bg-base-100 border-b border-line pb-3 mb-4 pt-2">
@@ -109,7 +178,7 @@
           {{ fmt|upper }}
         </a>
         {% endfor %}
-        {% if job.source_url and media_available %}
+        {% if media_available %}
         <a href="/viewer/{{ job.id }}/media" class="btn btn-sm btn-outline" download>
           {{ icon_download("w-4 h-4") }} {{ labels.VIEWER_DOWNLOAD_MEDIA }}
         </a>
@@ -159,6 +228,10 @@
       <div class="flex items-center gap-2"><kbd class="kbd kbd-xs">↑</kbd><kbd class="kbd kbd-xs">↓</kbd><span>{{ labels.VIEWER_SHORTCUTS_NAV }}</span></div>
       <div class="flex items-center gap-2"><kbd class="kbd kbd-xs">C</kbd><span>{{ labels.VIEWER_SHORTCUTS_COPY }}</span></div>
       <div class="flex items-center gap-2"><kbd class="kbd kbd-xs">Esc</kbd><span>{{ labels.VIEWER_SHORTCUTS_CLEAR }}</span></div>
+      {% if media_available %}
+      <div class="flex items-center gap-2"><kbd class="kbd kbd-xs">Space</kbd><span>{{ labels.VIEWER_SHORTCUTS_PLAY_PAUSE }}</span></div>
+      <div class="flex items-center gap-2"><kbd class="kbd kbd-xs">J</kbd><kbd class="kbd kbd-xs">L</kbd><span>{{ labels.VIEWER_SHORTCUTS_SEEK }}</span></div>
+      {% endif %}
     </dl>
     {% endif %}
   </div>
@@ -169,10 +242,18 @@
     {%- set _color_class = speaker_colors.get(seg.speaker, '') if seg.speaker else '' -%}
     {%- set _glyph_idx_raw = _color_class.rsplit('-', 1)[-1] if _color_class else '' -%}
     <div class="segment group flex gap-3 py-2 px-3 rounded-box hover:bg-base-200 transition-colors"
+         data-seg-idx="{{ loop.index0 }}" data-start="{{ seg.start }}" data-end="{{ seg.end }}"
+         :class="{ 'segment-active': currentSegIdx === {{ loop.index0 }} }"
          {% if not search_disabled %}data-text="{{ seg.text|lower|e }}"
          x-show="!search || $el.dataset.text.includes(search.toLowerCase())"
          x-transition.opacity{% endif %}>
+      {% if media_available %}
+      <button type="button" class="timestamp-btn text-xs font-mono opacity-40 whitespace-nowrap pt-0.5"
+              title="{{ labels.VIEWER_SEEK_TO }}"
+              @click="seekTo({{ seg.start }})">{{ seg.start|format_time }}</button>
+      {% else %}
       <code class="text-xs font-mono opacity-40 whitespace-nowrap pt-0.5">{{ seg.start|format_time }}</code>
+      {% endif %}
       <div class="flex-1 min-w-0">
         {% if seg.speaker %}
         <strong class="text-xs font-medium {{ _color_class }}">
@@ -222,7 +303,7 @@
         {{ fmt|upper }}
       </a>
       {% endfor %}
-      {% if job.source_url and media_available %}
+      {% if media_available %}
       <a href="/viewer/{{ job.id }}/media" class="btn btn-sm btn-outline" download>
         {{ icon_download("w-4 h-4") }} {{ labels.VIEWER_DOWNLOAD_MEDIA }}
       </a>
