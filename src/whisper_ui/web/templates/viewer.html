@@ -70,88 +70,9 @@
 
 {% if result.segments %}
 {% set _speaker_glyphs = ['●', '▲', '■', '◆', '★', '✦', '◉', '♦'] %}
-<div class="{{ 'has-player' if media_available else '' }}" x-data="{
-  search: '',
-  activeIndex: 0,
-  shortcutsOpen: false,
-  currentSegIdx: -1,
-  _segments: [],
-  _lastScrollTime: 0,
-  get matchCount() {
-    if (!this.search) return {{ result.segments|length }};
-    const q = this.search.toLowerCase();
-    return Array.from(document.querySelectorAll('.segment[data-text]')).filter(el => el.dataset.text.includes(q)).length;
-  },
-  _visibleSegments() {
-    return Array.from(document.querySelectorAll('.segment')).filter(el => el.offsetParent !== null);
-  },
-  focusSearch() {
-    const el = document.querySelector('input[type=search]');
-    if (el) { el.focus(); el.select(); }
-  },
-  navigateSegments(delta) {
-    const visible = this._visibleSegments();
-    if (!visible.length) return;
-    this.activeIndex = Math.max(0, Math.min(visible.length - 1, this.activeIndex + delta));
-    const target = visible[this.activeIndex];
-    if (target) target.scrollIntoView({block: 'center', behavior: 'smooth'});
-  },
-  copyActive() {
-    const visible = this._visibleSegments();
-    const target = visible[this.activeIndex];
-    const text = target?.querySelector('button[data-copy-text]')?.dataset?.copyText;
-    if (text) {
-      navigator.clipboard.writeText(text)
-        .then(() => $store.toasts.add({ message: '{{ labels.VIEWER_SEGMENT_COPIED }}', type: 'success' }));
-    }
-  },
-  clearSearch() { this.search = ''; },
-  initPlayer() {
-    const player = document.getElementById('media-player');
-    if (!player) return;
-    const segs = Array.from(document.querySelectorAll('.segment[data-start]'));
-    this._segments = segs.map(el => ({
-      start: parseFloat(el.dataset.start),
-      end: parseFloat(el.dataset.end)
-    }));
-    player.addEventListener('timeupdate', () => { this._onTimeUpdate(player.currentTime); });
-  },
-  _onTimeUpdate(t) {
-    const segs = this._segments;
-    let idx = -1;
-    let lo = 0, hi = segs.length - 1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (segs[mid].start <= t) { idx = mid; lo = mid + 1; }
-      else { hi = mid - 1; }
-    }
-    if (idx >= 0 && t > segs[idx].end) idx = -1;
-    if (idx === this.currentSegIdx) return;
-    this.currentSegIdx = idx;
-    if (idx < 0) return;
-    const now = Date.now();
-    if (now - this._lastScrollTime < 1000) return;
-    this._lastScrollTime = now;
-    const el = document.querySelector('[data-seg-idx="' + idx + '"]');
-    if (el && el.offsetParent !== null) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  },
-  seekTo(time) {
-    const player = document.getElementById('media-player');
-    if (!player) return;
-    player.currentTime = time;
-    player.play();
-  },
-  togglePlayPause() {
-    const player = document.getElementById('media-player');
-    if (!player) return;
-    if (player.paused) player.play(); else player.pause();
-  },
-  seekDelta(delta) {
-    const player = document.getElementById('media-player');
-    if (!player) return;
-    player.currentTime = Math.max(0, player.currentTime + delta);
-  }
-}" x-init="initPlayer()"
+<div class="{{ 'has-player' if media_available else '' }}"
+     x-data="viewerData({{ result.segments|length }})"
+     x-init="initPlayer()"
 @keydown.window="
   const tag = document.activeElement.tagName;
   const inField = tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement.isContentEditable;
@@ -345,28 +266,106 @@
 
 {% block scripts %}
 <script>
+window.viewerData = function(segmentCount) {
+  return {
+    search: '',
+    activeIndex: 0,
+    shortcutsOpen: false,
+    currentSegIdx: -1,
+    _segments: [],
+    _lastScrollTime: 0,
+    _segmentCount: segmentCount,
+    get matchCount() {
+      if (!this.search) return this._segmentCount;
+      var q = this.search.toLowerCase();
+      return Array.from(document.querySelectorAll('.segment[data-text]')).filter(function(el) { return el.dataset.text.includes(q); }).length;
+    },
+    _visibleSegments() {
+      return Array.from(document.querySelectorAll('.segment')).filter(function(el) { return el.offsetParent !== null; });
+    },
+    focusSearch() {
+      var el = document.querySelector('input[type=search]');
+      if (el) { el.focus(); el.select(); }
+    },
+    navigateSegments(delta) {
+      var visible = this._visibleSegments();
+      if (!visible.length) return;
+      this.activeIndex = Math.max(0, Math.min(visible.length - 1, this.activeIndex + delta));
+      var target = visible[this.activeIndex];
+      if (target) target.scrollIntoView({block: 'center', behavior: 'smooth'});
+    },
+    copyActive() {
+      var visible = this._visibleSegments();
+      var target = visible[this.activeIndex];
+      var text = target && target.querySelector('button[data-copy-text]');
+      text = text && text.dataset && text.dataset.copyText;
+      if (text) {
+        window.whisperCopy(text);
+      }
+    },
+    clearSearch() { this.search = ''; },
+    initPlayer() {
+      var player = document.getElementById('media-player');
+      if (!player) return;
+      var segs = Array.from(document.querySelectorAll('.segment[data-start]'));
+      this._segments = segs.map(function(el) {
+        return { start: parseFloat(el.dataset.start), end: parseFloat(el.dataset.end) };
+      });
+      var self = this;
+      player.addEventListener('timeupdate', function() { self._onTimeUpdate(player.currentTime); });
+    },
+    _onTimeUpdate(t) {
+      var segs = this._segments;
+      var idx = -1;
+      var lo = 0, hi = segs.length - 1;
+      while (lo <= hi) {
+        var mid = (lo + hi) >> 1;
+        if (segs[mid].start <= t) { idx = mid; lo = mid + 1; }
+        else { hi = mid - 1; }
+      }
+      if (idx >= 0 && t > segs[idx].end) idx = -1;
+      if (idx === this.currentSegIdx) return;
+      this.currentSegIdx = idx;
+      if (idx < 0) return;
+      var now = Date.now();
+      if (now - this._lastScrollTime < 1000) return;
+      this._lastScrollTime = now;
+      var el = document.querySelector('[data-seg-idx="' + idx + '"]');
+      if (el && el.offsetParent !== null) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    },
+    seekTo(time) {
+      var player = document.getElementById('media-player');
+      if (!player) return;
+      player.currentTime = time;
+      player.play();
+    },
+    togglePlayPause() {
+      var player = document.getElementById('media-player');
+      if (!player) return;
+      if (player.paused) player.play(); else player.pause();
+    },
+    seekDelta(delta) {
+      var player = document.getElementById('media-player');
+      if (!player) return;
+      player.currentTime = Math.max(0, player.currentTime + delta);
+    }
+  };
+};
+
 (function() {
-  // Escape HTML so user-supplied transcript text can never inject markup,
-  // then wrap matches of `query` in <mark> for visible highlighting.
-  const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-  })[c]);
-  const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  var escapeHtml = function(s) { return String(s).replace(/[&<>"']/g, function(c) {
+    return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+  }); };
+  var escapeRegex = function(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); };
   window.whisperHighlight = function(text, query) {
     if (!query) return escapeHtml(text);
-    const q = String(query).trim();
+    var q = String(query).trim();
     if (!q) return escapeHtml(text);
     try {
-      // Split the RAW text on the query, then escape each part. Escaping
-      // before the regex (the previous approach) corrupted entities: a
-      // search for "amp" inside text containing "&" would match the "amp"
-      // of "&amp;" and produce "&<mark>amp</mark>;". Splitting first keeps
-      // the match aligned with the source text; every part — including the
-      // matched run — is still escaped, so the output stays XSS-safe.
-      const parts = text.split(new RegExp('(' + escapeRegex(q) + ')', 'gi'));
-      return parts
-        .map((part, i) => (i % 2 === 0 ? escapeHtml(part) : '<mark>' + escapeHtml(part) + '</mark>'))
-        .join('');
+      var parts = text.split(new RegExp('(' + escapeRegex(q) + ')', 'gi'));
+      return parts.map(function(part, i) {
+        return i % 2 === 0 ? escapeHtml(part) : '<mark>' + escapeHtml(part) + '</mark>';
+      }).join('');
     } catch (_) {
       return escapeHtml(text);
     }
