@@ -93,6 +93,21 @@ class FileStore:
                 return matches[0]
         return None
 
+    def get_any_media_path(self, job_id: str, filepath: str | None = None) -> Path | None:
+        """Return the playable media file for any job type, or None.
+
+        Checks the URL-download naming convention (video.*/audio.*) first,
+        then falls back to the direct-upload ``filepath``.
+        """
+        path = self.get_source_media_path(job_id)
+        if path is not None:
+            return path
+        if filepath:
+            p = Path(filepath)
+            if p.is_file():
+                return p
+        return None
+
     def delete_job_files(self, job_id: str) -> None:
         """Remove both upload and output dirs for ``job_id``; raise on any failure.
 
