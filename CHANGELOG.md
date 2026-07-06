@@ -7,6 +7,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.18.0] - 2026-07-06
+
+Inline media playback on the viewer page, synchronized with the transcript.
+
+### Added
+
+- HTML5 audio/video player on the viewer page: uploaded MP4, MP3 and other
+  supported formats play directly in the browser without downloading.
+- Transcript sync: clicking a segment timestamp seeks the player to that point;
+  during playback the active segment highlights and auto-scrolls.
+- Keyboard shortcuts for media playback: `Space` (play/pause), `J` (rewind 5s),
+  `L` (forward 5s).
+- The media endpoint now serves direct file uploads (not just URL-sourced jobs),
+  so the "Download Media" button and inline player work for all job types.
+- Added missing MIME types: `.mp3`, `.aac`, `.flac`, `.wma`.
+
 ## [2.17.0] - 2026-06-17
 
 UI alignment with the Whisper UI design system (non-destructive presentation
@@ -933,7 +949,8 @@ Error` JSON body while logging the full traceback, so an
   classification, missing-job handling) are now covered by unit tests
   in `test_pipeline_dispatcher.py` and `test_stage_tasks.py`.
 
-[Unreleased]: https://github.com/fdff87554/Whisper-UI/compare/v2.17.0...HEAD
+[Unreleased]: https://github.com/fdff87554/Whisper-UI/compare/v2.18.0...HEAD
+[2.18.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.18.0
 [2.17.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.17.0
 [2.16.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.16.0
 [2.15.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.15.0
