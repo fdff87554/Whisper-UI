@@ -10,6 +10,87 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+  <script>
+  window.sharedViewerData = function(segmentCount) {
+    return {
+      search: '',
+      currentSegIdx: -1,
+      _segments: [],
+      _lastScrollTime: 0,
+      _segmentCount: segmentCount,
+      get matchCount() {
+        if (!this.search) return this._segmentCount;
+        var q = this.search.toLowerCase();
+        return Array.from(document.querySelectorAll('.segment[data-text]')).filter(function(el) { return el.dataset.text.includes(q); }).length;
+      },
+      initPlayer() {
+        var player = document.getElementById('media-player');
+        if (!player) return;
+        var segs = Array.from(document.querySelectorAll('.segment[data-start]'));
+        this._segments = segs.map(function(el) {
+          return { start: parseFloat(el.dataset.start), end: parseFloat(el.dataset.end) };
+        });
+        var self = this;
+        player.addEventListener('timeupdate', function() { self._onTimeUpdate(player.currentTime); });
+      },
+      _onTimeUpdate(t) {
+        var segs = this._segments;
+        var idx = -1;
+        var lo = 0, hi = segs.length - 1;
+        while (lo <= hi) {
+          var mid = (lo + hi) >> 1;
+          if (segs[mid].start <= t) { idx = mid; lo = mid + 1; }
+          else { hi = mid - 1; }
+        }
+        if (idx >= 0 && t > segs[idx].end) idx = -1;
+        if (idx === this.currentSegIdx) return;
+        this.currentSegIdx = idx;
+        if (idx < 0) return;
+        var now = Date.now();
+        if (now - this._lastScrollTime < 1000) return;
+        this._lastScrollTime = now;
+        var el = document.querySelector('[data-seg-idx="' + idx + '"]');
+        if (el && el.offsetParent !== null) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      },
+      seekTo(time) {
+        var player = document.getElementById('media-player');
+        if (!player) return;
+        player.currentTime = time;
+        player.play();
+      },
+      togglePlayPause() {
+        var player = document.getElementById('media-player');
+        if (!player) return;
+        if (player.paused) player.play(); else player.pause();
+      },
+      seekDelta(delta) {
+        var player = document.getElementById('media-player');
+        if (!player) return;
+        player.currentTime = Math.max(0, player.currentTime + delta);
+      }
+    };
+  };
+
+  (function() {
+    var escapeHtml = function(s) { return String(s).replace(/[&<>"']/g, function(c) {
+      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+    }); };
+    var escapeRegex = function(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); };
+    window.whisperHighlight = function(text, query) {
+      if (!query) return escapeHtml(text);
+      var q = String(query).trim();
+      if (!q) return escapeHtml(text);
+      try {
+        var parts = text.split(new RegExp('(' + escapeRegex(q) + ')', 'gi'));
+        return parts.map(function(part, i) {
+          return i % 2 === 0 ? escapeHtml(part) : '<mark>' + escapeHtml(part) + '</mark>';
+        }).join('');
+      } catch (_) {
+        return escapeHtml(text);
+      }
+    };
+  })();
+  </script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"
           integrity="sha384-X9kJyAubVxnP0hcA+AMMs21U445qsnqhnUF8EBlEpP3a42Kh/JwWjlv2ZcvGfphb"
           crossorigin="anonymous"></script>
@@ -47,69 +128,16 @@
 
     {% if result.segments %}
     {% set _speaker_glyphs = ['●', '▲', '■', '◆', '★', '✦', '◉', '♦'] %}
-    <div class="{{ 'has-player' if media_available else '' }}" x-data="{
-      search: '',
-      currentSegIdx: -1,
-      _segments: [],
-      _lastScrollTime: 0,
-      get matchCount() {
-        if (!this.search) return {{ result.segments|length }};
-        const q = this.search.toLowerCase();
-        return Array.from(document.querySelectorAll('.segment[data-text]')).filter(el => el.dataset.text.includes(q)).length;
-      },
-      initPlayer() {
-        const player = document.getElementById('media-player');
-        if (!player) return;
-        const segs = Array.from(document.querySelectorAll('.segment[data-start]'));
-        this._segments = segs.map(el => ({
-          start: parseFloat(el.dataset.start),
-          end: parseFloat(el.dataset.end)
-        }));
-        player.addEventListener('timeupdate', () => { this._onTimeUpdate(player.currentTime); });
-      },
-      _onTimeUpdate(t) {
-        const segs = this._segments;
-        let idx = -1;
-        let lo = 0, hi = segs.length - 1;
-        while (lo <= hi) {
-          const mid = (lo + hi) >> 1;
-          if (segs[mid].start <= t) { idx = mid; lo = mid + 1; }
-          else { hi = mid - 1; }
-        }
-        if (idx >= 0 && t > segs[idx].end) idx = -1;
-        if (idx === this.currentSegIdx) return;
-        this.currentSegIdx = idx;
-        if (idx < 0) return;
-        const now = Date.now();
-        if (now - this._lastScrollTime < 1000) return;
-        this._lastScrollTime = now;
-        const el = document.querySelector('[data-seg-idx=\"' + idx + '\"]');
-        if (el && el.offsetParent !== null) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      },
-      seekTo(time) {
-        const player = document.getElementById('media-player');
-        if (!player) return;
-        player.currentTime = time;
-        player.play();
-      },
-      togglePlayPause() {
-        const player = document.getElementById('media-player');
-        if (!player) return;
-        if (player.paused) player.play(); else player.pause();
-      },
-      seekDelta(delta) {
-        const player = document.getElementById('media-player');
-        if (!player) return;
-        player.currentTime = Math.max(0, player.currentTime + delta);
-      }
-    }" x-init="initPlayer()"
-    @keydown.window="
-      const tag = document.activeElement.tagName;
-      const inField = tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement.isContentEditable;
-      if (!inField && $event.key === ' ' && document.getElementById('media-player')) { $event.preventDefault(); togglePlayPause(); }
-      else if (!inField && ($event.key === 'j' || $event.key === 'J') && document.getElementById('media-player')) { $event.preventDefault(); seekDelta(-5); }
-      else if (!inField && ($event.key === 'l' || $event.key === 'L') && document.getElementById('media-player')) { $event.preventDefault(); seekDelta(5); }
-    ">
+    <div class="{{ 'has-player' if media_available else '' }}"
+         x-data="sharedViewerData({{ result.segments|length }})"
+         x-init="initPlayer()"
+         @keydown.window="
+           const tag = document.activeElement.tagName;
+           const inField = tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement.isContentEditable;
+           if (!inField && $event.key === ' ' && document.getElementById('media-player')) { $event.preventDefault(); togglePlayPause(); }
+           else if (!inField && ($event.key === 'j' || $event.key === 'J') && document.getElementById('media-player')) { $event.preventDefault(); seekDelta(-5); }
+           else if (!inField && ($event.key === 'l' || $event.key === 'L') && document.getElementById('media-player')) { $event.preventDefault(); seekDelta(5); }
+         ">
 
       {# Search #}
       {% if result.segments|length <= 5000 %}
@@ -176,27 +204,5 @@
       Whisper UI
     </div>
   </div>
-
-<script>
-(function() {
-  const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-  })[c]);
-  const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  window.whisperHighlight = function(text, query) {
-    if (!query) return escapeHtml(text);
-    const q = String(query).trim();
-    if (!q) return escapeHtml(text);
-    try {
-      const parts = text.split(new RegExp('(' + escapeRegex(q) + ')', 'gi'));
-      return parts
-        .map((part, i) => (i % 2 === 0 ? escapeHtml(part) : '<mark>' + escapeHtml(part) + '</mark>'))
-        .join('');
-    } catch (_) {
-      return escapeHtml(text);
-    }
-  };
-})();
-</script>
 </body>
 </html>
