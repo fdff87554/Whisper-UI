@@ -75,7 +75,6 @@
   activeIndex: 0,
   shortcutsOpen: false,
   currentSegIdx: -1,
-  playerReady: false,
   _segments: [],
   _lastScrollTime: 0,
   get matchCount() {
@@ -115,7 +114,6 @@
       start: parseFloat(el.dataset.start),
       end: parseFloat(el.dataset.end)
     }));
-    player.addEventListener('canplay', () => { this.playerReady = true; });
     player.addEventListener('timeupdate', () => { this._onTimeUpdate(player.currentTime); });
   },
   _onTimeUpdate(t) {
@@ -134,8 +132,8 @@
     const now = Date.now();
     if (now - this._lastScrollTime < 1000) return;
     this._lastScrollTime = now;
-    const el = document.querySelector('[data-seg-idx=\"' + idx + '\"]');
-    if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const el = document.querySelector('[data-seg-idx="' + idx + '"]');
+    if (el && el.offsetParent !== null) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
   },
   seekTo(time) {
     const player = document.getElementById('media-player');
