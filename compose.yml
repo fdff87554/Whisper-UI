@@ -112,7 +112,7 @@ services:
     restart: unless-stopped
     logging: *default-logging
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine
     # maxmemory-policy is hardcoded to noeviction on purpose: this Redis holds
     # only work-queue / DAG state (RQ registries, generation counters, sub-job
     # sets, pipeline context) — none of it is safe to evict, so an eviction
@@ -168,7 +168,7 @@ services:
   # No profile: the always-on frontend needs app-data, so this must run in
   # every deployment. ($$ escapes compose variable interpolation.)
   volume-init:
-    image: alpine:3
+    image: alpine:3.21
     entrypoint: ["/bin/sh", "-c"]
     command:
       - 'for d in /data /cache; do [ "$$(stat -c %u "$$d")" = 1000 ] || chown -R 1000:1000 "$$d"; done'
@@ -350,7 +350,7 @@ services:
   # point OLLAMA_BASE_URL at their existing server instead.
   ollama:
     profiles: [llm]
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.12.3
     volumes:
       - ollama-data:/root/.ollama
     environment:
@@ -375,7 +375,7 @@ services:
   # model is a fast no-op.
   ollama-pull:
     profiles: [llm]
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.12.3
     # Exec form (no shell): OLLAMA_MODEL reaches `ollama pull` as a single literal
     # argv element, so a model name containing shell metacharacters cannot be
     # parsed as a command. (Quoting it inside a `sh -c` string would not — an
@@ -397,7 +397,7 @@ services:
   # specific digest/version before a production rollout.
   prometheus:
     profiles: [monitoring]
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.5.0
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
@@ -407,7 +407,7 @@ services:
     logging: *default-logging
   redis-exporter:
     profiles: [monitoring]
-    image: oliver006/redis_exporter:latest
+    image: oliver006/redis_exporter:v1.67.0
     environment:
       - REDIS_ADDR=redis://redis:6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
@@ -423,7 +423,7 @@ services:
   # collector. Verify the image tag + gfx1151 coverage during the 211 rollout.
   gpu-exporter:
     profiles: [monitoring]
-    image: rocm/device-metrics-exporter:latest
+    image: rocm/device-metrics-exporter:v1.5.0
     # /sys (read-only) is required by device-metrics-exporter for inband-RAS
     # metrics per AMD's docker docs. The :5000 port stays internal — Prometheus
     # scrapes gpu-exporter:5000 over the compose network, not the host.

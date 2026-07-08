@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import sqlite3
 from unittest.mock import MagicMock
 
 import fakeredis
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from whisper_ui.core.models import Job
-from whisper_ui.worker.progress import RedisProgressReporter
+from whisper_ui.worker.progress import ProgressWriteOutcome, RedisProgressReporter
 from whisper_ui.worker.runtime import make_throttled_progress_reporter as _make_throttled_progress_reporter
 
 
@@ -221,8 +222,8 @@ def test_report_progress_updates_message_when_equal():
     assert stored["message"] == "diarize running"
 
 
-def test_report_returns_true_when_lua_accepts_fresh_write():
-    """``report()`` returns True when the Lua script commits the write.
+def test_report_returns_accepted_when_lua_accepts_fresh_write():
+    """``report()`` returns ACCEPTED when the Lua script commits the write.
     Covers all three accepting branches: legacy (no generation), reset
     (caller_gen > stored_gen), and same-generation max-write.
     """
@@ -230,15 +231,15 @@ def test_report_returns_true_when_lua_accepts_fresh_write():
 
     # Legacy branch (caller_gen = -1).
     legacy = RedisProgressReporter(fake, "job-legacy")
-    assert legacy.report(0.1, "m") is True
+    assert legacy.report(0.1, "m") is ProgressWriteOutcome.ACCEPTED
 
     # Reset branch (higher caller_gen than stored).
     gen_aware = RedisProgressReporter(fake, "job-reset", generation=2)
-    assert gen_aware.report(0.3, "m") is True
+    assert gen_aware.report(0.3, "m") is ProgressWriteOutcome.ACCEPTED
 
     # Same-generation max-write branch (new >= stored).
     same_gen = RedisProgressReporter(fake, "job-reset", generation=2)
-    assert same_gen.report(0.5, "m") is True
+    assert same_gen.report(0.5, "m") is ProgressWriteOutcome.ACCEPTED
 
 
 def test_report_returns_false_when_lua_drops_stale_write():
@@ -256,7 +257,7 @@ def test_report_returns_false_when_lua_drops_stale_write():
     stale = RedisProgressReporter(fake, "job-stale", generation=1)
     accepted = stale.report(0.99, "attempt1 stale heartbeat")
 
-    assert accepted is False
+    assert accepted is ProgressWriteOutcome.REJECTED
     # And the hash is untouched (sanity: confirms Lua dropped the write).
     stored = _stored(fake, "job-stale")
     assert float(stored["progress"]) == 0.4
@@ -283,7 +284,7 @@ def test_report_returns_false_when_central_gen_exceeds_caller_gen_despite_empty_
     stale = RedisProgressReporter(fake, "job-r4", generation=1)
     accepted = stale.report(0.85, "stale heartbeat")
 
-    assert accepted is False
+    assert accepted is ProgressWriteOutcome.REJECTED
     assert not fake.exists("job:job-r4"), "stale writer must not re-seed the hash"
 
 
@@ -299,7 +300,7 @@ def test_report_returns_true_when_central_gen_matches_caller_gen():
     fresh = RedisProgressReporter(fake, "job-r4ok", generation=2)
     accepted = fresh.report(0.05, "attempt2 preprocess starting")
 
-    assert accepted is True
+    assert accepted is ProgressWriteOutcome.ACCEPTED
     stored = _stored(fake, "job-r4ok")
     assert stored["progress"] == "0.05"
     assert stored["generation"] == "2"
@@ -321,15 +322,16 @@ def test_fail_rejected_by_central_gen():
     assert stale.fail("stale error") is False
 
 
-def test_report_returns_true_on_redis_error():
-    """Transient Redis failures must *not* surface as rejection: the
-    legacy "SQLite is source of truth when Redis is unavailable" contract
-    requires the throttler to keep writing to the DB during an outage.
+def test_report_returns_degraded_on_redis_error():
+    """Transient Redis failures surface as DEGRADED, not REJECTED: the
+    "SQLite is source of truth when Redis is unavailable" contract requires
+    the throttler to keep mirroring to the DB during an outage, but via the
+    progress-only field-level path (not a full-column overwrite).
     """
     _fake, reporter = _fake_reporter()
     reporter._max_write_script = MagicMock(side_effect=RedisConnectionError("down"))
 
-    assert reporter.report(0.5, "m") is True
+    assert reporter.report(0.5, "m") is ProgressWriteOutcome.DEGRADED
 
 
 def test_complete_returns_true_when_accepted():
@@ -640,12 +642,13 @@ class TestThrottledProgressReporter:
         and result_path fields via the full-column UPDATE path.
         """
         on_progress, reporter, db, job, _clock = _make_throttle()
-        reporter.report.return_value = False  # Lua rejected (stale generation)
+        reporter.report.return_value = ProgressWriteOutcome.REJECTED  # Lua rejected (stale)
 
         on_progress(0.85, "attempt1 stale heartbeat")
 
         reporter.report.assert_called_once_with(0.85, "attempt1 stale heartbeat")
         db.update_job.assert_not_called()
+        db.update_job_progress.assert_not_called()
         # Captured Job must not be mutated — otherwise a *subsequent*
         # legitimate writer would inherit the stale progress value.
         assert job.progress == 0.0
@@ -653,11 +656,11 @@ class TestThrottledProgressReporter:
 
     def test_throttle_proceeds_when_reporter_accepts_write(self):
         """Sanity pair for the test above: when the reporter returns
-        True (legacy max-write, reset branch, or current generation
-        match) the throttler still writes to SQLite as before.
+        ACCEPTED (legacy max-write, reset branch, or current generation
+        match) the throttler still full-mirrors to SQLite as before.
         """
         on_progress, reporter, db, job, _clock = _make_throttle()
-        reporter.report.return_value = True
+        reporter.report.return_value = ProgressWriteOutcome.ACCEPTED
 
         on_progress(0.42, "running")
 
@@ -665,6 +668,31 @@ class TestThrottledProgressReporter:
         db.update_job.assert_called_once_with(job)
         assert job.progress == 0.42
         assert job.progress_message == "running"
+
+    def test_throttle_degraded_uses_field_level_update(self):
+        """On a Redis outage (DEGRADED) the mirror must fall back to the
+        progress-only field-level UPDATE, never the full-column update_job —
+        so a possibly-stale writer during the outage cannot clobber a
+        COMPLETED row's status / result_path / error.
+        """
+        on_progress, reporter, db, job, _clock = _make_throttle()
+        reporter.report.return_value = ProgressWriteOutcome.DEGRADED
+
+        on_progress(0.42, "running")
+
+        db.update_job.assert_not_called()
+        db.update_job_progress.assert_called_once_with(job.id, 0.42, "running")
+
+    def test_throttle_swallows_sqlite_error_on_mirror(self):
+        """A SQLite lock / I/O error while mirroring progress must never
+        fail the stage: the error is swallowed so a multi-hour transcribe is
+        not reported as FAILED because one progress mirror could not commit.
+        """
+        on_progress, reporter, db, _job, _clock = _make_throttle()
+        reporter.report.return_value = ProgressWriteOutcome.ACCEPTED
+        db.update_job.side_effect = sqlite3.OperationalError("database is locked")
+
+        on_progress(0.42, "running")  # must not raise
 
     def test_late_heartbeat_with_old_message_is_dropped(self):
         """Same race as above, but the late update still carries the old

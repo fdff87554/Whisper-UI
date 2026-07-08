@@ -26,6 +26,19 @@ class Settings(BaseSettings):
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
+    # Socket timeouts for the web/worker Redis clients built by
+    # ``core.redis_client.create_redis``. Without these, a Redis host that
+    # accepts the connection but then goes silent (kernel freeze, firewall
+    # drop, network partition) blocks the caller's recv indefinitely — the web
+    # event loop or a worker would hang instead of raising RedisError and
+    # taking the existing graceful-degradation path. Seconds; 0 disables the
+    # bound (legacy blocking behaviour). These do not apply to the RQ worker
+    # loop's own connection (see core/redis_client.py).
+    redis_socket_timeout: int = 10
+    redis_socket_connect_timeout: int = 5
+    # PING an idle pooled connection after this many seconds so a half-open
+    # connection surfaces as an error before the next command blocks on it.
+    redis_health_check_interval: int = 30
 
     # Storage
     database_path: Path = Field(default=_PROJECT_ROOT / "data" / "db" / "whisper_ui.db")
@@ -65,6 +78,13 @@ class Settings(BaseSettings):
     # the whisperx batched pipeline and the guard that stops a hallucination
     # loop from spreading. -1 keeps whisper.cpp's own default.
     whispercpp_max_context: int = 0
+
+    # Logging. Exposed as Settings fields (not just process env) so a value in
+    # .env is honoured — setup_logging reads these. log_level is validated /
+    # normalised in logging_setup._resolve_level (an unknown value falls back to
+    # INFO), so no validator is needed here.
+    log_level: str = "INFO"
+    log_json: bool = False
 
     # Language
     language: str = "zh"
@@ -107,12 +127,27 @@ class Settings(BaseSettings):
     # proxy resets these headers — otherwise a hostile client can spoof
     # them to evade rate limits and CSRF.
     trust_proxy_headers: bool = False
+    # Number of trusted reverse proxies in front of the app. When
+    # trust_proxy_headers is on, the client IP is read as the Nth entry from the
+    # RIGHT of X-Forwarded-For — the rightmost entries are appended by our own
+    # trusted proxies, so the (N)th-from-right is the real client while anything
+    # further left is client-controlled and must NOT be trusted for rate-limit
+    # bucketing. Default 1 = a single reverse proxy directly in front. Taking
+    # the left-most entry (the old behaviour) let a client spoof X-Forwarded-For
+    # to a fresh value per request and evade the per-IP limit entirely.
+    trusted_proxy_count: int = 1
     # Allow open self-service registration once the first admin exists. The
     # initial bootstrap account is always allowed (an admin must be created to
     # manage the instance); when this is False every later /register attempt
     # is refused so accounts can only be provisioned by an admin. Default True
     # preserves the original open-signup behaviour.
     allow_registration: bool = True
+
+    # Optional bearer token for the /metrics endpoint. Empty (default) keeps
+    # /metrics open (it exposes only counts/depths, no PII) — an operator
+    # exposing the box publicly should either set this or block /metrics at the
+    # reverse proxy. When set, a scrape must send ``Authorization: Bearer <token>``.
+    metrics_token: str = ""
 
     # Upload
     max_upload_size: int = 2 * 1024 * 1024 * 1024  # 2 GB
@@ -321,6 +356,14 @@ class Settings(BaseSettings):
             raise ValueError(f"job_timeout_audio_multiplier must be > 0, got {self.job_timeout_audio_multiplier}")
         if self.stale_job_buffer < 0:
             raise ValueError(f"stale_job_buffer must be >= 0, got {self.stale_job_buffer}")
+        if self.redis_socket_timeout < 0:
+            raise ValueError(f"redis_socket_timeout must be >= 0, got {self.redis_socket_timeout}")
+        if self.redis_socket_connect_timeout < 0:
+            raise ValueError(f"redis_socket_connect_timeout must be >= 0, got {self.redis_socket_connect_timeout}")
+        if self.redis_health_check_interval < 0:
+            raise ValueError(f"redis_health_check_interval must be >= 0, got {self.redis_health_check_interval}")
+        if self.trusted_proxy_count < 1:
+            raise ValueError(f"trusted_proxy_count must be >= 1, got {self.trusted_proxy_count}")
         if self.diarize_heartbeat_interval < 0:
             raise ValueError(f"diarize_heartbeat_interval must be >= 0, got {self.diarize_heartbeat_interval}")
         # Redis progress keys must outlive the longest possible job run,

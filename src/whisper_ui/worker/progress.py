@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import enum
 import logging
 from typing import TYPE_CHECKING
 
@@ -34,6 +35,26 @@ _DEFAULT_PROCESSING_TTL = 7200
 # scripts skip every generation-related branch, falling back to plain
 # max-write / unconditional-replace semantics.
 _NO_GENERATION = -1
+
+
+class ProgressWriteOutcome(enum.Enum):
+    """Outcome of a generation-gated progress write, consumed by the throttled
+    reporter's SQLite mirror.
+
+    * ``ACCEPTED`` — Redis accepted the write; gating confirmed this writer owns
+      the current attempt, so a full-column ``update_job`` mirror is safe.
+    * ``REJECTED`` — the Lua script dropped the write because the caller's
+      generation is stale (a superseded retry). The mirror must be skipped
+      entirely so the stale snapshot cannot overwrite the current attempt.
+    * ``DEGRADED`` — Redis was unavailable, so gating could not be checked. The
+      mirror falls back to a progress-only field-level UPDATE: it keeps SQLite
+      (the source of truth during an outage) fresh without risking a
+      full-column overwrite from a possibly-stale writer.
+    """
+
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    DEGRADED = "degraded"
 
 
 # Atomic generation-aware max-write for progress reports.
@@ -264,23 +285,22 @@ class RedisProgressReporter:
         """
         return _NO_GENERATION if self._generation is None else int(self._generation)
 
-    def report(self, progress: float, message: str) -> bool:
+    def report(self, progress: float, message: str) -> ProgressWriteOutcome:
         """Attempt a generation-gated max-write.
 
-        Returns ``True`` when the Lua script accepted the write (or when
-        ``generation`` is None, meaning ungated max-write semantics always
-        accept), ``False`` when the script explicitly rejected a stale
-        write (``caller_gen < stored_gen``).
+        Returns :class:`ProgressWriteOutcome`:
 
-        Transient Redis outages are swallowed and reported as accepted so
-        the throttler path keeps writing to SQLite — SQLite is the source
-        of truth when Redis is unavailable. Only an explicit "Lua
-        returned 0" is surfaced to the caller as a rejection signal, and
-        that only happens in exactly one branch of the script: a stage
-        attempting to write under a superseded generation. ``runtime.
-        make_throttled_progress_reporter`` uses this signal to skip its
-        DB mirror so a stale Job snapshot cannot overwrite the current
-        attempt's row via the full-column ``update_job`` UPDATE path.
+        * ``ACCEPTED`` — the Lua script accepted the write (or ``generation``
+          is None, i.e. ungated max-write always accepts).
+        * ``REJECTED`` — the script explicitly dropped a stale write
+          (``caller_gen < stored_gen``): a stage writing under a superseded
+          generation. ``make_throttled_progress_reporter`` skips its DB mirror
+          on this so a stale Job snapshot cannot overwrite the current
+          attempt's row via the full-column ``update_job`` UPDATE.
+        * ``DEGRADED`` — Redis was unavailable. Previously this was reported as
+          accepted, which let a stale writer's full-column mirror clobber a
+          COMPLETED row during an outage. It is now surfaced so the mirror
+          falls back to a progress-only field-level UPDATE instead.
         """
         try:
             result = self._max_write_script(
@@ -289,14 +309,14 @@ class RedisProgressReporter:
             )
         except RedisError:
             logger.warning("Redis progress write failed for %s", self._job_id, exc_info=True)
-            # SQLite is the source of truth during transient Redis outages;
-            # treating the write as accepted lets the throttler keep the DB
-            # mirror fresh even when Redis is down.
-            return True
-        return int(result) != 0
+            return ProgressWriteOutcome.DEGRADED
+        return ProgressWriteOutcome.ACCEPTED if int(result) != 0 else ProgressWriteOutcome.REJECTED
 
     def complete(self, result_path: str) -> bool:
-        """Terminal-state write. See :meth:`report` for the bool contract."""
+        """Terminal-state write. Returns True when the Lua script accepted the
+        write (or on a swallowed Redis outage), False on an explicit stale-
+        generation rejection. The return is fire-and-forget today; the DB
+        transition to COMPLETED is driven separately by the dispatcher."""
         try:
             result = self._complete_script(
                 keys=[self._key, self._generation_key],
@@ -308,7 +328,7 @@ class RedisProgressReporter:
         return int(result) != 0
 
     def fail(self, error: str) -> bool:
-        """Terminal-state write. See :meth:`report` for the bool contract."""
+        """Terminal-state write. Same bool contract as :meth:`complete`."""
         try:
             result = self._fail_script(
                 keys=[self._key, self._generation_key],

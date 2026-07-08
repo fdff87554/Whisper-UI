@@ -264,7 +264,7 @@ def enqueue_pipeline(
     }
     if job.source_url:
         initial_context["source_url"] = job.source_url
-        initial_context["download_dir"] = str(filestore.prepare_upload_path(job.id, "_").parent)
+        initial_context["download_dir"] = str(filestore.prepare_upload_dir(job.id))
         initial_context["input_path"] = ""
     else:
         initial_context["input_path"] = job.filepath or ""
@@ -523,10 +523,16 @@ def finalize_success(rq_job, connection, _result) -> None:
             logger.error("finalize_success could not find parent job %s", parent_job_id)
             return
 
-        if job.status == JobStatus.COMPLETED:
+        if job.status in (JobStatus.COMPLETED, JobStatus.FAILED):
+            # Never resurrect a terminal job. COMPLETED guards a duplicate
+            # finalize; FAILED guards a late/zombie success callback arriving
+            # after the stale reaper (or a fail callback) already failed the
+            # job — without this, a callback whose meta generation is absent
+            # (ungated) could flip a FAILED row back to COMPLETED.
             logger.debug(
-                "finalize_success: job %s already COMPLETED, skipping duplicate finalize",
+                "finalize_success: job %s already terminal (%s); skipping finalize to avoid resurrecting it",
                 parent_job_id,
+                job.status.value,
             )
             return
 
@@ -568,16 +574,18 @@ def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> No
 
     meta_generation = extract_meta_generation(rq_job)
     error_msg = format_failure_message(_exc_type, exc_value)
-    # Surface the raw exception class — distinct from the localised
-    # error_msg the UI shows — so operators can grep finalize_failure
-    # entries to count timeouts vs preprocess errors vs pyannote OOMs
-    # without having to translate the Chinese error labels.
+    # Log the raw exception class AND the raw detail (str(exc_value)) here,
+    # server-side only. error_msg is the generic message the UI shows; the raw
+    # detail — which can carry ffmpeg / whisper-cli stderr and internal paths —
+    # stays in the operator log so debugging is unaffected while the user sees
+    # only the sanitised per-stage message.
     logger.error(
-        "Pipeline failure for job %s (sub_job=%s generation=%s exception=%s message=%r)",
+        "Pipeline failure for job %s (sub_job=%s generation=%s exception=%s detail=%r user_message=%r)",
         parent_job_id,
         rq_job.id,
         meta_generation if meta_generation is not None else "-",
         _exc_type.__name__ if _exc_type is not None else "?",
+        str(exc_value) if exc_value is not None else "-",
         error_msg,
     )
 
@@ -660,7 +668,7 @@ def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> No
 
 
 def is_pipeline_dead(redis: Redis, parent_job_id: str) -> bool:
-    """Return True when a PROCESSING parent has no live RQ work left.
+    """Return True when a QUEUED/PROCESSING parent has no live RQ work left.
 
     "Live" means at least one current-generation sub-job is still queued,
     deferred, scheduled, or started. A parent whose sub-jobs are all finished,
@@ -710,12 +718,19 @@ def recover_stale_pipeline_jobs(
 ) -> int:
     """Fail only genuinely-dead stale jobs; spare jobs still waiting in RQ.
 
-    Replaces the blind wall-age reaper. A parent PROCESSING for longer than
-    ``timeout_seconds`` is failed only if :func:`is_pipeline_dead` confirms none
-    of its current-generation sub-jobs is still alive in RQ. This stops a
+    Replaces the blind wall-age reaper. A parent QUEUED/PROCESSING for longer
+    than ``timeout_seconds`` is failed only if :func:`is_pipeline_dead` confirms
+    none of its current-generation sub-jobs is still alive in RQ. This stops a
     single-/slow-worker box from mass-failing a healthy batch whose tail had
     simply not been reached yet (the production incident: 31/38 jobs reaped
     while their transcribe sub-jobs were still queued behind one worker).
+
+    QUEUED is a candidate too, which closes the state-machine dead-end where a
+    job stranded in QUEUED (its worker crashed, or RQ data was lost, before any
+    stage promoted it to PROCESSING) could never be recovered, retried, or
+    deleted. is_pipeline_dead returns True for such a job (no live sub-jobs), so
+    it is failed and becomes retryable; a job merely waiting in a backed-up
+    queue keeps live sub-jobs and is spared.
 
     For each job it does fail, the generation counter is bumped so any zombie
     sub-job that later resurfaces drops its writes through the existing
@@ -723,7 +738,7 @@ def recover_stale_pipeline_jobs(
     so a backlog deeper than PIPELINE_STATE_TTL_SECONDS cannot expire them
     into a false "dead" verdict on a later round.
     """
-    candidates = db.list_stale_processing_job_ids(timeout_seconds)
+    candidates = db.list_stale_active_job_ids(timeout_seconds)
     if not candidates:
         return 0
     dead: list[str] = []

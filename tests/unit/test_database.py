@@ -73,11 +73,73 @@ def test_update_job(db: JobDatabase):
     assert fetched.progress == 1.0
 
 
+def test_update_job_progress_only_touches_progress_fields(db: JobDatabase):
+    """The field-level progress mirror must never overwrite status /
+    result_path / error — that is what makes it safe to use during a Redis
+    outage when generation gating cannot be verified. A COMPLETED job with a
+    result must stay COMPLETED with its result even if a stale writer nudges
+    its progress.
+    """
+    job = Job(filename="test.mp3", filepath="/tmp/test.mp3")
+    job.status = JobStatus.COMPLETED
+    job.progress = 1.0
+    job.result_path = "/out/result.json"
+    db.insert_job(job)
+
+    db.update_job_progress(job.id, 0.5, "stale heartbeat")
+
+    fetched = db.get_job(job.id)
+    assert fetched is not None
+    assert fetched.progress == 0.5
+    assert fetched.progress_message == "stale heartbeat"
+    # Untouched: the fields a stale full-column overwrite would have clobbered.
+    assert fetched.status == JobStatus.COMPLETED
+    assert fetched.result_path == "/out/result.json"
+
+
 def test_delete_job(db: JobDatabase):
     job = Job(filename="test.mp3", filepath="/tmp/test.mp3")
     db.insert_job(job)
     db.delete_job(job.id)
     assert db.get_job(job.id) is None
+
+
+def test_try_claim_retry_transitions_failed_to_queued_once(db: JobDatabase):
+    """The atomic retry claim succeeds exactly once: a second concurrent call
+    (job already QUEUED) returns False so two pipelines are never built."""
+    job = Job(filename="t.mp3", filepath="/tmp/t.mp3")
+    job.status = JobStatus.FAILED
+    job.error = "boom"
+    job.result_path = "/old.json"
+    db.insert_job(job)
+
+    assert db.try_claim_retry(job.id, duration=12.0) is True
+    fetched = db.get_job(job.id)
+    assert fetched.status == JobStatus.QUEUED
+    assert fetched.error is None
+    assert fetched.result_path is None
+    assert fetched.duration == 12.0
+
+    # Second claim loses: status is no longer FAILED.
+    assert db.try_claim_retry(job.id, duration=99.0) is False
+    assert db.get_job(job.id).duration == 12.0
+
+
+def test_delete_terminal_job_refuses_non_terminal(db: JobDatabase):
+    """Conditional delete only removes terminal rows, so a job a retry just
+    claimed (QUEUED) is never torn out from under the running attempt."""
+    job = Job(filename="t.mp3", filepath="/tmp/t.mp3")
+    job.status = JobStatus.QUEUED
+    db.insert_job(job)
+
+    assert db.delete_terminal_job(job.id) is False
+    assert db.get_job(job.id) is not None
+
+    completed = Job(filename="c.mp3", filepath="/tmp/c.mp3")
+    completed.status = JobStatus.COMPLETED
+    db.insert_job(completed)
+    assert db.delete_terminal_job(completed.id) is True
+    assert db.get_job(completed.id) is None
 
 
 def test_list_jobs_with_limit(db: JobDatabase):
@@ -367,6 +429,30 @@ def test_hot_path_indexes_are_created(tmp_path):
 
     assert "idx_jobs_status_updated_at" in names
     assert "idx_jobs_batch_id" in names
+    assert "idx_jobs_owner_created_at" in names
+
+
+def test_jobs_list_query_uses_created_at_index(tmp_path):
+    """The per-user list query (owner filter + created_at ordering) must be
+    served by an index, not a full scan + sort of the owner's history."""
+    import sqlite3 as _sqlite3
+
+    from whisper_ui.storage import migrations
+
+    conn = _sqlite3.connect(tmp_path / "plan.db")
+    try:
+        migrations.init_db(conn)
+        plan = conn.execute(
+            "EXPLAIN QUERY PLAN SELECT * FROM jobs WHERE owner_id = ? ORDER BY created_at DESC LIMIT ?",
+            (1, 20),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    plan_text = " ".join(str(row) for row in plan)
+    assert "idx_jobs_owner_created_at" in plan_text
+    # The ordering must come from the index, not a temp b-tree sort.
+    assert "USE TEMP B-TREE FOR ORDER BY" not in plan_text
 
 
 def test_has_active_jobs_empty(db: JobDatabase):
@@ -672,7 +758,31 @@ def test_get_batch_stats_with_owner(db: JobDatabase):
     assert admin_stats["b1"]["completed"] == 2
 
 
-def test_recover_stale_jobs_ignores_non_processing(db: JobDatabase):
+def test_recover_stale_jobs_ignores_terminal_and_pending(db: JobDatabase):
+    """Recovery targets active (QUEUED/PROCESSING) jobs; it must never touch
+    PENDING (not yet enqueued) or terminal (COMPLETED/FAILED) rows even when
+    their updated_at is ancient."""
+    untouched = {}
+    for status in (JobStatus.PENDING, JobStatus.COMPLETED, JobStatus.FAILED):
+        job = Job(filename=f"{status.value}.mp3", filepath=f"/tmp/{status.value}.mp3")
+        job.status = status
+        db.insert_job(job)
+        untouched[status] = job.id
+
+    db._conn.execute("UPDATE jobs SET updated_at = '2000-01-01T00:00:00+00:00'")
+    db._conn.commit()
+
+    recovered = db.recover_stale_jobs(timeout_seconds=60, error_message="timeout")
+    assert recovered == 0
+    for status, job_id in untouched.items():
+        fetched = db.get_job(job_id)
+        assert fetched is not None
+        assert fetched.status == status
+
+
+def test_recover_stale_jobs_recovers_stranded_queued(db: JobDatabase):
+    """A job stranded in QUEUED (worker crashed before promoting it to
+    PROCESSING) must be recoverable so it stops being a state-machine dead-end."""
     queued = Job(filename="queued.mp3", filepath="/tmp/queued.mp3")
     queued.status = JobStatus.QUEUED
     db.insert_job(queued)
@@ -684,33 +794,31 @@ def test_recover_stale_jobs_ignores_non_processing(db: JobDatabase):
     db._conn.commit()
 
     recovered = db.recover_stale_jobs(timeout_seconds=60, error_message="timeout")
-    assert recovered == 0
-
+    assert recovered == 1
     fetched = db.get_job(queued.id)
     assert fetched is not None
-    assert fetched.status == JobStatus.QUEUED
+    assert fetched.status == JobStatus.FAILED
 
 
-def test_list_stale_processing_job_ids_returns_old_processing_only(db: JobDatabase):
-    stale = Job(filename="stale.mp3", filepath="/tmp/stale.mp3")
-    stale.status = JobStatus.PROCESSING
-    db.insert_job(stale)
+def test_list_stale_active_job_ids_returns_old_queued_and_processing(db: JobDatabase):
+    stale_proc = Job(filename="stale.mp3", filepath="/tmp/stale.mp3")
+    stale_proc.status = JobStatus.PROCESSING
+    db.insert_job(stale_proc)
+    stale_queued = Job(filename="queued.mp3", filepath="/tmp/queued.mp3")
+    stale_queued.status = JobStatus.QUEUED
+    db.insert_job(stale_queued)
     fresh = Job(filename="fresh.mp3", filepath="/tmp/fresh.mp3")
     fresh.status = JobStatus.PROCESSING
     db.insert_job(fresh)
-    queued = Job(filename="queued.mp3", filepath="/tmp/queued.mp3")
-    queued.status = JobStatus.QUEUED
-    db.insert_job(queued)
 
-    # Backdate the stale PROCESSING job and the (irrelevant) QUEUED job; only
-    # the old PROCESSING one is a stale-recovery candidate.
+    # Backdate both active jobs; the fresh one stays recent and is excluded.
     db._conn.execute(
         "UPDATE jobs SET updated_at = '2000-01-01T00:00:00+00:00' WHERE id IN (?, ?)",
-        (stale.id, queued.id),
+        (stale_proc.id, stale_queued.id),
     )
     db._conn.commit()
 
-    assert db.list_stale_processing_job_ids(timeout_seconds=60) == [stale.id]
+    assert set(db.list_stale_active_job_ids(timeout_seconds=60)) == {stale_proc.id, stale_queued.id}
 
 
 def test_recover_stale_jobs_only_ids_restricts_to_subset(db: JobDatabase):

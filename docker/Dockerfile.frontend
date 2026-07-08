@@ -47,4 +47,6 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 # structured access log emitted from whisper_ui.web.middleware.request_id,
 # which includes user_id, request_id, and duration_ms (the stock log has
 # none of those).
-CMD ["uvicorn", "whisper_ui.web.app:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+# --no-server-header: drop the "Server: uvicorn" response header so the app
+# does not advertise its server software to every client.
+CMD ["uvicorn", "whisper_ui.web.app:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--no-server-header"]

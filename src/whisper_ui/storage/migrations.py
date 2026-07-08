@@ -89,11 +89,20 @@ _MIGRATIONS: list[str] = [
     # Hot-path indexes for the polled job list / dashboard / metrics and the
     # background sweeps, which filter on status and range-scan updated_at
     # (list_jobs_filtered, get_status_counts, count_completed_since,
-    # list_stale_processing_job_ids) or filter on batch_id (list_jobs_by_batch).
+    # list_stale_active_job_ids) or filter on batch_id (list_jobs_by_batch).
     # owner_id is already covered by idx_jobs_owner_id. Cheap to maintain on a
     # write-light table; high-leverage as job history grows.
     "CREATE INDEX IF NOT EXISTS idx_jobs_status_updated_at ON jobs(status, updated_at)",
     "CREATE INDEX IF NOT EXISTS idx_jobs_batch_id ON jobs(batch_id)",
+    # The polled per-user jobs list (list_jobs_filtered) runs
+    # ``WHERE owner_id = ? [AND status = ?] ORDER BY created_at DESC`` every few
+    # seconds. Without a created_at index SQLite range-scans + sorts the whole
+    # owner's history on each poll; (owner_id, created_at) lets it satisfy the
+    # equality filter and the ordering from the index. idx_jobs_status_updated_at
+    # cannot serve this — its sort key is updated_at, not created_at.
+    "CREATE INDEX IF NOT EXISTS idx_jobs_owner_created_at ON jobs(owner_id, created_at)",
+    # Public transcript sharing: nullable opaque token, unique so a lookup by
+    # token maps to at most one job.
     "ALTER TABLE jobs ADD COLUMN share_token TEXT",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_share_token ON jobs(share_token)",
 ]

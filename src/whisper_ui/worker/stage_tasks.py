@@ -108,8 +108,12 @@ def _mark_processing_if_queued(runtime: WorkerRuntime, job: Job) -> None:
     This guards two downstream behaviours that depend on the
     QUEUED → PROCESSING transition:
 
-    - ``recover_stale_jobs`` only scans status = 'processing'; without
-      this flip a crashed DAG leaves the parent stuck in QUEUED forever.
+    - Progress/status accuracy: a job that has actually started work should
+      read as PROCESSING, not QUEUED. (The stale reaper now also recovers
+      genuinely-dead QUEUED jobs via ``list_stale_active_job_ids`` +
+      ``is_pipeline_dead``, so a crashed DAG no longer strands a parent in
+      QUEUED forever — but that recovery only kicks in after the stale
+      timeout, whereas this flip is immediate.)
     - Dashboard polling speed and status badges branch on PROCESSING.
     """
     if job.status == JobStatus.QUEUED:
@@ -356,7 +360,7 @@ def _seed_download_context(job: Job, runtime: WorkerRuntime, context: dict[str, 
     from a URL source.
     """
     context.setdefault("source_url", job.source_url or "")
-    download_dir = str(runtime.filestore.prepare_upload_path(job.id, "_").parent)
+    download_dir = str(runtime.filestore.prepare_upload_dir(job.id))
     context["download_dir"] = download_dir
     context["input_path"] = context.get("input_path", "")
     # Persist the seeded keys so DownloadStage running in this same task

@@ -59,11 +59,22 @@ _TWITTER_HOSTS = {
 _TWEET_ID_RE = re.compile(r"^[0-9]{1,25}$")
 
 
-def _parse_with_scheme(url: str):
-    """Parse a URL, prepending https:// if no scheme is present."""
-    parsed = urlparse(url)
-    if not parsed.scheme:
-        parsed = urlparse(f"https://{url}")
+def _parse_with_scheme(url: str, error_cls: type[ValueError]):
+    """Parse a URL, prepending https:// if no scheme is present.
+
+    ``urlparse`` raises a bare ``ValueError`` for a handful of malformed inputs
+    — most notably an unmatched ``[`` ("Invalid IPv6 URL"), which is what a user
+    pasting a Markdown link like ``[title](https://...)`` produces. Wrap it in
+    the caller's domain error so a ``validate_*`` call always fails with a
+    YouTube/GoogleDrive/Twitter error (which the routes catch and count as an
+    invalid line) instead of a bare ValueError that escapes to a generic 500.
+    """
+    try:
+        parsed = urlparse(url)
+        if not parsed.scheme:
+            parsed = urlparse(f"https://{url}")
+    except ValueError as exc:
+        raise error_cls("Malformed URL.") from exc
     return parsed
 
 
@@ -76,7 +87,7 @@ def validate_youtube_url(url: str) -> str:
     if not url:
         raise YouTubeURLError("URL is empty.")
 
-    parsed = _parse_with_scheme(url)
+    parsed = _parse_with_scheme(url, YouTubeURLError)
 
     if parsed.scheme not in ("http", "https"):
         raise YouTubeURLError("Invalid URL scheme.")
@@ -141,7 +152,7 @@ def validate_youtube_playlist_url(url: str) -> str:
     if not url:
         raise YouTubeURLError("URL is empty.")
 
-    parsed = _parse_with_scheme(url)
+    parsed = _parse_with_scheme(url, YouTubeURLError)
 
     if parsed.scheme not in ("http", "https"):
         raise YouTubeURLError("Invalid URL scheme.")
@@ -179,7 +190,7 @@ def validate_google_drive_url(url: str) -> str:
     if not url:
         raise GoogleDriveURLError("URL is empty.")
 
-    parsed = _parse_with_scheme(url)
+    parsed = _parse_with_scheme(url, GoogleDriveURLError)
 
     if parsed.scheme not in ("http", "https"):
         raise GoogleDriveURLError("Invalid URL scheme.")
@@ -249,7 +260,7 @@ def validate_twitter_url(url: str) -> str:
     if not url:
         raise TwitterURLError("URL is empty.")
 
-    parsed = _parse_with_scheme(url)
+    parsed = _parse_with_scheme(url, TwitterURLError)
 
     if parsed.scheme not in ("http", "https"):
         raise TwitterURLError("Invalid URL scheme.")
@@ -288,7 +299,7 @@ def is_youtube_playlist_url(url: str) -> bool:
     validate_youtube_url so routing and validation can never disagree.
     """
     try:
-        parsed = _parse_with_scheme(url.strip())
+        parsed = _parse_with_scheme(url.strip(), YouTubeURLError)
     except Exception:
         return False
     host = parsed.hostname or ""
@@ -303,7 +314,7 @@ def is_youtube_playlist_url(url: str) -> bool:
 def is_google_drive_url(url: str) -> bool:
     """Quick check whether a URL looks like a Google Drive link."""
     try:
-        parsed = _parse_with_scheme(url.strip())
+        parsed = _parse_with_scheme(url.strip(), GoogleDriveURLError)
         host = parsed.hostname or ""
         return host in _GDRIVE_HOSTS
     except Exception:
@@ -313,7 +324,7 @@ def is_google_drive_url(url: str) -> bool:
 def is_twitter_url(url: str) -> bool:
     """Quick check whether a URL looks like a Twitter/X link."""
     try:
-        parsed = _parse_with_scheme(url.strip())
+        parsed = _parse_with_scheme(url.strip(), TwitterURLError)
         host = parsed.hostname or ""
         return host in _TWITTER_HOSTS
     except Exception:

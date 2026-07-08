@@ -69,7 +69,10 @@ RUN curl -fsSL -o /tmp/deno.zip \
 WORKDIR /app
 
 ARG PIP_INDEX_URL=
-ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+# Deliberately NOT re-exported as ENV: an ARG is already visible to RUN as
+# an env var during build, so pip still honours it, but it does not persist
+# into the final image config where a credentialed private index URL could
+# leak via `docker inspect` / `docker history`.
 
 # Dependency layer: only project metadata plus a stub package, so editing
 # src/ does not invalidate the expensive torch-rocm install below.
@@ -92,8 +95,9 @@ RUN uv export --frozen --no-emit-project --no-hashes \
     "${ROCM_WHEEL_INDEX}/torch-2.10.0%2Brocm7.2.0.lw.gitb6ee5fde-cp312-cp312-linux_x86_64.whl" \
     "${ROCM_WHEEL_INDEX}/torchaudio-2.10.0%2Brocm7.2.0.git5047768f-cp312-cp312-linux_x86_64.whl" \
     "${ROCM_WHEEL_INDEX}/triton-3.6.0%2Brocm7.2.0.gitba5c1517-cp312-cp312-linux_x86_64.whl" && \
-    pip install --no-cache-dir --break-system-packages --no-deps "whisperx>=3.8,<3.9" && \
-    pip install --no-cache-dir --break-system-packages -c /tmp/constraints.txt ".[worker,worker-llm]"
+    pip install --no-cache-dir --break-system-packages --no-deps "whisperx==3.8.6" && \
+    pip install --no-cache-dir --break-system-packages -c /tmp/constraints.txt ".[worker,worker-llm]" && \
+    python -c "import whisperx"
 
 # Project layer: cheap to rebuild on every code change. --force-reinstall
 # replaces the stub install of whisper-ui itself; --no-deps keeps it from

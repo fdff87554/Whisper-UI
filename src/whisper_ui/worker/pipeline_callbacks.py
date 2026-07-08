@@ -18,9 +18,28 @@ from rq.command import send_stop_job_command
 from rq.timeouts import BaseTimeoutException
 
 from whisper_ui.core.constants import ERROR_DISPLAY_LENGTH, ERROR_MAX_LENGTH
+from whisper_ui.core.exceptions import (
+    AlignmentError,
+    DiarizationError,
+    DownloadError,
+    PreprocessError,
+    TranscriptionError,
+)
 from whisper_ui.core.models import JobStatus
+from whisper_ui.ui import labels as ui_labels
 from whisper_ui.ui.labels import JOBS_TIMEOUT_ERROR
 from whisper_ui.worker.runtime import extract_rq_timeout_seconds
+
+# Map a pipeline exception class to the generic, user-safe message for its
+# stage. Anything not listed (including a bare Exception) falls back to the
+# generic label so raw exception text never reaches the UI.
+_STAGE_FAILURE_MESSAGES = {
+    DownloadError: ui_labels.JOBS_STAGE_FAILED_DOWNLOAD,
+    PreprocessError: ui_labels.JOBS_STAGE_FAILED_PREPROCESS,
+    TranscriptionError: ui_labels.JOBS_STAGE_FAILED_TRANSCRIPTION,
+    AlignmentError: ui_labels.JOBS_STAGE_FAILED_ALIGNMENT,
+    DiarizationError: ui_labels.JOBS_STAGE_FAILED_DIARIZATION,
+}
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -71,23 +90,27 @@ def is_stale_callback(current_generation: int | None, meta_generation: int | Non
 
 
 def format_failure_message(exc_type, exc_value) -> str:
-    """Turn an RQ on_failure exception triple into the user-facing error.
+    """Turn an RQ on_failure exception triple into the *user-facing* error.
 
-    RQ timeouts route through ``JOBS_TIMEOUT_ERROR`` so the UI shows the
-    Chinese "任務總執行時間超出上限" message; everything else falls back
-    to ``str(exc_value)``.
+    RQ timeouts route through ``JOBS_TIMEOUT_ERROR``; every other failure maps to
+    a generic per-stage message (see ``_STAGE_FAILURE_MESSAGES``), falling back
+    to the generic label. Raw ``str(exc_value)`` — which can carry ffmpeg /
+    whisper-cli stderr and internal filesystem paths — is deliberately NOT
+    returned here so it never reaches the UI; operators get it from the
+    server-side log in ``finalize_failure`` instead.
 
-    RQ passes the exception *class* as ``exc_type`` (not an instance), so
-    the type check uses ``issubclass``; ``exc_value`` is the instance and
-    is forwarded to ``extract_rq_timeout_seconds`` for message-regex
-    parsing when the current-job lookup is unavailable.
+    RQ passes the exception *class* as ``exc_type`` (not an instance), so the
+    type check uses ``issubclass``; ``exc_value`` is the instance forwarded to
+    ``extract_rq_timeout_seconds`` for message-regex parsing.
     """
     if exc_type is not None and isinstance(exc_type, type) and issubclass(exc_type, BaseTimeoutException):
         seconds = extract_rq_timeout_seconds(exc_value) if exc_value is not None else "?"
         return JOBS_TIMEOUT_ERROR.format(seconds=seconds)
-    if exc_value is not None:
-        return str(exc_value)
-    return "unknown pipeline failure"
+    if exc_type is not None and isinstance(exc_type, type):
+        for exc_cls, message in _STAGE_FAILURE_MESSAGES.items():
+            if issubclass(exc_type, exc_cls):
+                return message
+    return ui_labels.JOBS_STAGE_FAILED_GENERIC
 
 
 def mark_failed(job: Job, db: JobDatabase, reporter: RedisProgressReporter, error_msg: str) -> None:

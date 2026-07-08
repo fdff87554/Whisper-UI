@@ -194,24 +194,30 @@ class JobDatabase:
         ).fetchall()
         return [_row_to_job(r) for r in rows]
 
-    def list_stale_processing_job_ids(self, timeout_seconds: int) -> list[str]:
-        """Return ids of PROCESSING jobs whose updated_at is older than the timeout.
+    def list_stale_active_job_ids(self, timeout_seconds: int) -> list[str]:
+        """Return ids of QUEUED/PROCESSING jobs whose updated_at is older than the timeout.
 
         Candidate list for the liveness-aware stale reaper
         (``worker.pipeline_dispatcher.recover_stale_pipeline_jobs``): the caller
         checks each candidate's RQ pipeline liveness and only fails the
         genuinely-dead ones, sparing jobs that are merely waiting behind a
         slow/backed-up worker. Ordered oldest-first for deterministic logs.
+
+        QUEUED is included alongside PROCESSING so a job that got stranded in
+        QUEUED — its worker crashed (or its RQ data was lost) before any stage
+        promoted it to PROCESSING — is still reachable by recovery. A job merely
+        waiting in a backed-up queue keeps live RQ sub-jobs, so is_pipeline_dead
+        spares it regardless of status.
         """
         threshold = (datetime.now(UTC) - timedelta(seconds=timeout_seconds)).isoformat()
         rows = self._conn.execute(
-            "SELECT id FROM jobs WHERE status = ? AND updated_at < ? ORDER BY updated_at ASC, id ASC",
-            (JobStatus.PROCESSING.value, threshold),
+            "SELECT id FROM jobs WHERE status IN (?, ?) AND updated_at < ? ORDER BY updated_at ASC, id ASC",
+            (JobStatus.QUEUED.value, JobStatus.PROCESSING.value, threshold),
         ).fetchall()
         return [row["id"] for row in rows]
 
     def recover_stale_jobs(self, timeout_seconds: int, error_message: str, *, only_ids: list[str] | None = None) -> int:
-        """Mark PROCESSING jobs whose updated_at is older than the timeout as FAILED.
+        """Mark QUEUED/PROCESSING jobs whose updated_at is older than the timeout as FAILED.
 
         When ``only_ids`` is given, the UPDATE is additionally restricted to
         that id set — the liveness-aware reaper passes the subset of stale
@@ -250,11 +256,12 @@ class JobDatabase:
         # cache limit. Tighter bounding would require batching the
         # UPDATE (e.g. SELECT id LIMIT N then UPDATE WHERE id IN ...)
         # and is not justified at current row sizes.
-        sql = "UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE status = ? AND updated_at < ?"
+        sql = "UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE status IN (?, ?) AND updated_at < ?"
         params: list[object] = [
             JobStatus.FAILED.value,
             error_message,
             datetime.now(UTC).isoformat(),
+            JobStatus.QUEUED.value,
             JobStatus.PROCESSING.value,
             threshold,
         ]
@@ -290,6 +297,24 @@ class JobDatabase:
         values = [getattr(job, col) for col in _JOB_COLUMNS if col != "id"]
         values.append(job.id)
         self._conn.execute(f"UPDATE jobs SET {set_clause} WHERE id = ?", values)
+        self._conn.commit()
+
+    def update_job_progress(self, job_id: str, progress: float, message: str) -> None:
+        """Persist only the progress fields, never status/result_path/error.
+
+        The full-column :meth:`update_job` overwrites every column from an
+        in-memory snapshot, which is only safe once generation gating has
+        confirmed the writer owns the current attempt. During a Redis outage
+        gating cannot be checked, so the progress mirror falls back to this
+        targeted UPDATE: a stale writer can at worst nudge the progress number,
+        never resurrect a COMPLETED row to PROCESSING or drop its result_path.
+        ``updated_at`` is refreshed so an actively-reporting job is not falsely
+        reaped as stale.
+        """
+        self._conn.execute(
+            "UPDATE jobs SET progress = ?, progress_message = ?, updated_at = ? WHERE id = ?",
+            (progress, message, datetime.now(UTC).isoformat(), job_id),
+        )
         self._conn.commit()
 
     def list_jobs_by_batch(self, batch_id: str, *, owner_id: int | None = None) -> list[Job]:
@@ -414,6 +439,40 @@ class JobDatabase:
     def delete_job(self, job_id: str) -> None:
         self._conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
         self._conn.commit()
+
+    def try_claim_retry(self, job_id: str, duration: float | None) -> bool:
+        """Atomically transition a FAILED job to QUEUED for a retry.
+
+        Returns True when this call performed the transition. A concurrent
+        double-click, or a bulk retry racing a single retry, sees False and must
+        not enqueue — otherwise two pipelines run for one job, wasting a full
+        GPU pass and letting two attempts write the same intermediate files. The
+        progress/error/result reset happens in the same statement so the claim
+        and the reset are one atomic write gated on ``status = 'failed'``.
+        """
+        cursor = self._conn.execute(
+            "UPDATE jobs SET status = ?, error = NULL, progress = 0.0, progress_message = '', "
+            "result_path = NULL, duration = ?, updated_at = ? WHERE id = ? AND status = ?",
+            (JobStatus.QUEUED.value, duration, datetime.now(UTC).isoformat(), job_id, JobStatus.FAILED.value),
+        )
+        self._conn.commit()
+        return cursor.rowcount == 1
+
+    def delete_terminal_job(self, job_id: str) -> bool:
+        """Delete a job row only while it is still terminal (COMPLETED/FAILED).
+
+        Returns True when a row was deleted. The terminal guard makes delete
+        mutually exclusive with :meth:`try_claim_retry`: if a retry wins a
+        concurrent race the status is QUEUED, this DELETE matches nothing, and
+        the caller reports "not deletable" instead of tearing the row (and, in
+        the route, the files) out from under a freshly-requeued attempt.
+        """
+        cursor = self._conn.execute(
+            "DELETE FROM jobs WHERE id = ? AND status IN (?, ?)",
+            (job_id, JobStatus.COMPLETED.value, JobStatus.FAILED.value),
+        )
+        self._conn.commit()
+        return cursor.rowcount == 1
 
     def list_terminal_job_ids_older_than(
         self,

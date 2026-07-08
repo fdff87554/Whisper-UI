@@ -31,7 +31,7 @@ def test_build_worker_runtime_wires_shared_resources_and_closes_db():
 
     with (
         patch("whisper_ui.worker.runtime.get_settings", return_value=fake_settings),
-        patch("whisper_ui.worker.runtime.Redis.from_url", return_value=fake_redis) as redis_from_url,
+        patch("whisper_ui.worker.runtime.create_redis", return_value=fake_redis) as create_redis_mock,
         patch("whisper_ui.worker.runtime.JobDatabase", return_value=fake_db) as db_ctor,
         patch("whisper_ui.worker.runtime.FileStore", return_value=fake_filestore) as fs_ctor,
     ):
@@ -43,7 +43,7 @@ def test_build_worker_runtime_wires_shared_resources_and_closes_db():
             assert runtime.filestore is fake_filestore
             assert isinstance(runtime.reporter, RedisProgressReporter)
 
-        redis_from_url.assert_called_once_with(fake_settings.redis_url)
+        create_redis_mock.assert_called_once_with(fake_settings)
         db_ctor.assert_called_once_with(fake_settings.database_path)
         fs_ctor.assert_called_once_with(fake_settings.upload_dir, fake_settings.output_dir)
         fake_db.close.assert_called_once()
@@ -55,7 +55,7 @@ def test_build_worker_runtime_closes_db_even_on_error():
 
     with (
         patch("whisper_ui.worker.runtime.get_settings", return_value=fake_settings),
-        patch("whisper_ui.worker.runtime.Redis.from_url", return_value=MagicMock()),
+        patch("whisper_ui.worker.runtime.create_redis", return_value=MagicMock()),
         patch("whisper_ui.worker.runtime.JobDatabase", return_value=fake_db),
         patch("whisper_ui.worker.runtime.FileStore", return_value=MagicMock()),
     ):

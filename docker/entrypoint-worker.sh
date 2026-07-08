@@ -74,9 +74,13 @@ case "${WORKER_MAX_IDLE_TIME:-}" in
 esac
 
 echo "Starting RQ worker on queues: ${WORKER_QUEUES}"
+# Pass the Redis URL via RQ_REDIS_URL (the env var the rq CLI reads for --url)
+# rather than an argv --url flag: a URL like redis://:<password>@host embeds a
+# credential, and argv is world-readable via `ps` to any local user on the
+# Docker host, whereas /proc/<pid>/environ is restricted to the process owner.
+export RQ_REDIS_URL="${REDIS_URL:-redis://redis:6379/0}"
 # shellcheck disable=SC2086
 exec python -m whisper_ui.worker worker \
-	--url "${REDIS_URL:-redis://redis:6379/0}" \
 	--name "whisper-worker-$(hostname)" \
 	${WORKER_CLASS_ARG} \
 	${WORKER_MAX_IDLE_ARG} \

@@ -17,11 +17,20 @@ class FileStore:
         self._upload_dir.mkdir(parents=True, exist_ok=True)
         self._output_dir.mkdir(parents=True, exist_ok=True)
 
-    def prepare_upload_path(self, job_id: str, filename: str) -> Path:
-        """Create the upload directory for *job_id* and return the destination path."""
+    def prepare_upload_dir(self, job_id: str) -> Path:
+        """Create (if needed) and return the upload directory for *job_id*.
+
+        Callers that need the directory itself — the URL download stages write
+        ``video.<ext>`` into it — use this instead of the
+        ``prepare_upload_path(job_id, "_").parent`` sentinel idiom.
+        """
         job_dir = self._upload_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
-        return job_dir / Path(filename).name
+        return job_dir
+
+    def prepare_upload_path(self, job_id: str, filename: str) -> Path:
+        """Create the upload directory for *job_id* and return the destination path."""
+        return self.prepare_upload_dir(job_id) / Path(filename).name
 
     def copy_source_for_new_job(self, src_job_id: str, src_filename: str, new_job_id: str) -> Path:
         """Copy ``src_job_id``'s uploaded audio into ``new_job_id``'s upload dir.
@@ -111,13 +120,14 @@ class FileStore:
     def delete_job_files(self, job_id: str) -> None:
         """Remove both upload and output dirs for ``job_id``; raise on any failure.
 
-        Manual delete routes (``DELETE /jobs/{id}``, ``DELETE /jobs/batch/{id}``)
-        rely on this strict 'either both gone or both kept' contract: if a
-        filesystem error leaves files behind, the route MUST NOT delete the
-        DB row, otherwise the UI / audit log shows the job as deleted while
-        the storage is still occupied. Best-effort cleanup (which suits
-        the retention sweep) belongs in :meth:`delete_upload_files`, not
-        here.
+        Raising on failure lets the caller decide how to handle a partial
+        reclaim. The manual delete routes (``DELETE /jobs/{id}``,
+        ``DELETE /jobs/batch/{id}``) call this **after** an atomic, terminal-
+        gated row delete (row-first ordering, to close the delete/retry TOCTOU),
+        so a filesystem error here leaves orphaned files that the route logs for
+        manual/retention cleanup rather than a dangling DB row. Best-effort
+        cleanup that never raises (which suits the retention sweep) belongs in
+        :meth:`delete_upload_files`, not here.
         """
         removed: list[str] = []
         for base, label in ((self._upload_dir, "upload"), (self._output_dir, "output")):

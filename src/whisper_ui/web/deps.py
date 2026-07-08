@@ -17,7 +17,17 @@ from whisper_ui.web.flash import consume_flash
 
 _WEB_DIR = Path(__file__).parent
 
-templates = Jinja2Templates(directory=_WEB_DIR / "templates")
+
+def _csp_nonce_context(request: Request) -> dict[str, str]:
+    """Expose the per-request CSP nonce (set by SecurityHeadersMiddleware) to
+    templates so inline <script> blocks can carry ``nonce="{{ csp_nonce }}"``.
+    Falls back to "" if the middleware did not run (e.g. a direct render in a
+    test), which simply yields a script that the CSP will reject in the browser.
+    """
+    return {"csp_nonce": getattr(request.state, "csp_nonce", "")}
+
+
+templates = Jinja2Templates(directory=_WEB_DIR / "templates", context_processors=[_csp_nonce_context])
 
 
 def _format_time(seconds: float) -> str:

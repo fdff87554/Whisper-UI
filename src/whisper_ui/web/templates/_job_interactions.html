@@ -77,7 +77,7 @@
   </dialog>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 function registerJobSelectionStore() {
   // Idempotent. hx-boost only swaps #page-content, so this script re-runs when
   // the user navigates into /jobs or /admin/jobs *after* Alpine has already

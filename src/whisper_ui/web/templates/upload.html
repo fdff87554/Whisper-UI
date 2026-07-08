@@ -331,7 +331,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
 const UPLOAD_PRESETS = {
   meeting:   { language: 'zh', enable_diarization: true,  num_speakers: 0, convert_to_traditional: true,  llm_correction_enabled: true  },
   podcast:   { language: 'zh', enable_diarization: true,  num_speakers: 2, convert_to_traditional: true,  llm_correction_enabled: true  },

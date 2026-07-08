@@ -4,9 +4,11 @@ Exposes operational gauges computed on each scrape from the data the frontend
 already holds — RQ/Redis registries and the SQLite ``jobs`` table — with no
 persistent counters. A Redis blip degrades to the SQLite-only metrics instead
 of failing the scrape (mirrors the lifespan's tolerance of an unreachable
-Redis). The endpoint is unauthenticated (added to ``auth.PUBLIC_PATHS``, same
-posture as ``/health``); it exposes only counts/depths, no PII. An operator
-fronting the box publicly should block ``/metrics`` at the reverse proxy.
+Redis). The endpoint is on ``auth.PUBLIC_PATHS`` (same posture as ``/health``)
+and exposes only counts/depths, no PII. It is open by default; setting
+``METRICS_TOKEN`` requires scrapes to send ``Authorization: Bearer <token>``.
+An operator fronting the box publicly should set that token or block
+``/metrics`` at the reverse proxy.
 
 Per-stage latency is intentionally NOT exposed here (workers have no HTTP
 server); it ships as ``elapsed_ms`` in the structured JSON logs and a
@@ -17,18 +19,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Request, Response
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, generate_latest
 from prometheus_client.core import GaugeMetricFamily
 
 from whisper_ui.core.constants import WORKER_QUEUE_CPU, WORKER_QUEUE_GPU, WORKER_QUEUE_IO, WORKER_QUEUE_LLM
 from whisper_ui.core.models import JobStatus
 
-# DbDep/RedisDep stay runtime imports: FastAPI evaluates these Depends
-# annotations at startup, so moving them into TYPE_CHECKING would NameError.
-from whisper_ui.web.deps import DbDep, RedisDep  # noqa: TC001
+# DbDep/RedisDep/SettingsDep stay runtime imports: FastAPI evaluates these
+# Depends annotations at startup, so moving them into TYPE_CHECKING would NameError.
+from whisper_ui.web.deps import DbDep, RedisDep, SettingsDep  # noqa: TC001
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -103,8 +106,20 @@ def _render_metrics(status_counts: dict[str, int], redis: Redis) -> bytes:
     return generate_latest(registry)
 
 
+def _metrics_authorized(request: Request, expected_token: str) -> bool:
+    """True when no token is configured (open, default) or the request carries
+    the matching bearer token. Constant-time compare avoids a timing oracle."""
+    if not expected_token:
+        return True
+    header = request.headers.get("authorization", "")
+    scheme, _, presented = header.partition(" ")
+    return scheme.lower() == "bearer" and secrets.compare_digest(presented, expected_token)
+
+
 @router.get("/metrics")
-async def metrics(db: DbDep, redis: RedisDep) -> Response:
+async def metrics(request: Request, db: DbDep, redis: RedisDep, settings: SettingsDep) -> Response:
+    if not _metrics_authorized(request, settings.metrics_token):
+        return Response("Unauthorized", status_code=401, headers={"WWW-Authenticate": "Bearer"})
     # get_status_counts is a single fast indexed query — run it on the event
     # loop, which owns the shared SQLite connection (the collector must not
     # touch that connection from the worker thread below). Only the ~15

@@ -93,7 +93,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
 // Deployment availability mirrors the disabled state on the modal toggles,
 // so the pre-filled state never enables a feature this deployment cannot run
 // (the backend clamps too; this keeps the UI honest).

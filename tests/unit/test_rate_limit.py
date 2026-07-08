@@ -9,14 +9,18 @@ during an incident.
 from __future__ import annotations
 
 import logging
+from unittest.mock import MagicMock
 
 import fakeredis
 import pytest
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from whisper_ui.web.rate_limit import (
     _describe_trip,
     check_and_increment,
     is_locked,
+    record_register_attempt,
+    register_is_locked,
     reset_user,
 )
 
@@ -24,6 +28,16 @@ from whisper_ui.web.rate_limit import (
 @pytest.fixture
 def redis():
     return fakeredis.FakeStrictRedis()
+
+
+@pytest.fixture
+def down_redis():
+    """A Redis client whose every call raises, simulating an outage."""
+    client = MagicMock()
+    client.get.side_effect = RedisConnectionError("down")
+    client.delete.side_effect = RedisConnectionError("down")
+    client.pipeline.side_effect = RedisConnectionError("down")
+    return client
 
 
 def _call_check(redis, username: str = "alice", ip: str = "1.2.3.4") -> bool:
@@ -173,3 +187,32 @@ def test_reset_user_silent_when_no_counter_to_clear(redis, caplog):
         reset_user(redis, "ghost")
 
     assert caplog.records == []
+
+
+# --- Fail-open on Redis outage: auth must not 500 when the queue store is down ---
+
+
+def test_check_and_increment_fails_open_on_redis_error(down_redis, caplog):
+    with caplog.at_level(logging.WARNING, logger="whisper_ui.web.rate_limit"):
+        blocked = _call_check(down_redis)
+
+    assert blocked is False
+    assert any("failing open" in r.message for r in caplog.records)
+
+
+def test_is_locked_fails_open_on_redis_error(down_redis):
+    assert is_locked(down_redis, username="alice", ip="1.2.3.4", max_user_attempts=5, max_ip_attempts=20) is False
+
+
+def test_register_is_locked_fails_open_on_redis_error(down_redis):
+    assert register_is_locked(down_redis, ip="1.2.3.4", max_attempts=10) is False
+
+
+def test_record_register_attempt_swallows_redis_error(down_redis):
+    # Must not raise even though the pipeline call errors.
+    record_register_attempt(down_redis, ip="1.2.3.4", window_seconds=900)
+
+
+def test_reset_user_swallows_redis_error(down_redis):
+    # Called on successful login; a Redis outage here must not 500 after auth.
+    reset_user(down_redis, "alice")

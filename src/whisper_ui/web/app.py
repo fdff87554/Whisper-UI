@@ -19,20 +19,53 @@ from whisper_ui.web.deps import templates
 from whisper_ui.web.middleware.request_id import RequestIdMiddleware
 
 
+def _build_csp(nonce: str) -> str:
+    """Pragmatic Content-Security-Policy for the htmx + Alpine.js frontend.
+
+    ``script-src`` allowlists jsDelivr (htmx / Alpine are loaded from there with
+    SRI) and carries a per-request nonce for the handful of inline ``<script>``
+    blocks. ``'unsafe-eval'`` is required because Alpine's standard build
+    evaluates its ``x-*`` directive expressions via ``new Function`` — dropping
+    it would need the @alpinejs/csp build and an inline-expression rewrite, a
+    much larger change. Everything else is locked to ``'self'`` so this still
+    adds real XSS defence-in-depth: no framing, no plugins, no base-tag or
+    form-action hijack, no off-origin data exfiltration.
+    """
+    return "; ".join(
+        (
+            "default-src 'self'",
+            f"script-src 'self' 'nonce-{nonce}' 'unsafe-eval' https://cdn.jsdelivr.net",
+            # base.html and shared_viewer.html load the Noto Sans TC stylesheet
+            # from fonts.googleapis.com and its font files from fonts.gstatic.com.
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+            "img-src 'self' data:",
+            "font-src 'self' https://fonts.gstatic.com",
+            "connect-src 'self'",
+            "object-src 'none'",
+            "base-uri 'self'",
+            "form-action 'self'",
+            "frame-ancestors 'self'",
+        )
+    )
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Defense-in-depth headers for the internal-network deployment.
 
-    No CSP because the templates load htmx and Alpine.js from jsDelivr;
-    crafting a working source list belongs in a separate deployment-time
-    pass. No HSTS because TLS is expected to be terminated by an
-    upstream reverse proxy that owns the TLS-related headers.
+    A per-request CSP nonce is stashed on ``request.state`` before the route
+    runs so the templates' inline ``<script>`` blocks can reference it (see the
+    ``csp_nonce`` template context processor). No HSTS because TLS is expected
+    to be terminated by an upstream reverse proxy that owns the TLS headers.
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
+        nonce = secrets.token_urlsafe(16)
+        request.state.csp_nonce = nonce
         response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
         response.headers.setdefault("Referrer-Policy", "same-origin")
+        response.headers.setdefault("Content-Security-Policy", _build_csp(nonce))
         return response
 
 
@@ -138,11 +171,11 @@ def _run_stale_recovery(db_path, redis, timeout_seconds: int, error_message: str
 async def lifespan(app: FastAPI):
     from datetime import UTC, datetime, timedelta
 
-    from redis import Redis
     from redis.exceptions import RedisError
 
     from whisper_ui.core.config import get_settings
     from whisper_ui.core.constants import STALE_JOB_CHECK_INTERVAL
+    from whisper_ui.core.redis_client import create_redis
     from whisper_ui.storage.database import JobDatabase
     from whisper_ui.storage.filestore import FileStore
     from whisper_ui.ui.labels import JOBS_STALE_ERROR
@@ -151,7 +184,7 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.db = JobDatabase(settings.database_path)
     app.state.filestore = FileStore(settings.upload_dir, settings.output_dir)
-    app.state.redis = Redis.from_url(settings.redis_url)
+    app.state.redis = create_redis(settings)
     try:
         app.state.redis.ping()
     except RedisError:
@@ -222,12 +255,13 @@ def create_app() -> FastAPI:
     from whisper_ui.core.config import get_settings
     from whisper_ui.core.logging_setup import setup_logging
 
-    # Apply the project-wide dictConfig before anything else logs. Calling
-    # later would leave early startup lines (Settings validation, etc.)
-    # going through Python's default WARNING-only root logger.
+    # Apply the project-wide dictConfig before anything else logs (env-based),
+    # so early startup lines are formatted, then re-apply from Settings so a
+    # LOG_LEVEL / LOG_JSON in .env (which get_settings loads) takes effect.
+    # dictConfig is idempotent, so the second call simply supersedes the first.
     setup_logging()
-
     settings = get_settings()
+    setup_logging(log_level=settings.log_level, log_json=settings.log_json)
     application = FastAPI(title="Whisper UI", lifespan=lifespan)
     # bootstrap_done flips True after the first active admin is observed.
     # Initialised here (not in lifespan) so AuthMiddleware can read it

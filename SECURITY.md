@@ -75,18 +75,46 @@ restricts the network the application is reachable from.
   every restart will invalidate all sessions.
 - Set `SESSION_HTTPS_ONLY=true` when running behind TLS so the session
   cookie is marked `Secure`.
-- If you set `TRUST_PROXY_HEADERS=true`, the reverse proxy **must**
-  overwrite client-supplied `X-Forwarded-For` and `X-Forwarded-Host`
-  (e.g. nginx `proxy_set_header X-Forwarded-For $remote_addr;`).
-  Otherwise a hostile client can spoof its IP and host to defeat
-  rate-limit and CSRF checks. See the README "Multi-user authentication"
-  section for full operator guidance.
+- If you set `TRUST_PROXY_HEADERS=true`, set `TRUSTED_PROXY_COUNT` to the
+  number of reverse proxies in front of the app (default 1). The client IP
+  is taken as the Nth entry from the **right** of `X-Forwarded-For` (the hops
+  your own proxies appended); anything further left is treated as
+  client-controlled and ignored. The reverse proxy must still append (not
+  trust) the inbound header. Otherwise a hostile client can spoof its IP and
+  host to defeat rate-limit and CSRF checks. See the README "Multi-user
+  authentication" section for full operator guidance.
+- Set `METRICS_TOKEN` to require `Authorization: Bearer <token>` on `/metrics`
+  when the box is reachable publicly. `/metrics` is open by default (it exposes
+  only counts/depths, no PII); a token or a reverse-proxy block hardens it.
 - Set `REDIS_PASSWORD` before exposing the bundled Redis beyond the local
-  Docker network (the compose snippet only enables `--requirepass` when
-  the variable is non-empty).
+  Docker network. Compose always passes `--requirepass "${REDIS_PASSWORD:-}"`,
+  so an unset password leaves Redis open (empty password = no auth).
 - Never commit `.env` files or HuggingFace tokens to version control.
 - Run Docker containers with minimal privileges.
 - Keep dependencies updated; the project ships a GitHub Dependabot
   config (`.github/dependabot.yml`) and CI runs dependency checks.
 - Restrict network access to the published port (default 8080) so reach is
   limited to the intended audience.
+
+## Known Accepted Trade-offs
+
+These are deliberate design choices for the internal-network deployment model,
+documented here so they are explicit rather than surprises:
+
+- **Logout is not server-side session revocation.** `/logout` clears the
+  browser's signed session cookie but does not bump `session_version`, so a
+  cookie value captured before logout (e.g. on a shared machine, or via a
+  plaintext channel when `SESSION_HTTPS_ONLY` is off) stays valid until its
+  14-day `max_age` expires. Admin password reset / account deactivation _do_
+  bump `session_version` and revoke immediately. On shared machines, close the
+  browser session; for immediate revocation, an admin can reset the password.
+- **Session cookie `Secure` defaults off.** The bundled compose profiles serve
+  plain HTTP, so `SESSION_HTTPS_ONLY` defaults to `false`. Set it to `true`
+  behind TLS so the cookie is only sent over HTTPS.
+- **`SESSION_SECRET` unset does not fail startup.** An empty value falls back to
+  an ephemeral per-process secret (logged as a warning) so dev/compose still
+  boots; production must set a stable value or every restart logs everyone out.
+- **Front-end JS loads from jsDelivr (with SRI).** htmx and Alpine.js are loaded
+  from the jsDelivr CDN pinned by Subresource Integrity hash, so a tampered CDN
+  asset is rejected by the browser. A fully air-gapped deployment should vendor
+  these locally and tighten the CSP `script-src` accordingly.

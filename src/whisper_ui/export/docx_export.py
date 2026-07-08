@@ -42,8 +42,13 @@ class DocxExporter:
                 run.bold = True
                 run.font.size = Pt(11)
 
-            p = doc.add_paragraph(strip_control_chars(seg.text))
-            p.style.font.size = Pt(10)
+            # Size the body run directly. Setting ``p.style.font.size`` would
+            # mutate the shared 'Normal' style on every iteration (a global
+            # side effect that also retro-sizes earlier paragraphs); a run-level
+            # size keeps the change local to this paragraph.
+            para = doc.add_paragraph()
+            run = para.add_run(strip_control_chars(seg.text))
+            run.font.size = Pt(10)
 
         buf = io.BytesIO()
         doc.save(buf)

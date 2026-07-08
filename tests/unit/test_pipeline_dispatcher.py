@@ -667,6 +667,44 @@ def test_finalize_success_skips_already_completed_job(monkeypatch, tmp_path):
     runtime.db.update_job.assert_not_called()
 
 
+def test_finalize_success_does_not_resurrect_failed_job(monkeypatch, tmp_path):
+    """A late/zombie success callback for a job the stale reaper already FAILED
+    must not flip it back to COMPLETED, even when its meta generation is absent
+    (the ungated path the Python stale-callback guard cannot catch)."""
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    job = Job(
+        id="job-already-failed",
+        filename="m.mp3",
+        filepath=str(tmp_path / "m.mp3"),
+        status=JobStatus.FAILED,
+    )
+
+    runtime = MagicMock()
+    runtime.redis = redis
+    runtime.db.get_job.return_value = job
+    runtime.settings.redis_processing_expiry = 7200
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _fake_builder(job_id, *, generation=None):
+        runtime.reporter = MagicMock()
+        yield runtime
+
+    monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
+
+    fake_rq_job = MagicMock()
+    fake_rq_job.meta = {"parent_job_id": job.id}  # no generation -> ungated path
+
+    pd.finalize_success(fake_rq_job, redis, None)
+
+    runtime.filestore.save_result.assert_not_called()
+    runtime.db.update_job.assert_not_called()
+    assert job.status == JobStatus.FAILED
+
+
 def test_finalize_failure_marks_job_failed_and_cancels_siblings(monkeypatch, tmp_path):
     from whisper_ui.worker import pipeline_dispatcher as pd
 
@@ -709,8 +747,13 @@ def test_finalize_failure_marks_job_failed_and_cancels_siblings(monkeypatch, tmp
     # check short-circuits the test against its own setup.
     pd.finalize_failure(failing, redis, RuntimeError, RuntimeError("kaboom"), None)
 
+    from whisper_ui.ui import labels as ui_labels
+
     assert job.status == JobStatus.FAILED
-    assert "kaboom" in (job.error or "")
+    # User-facing error is the generic message; the raw "kaboom" detail only
+    # goes to the server log, never job.error.
+    assert job.error == ui_labels.JOBS_STAGE_FAILED_GENERIC
+    assert "kaboom" not in (job.error or "")
     # Observable terminal state — finalize_failure now builds its own
     # generation-aware reporter instead of reusing runtime.reporter.
     stored = {
@@ -718,7 +761,7 @@ def test_finalize_failure_marks_job_failed_and_cancels_siblings(monkeypatch, tmp
         for k, v in redis.hgetall(f"job:{job.id}").items()
     }
     assert stored["status"] == "failed"
-    assert "kaboom" in stored["error"]
+    assert "kaboom" not in stored["error"]
 
     for other in others:
         refreshed = RQJob.fetch(other.id, connection=redis)
@@ -1151,9 +1194,9 @@ def test_subjobs_set_is_scoped_per_generation(tmp_path):
     assert gen1_ids.isdisjoint(gen2_ids), "attempt 1 and attempt 2 sub-job sets must not overlap"
 
 
-def test_finalize_failure_generic_exception_still_uses_str(monkeypatch, tmp_path):
-    """Non-timeout exceptions keep the existing str(exc_value) path so
-    pipeline-level errors (e.g. PipelineError) are surfaced verbatim."""
+def test_finalize_failure_generic_exception_uses_sanitised_message(monkeypatch, tmp_path):
+    """Non-timeout, unmapped exceptions surface the generic per-stage message,
+    never the raw str(exc_value) (which can carry stderr / internal paths)."""
     from whisper_ui.worker import pipeline_dispatcher as pd
 
     redis = fakeredis.FakeRedis()
@@ -1185,9 +1228,13 @@ def test_finalize_failure_generic_exception_still_uses_str(monkeypatch, tmp_path
     # callback's staleness check passes for this attempt.
     pd.finalize_failure(failing, redis, RuntimeError, RuntimeError("whisper model oom"), None)
 
+    from whisper_ui.ui import labels as ui_labels
+
     assert job.status == JobStatus.FAILED
-    assert "whisper model oom" in (job.error or "")
-    # Must not be silently rewritten to the timeout label.
+    # Raw detail is sanitised out of the user-facing error.
+    assert job.error == ui_labels.JOBS_STAGE_FAILED_GENERIC
+    assert "whisper model oom" not in (job.error or "")
+    # Must not be silently rewritten to the timeout label either.
     assert "任務總執行時間" not in (job.error or "")
 
 
@@ -1292,8 +1339,11 @@ def test_finalize_failure_on_llm_correction_without_transcript_still_fails(monke
 
     pd.finalize_failure(llm_sub, redis, RuntimeError, RuntimeError("boom"), None)
 
+    from whisper_ui.ui import labels as ui_labels
+
     assert job.status == JobStatus.FAILED
-    assert "boom" in (job.error or "")
+    # Sanitised generic message, not the raw "boom".
+    assert job.error == ui_labels.JOBS_STAGE_FAILED_GENERIC
 
 
 def _build_completion_runtime(redis, job, tmp_path, *, save_side_effect=None):
@@ -1545,6 +1595,46 @@ def test_recover_stale_pipeline_jobs_spares_live_and_fails_dead(tmp_path):
         assert db.get_job(dead.id).status == JobStatus.FAILED
         assert db.get_job(dead.id).error == JOBS_STALE_ERROR
         assert db.get_job(live.id).status == JobStatus.PROCESSING, "a job still waiting in queue must be spared"
+    finally:
+        db.close()
+
+
+def test_recover_stale_pipeline_jobs_recovers_stranded_queued_job(tmp_path):
+    """A parent stranded in QUEUED whose pipeline is dead (no live sub-jobs) is
+    recovered, closing the dead-end where such a job could never be retried or
+    deleted. A QUEUED parent whose sub-jobs are still live is spared."""
+    from whisper_ui.storage.database import JobDatabase
+    from whisper_ui.ui.labels import JOBS_STALE_ERROR
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    db = JobDatabase(tmp_path / "stale.db")
+    try:
+        dead = Job(id="qdead", filename="d.mp3", filepath=str(tmp_path / "d.mp3"), status=JobStatus.QUEUED)
+        live = Job(id="qlive", filename="l.mp3", filepath=str(tmp_path / "l.mp3"), status=JobStatus.QUEUED)
+        db.insert_job(dead)
+        db.insert_job(live)
+        enqueue_pipeline(dead, redis=redis, settings=settings, filestore=filestore)
+        enqueue_pipeline(live, redis=redis, settings=settings, filestore=filestore)
+
+        # dead: cancel every sub-job so the pipeline has no live work; the parent
+        # DB row is still QUEUED (it never got promoted to PROCESSING).
+        for sub in _load_subjobs(redis, dead.id):
+            sub.cancel()
+
+        db._conn.execute(
+            "UPDATE jobs SET updated_at = '2000-01-01T00:00:00+00:00' WHERE status = ?",
+            (JobStatus.QUEUED.value,),
+        )
+        db._conn.commit()
+
+        recovered = pd.recover_stale_pipeline_jobs(db, redis, timeout_seconds=60, error_message=JOBS_STALE_ERROR)
+
+        assert recovered == 1
+        assert db.get_job(dead.id).status == JobStatus.FAILED
+        assert db.get_job(live.id).status == JobStatus.QUEUED, "a QUEUED job with live sub-jobs must be spared"
     finally:
         db.close()
 

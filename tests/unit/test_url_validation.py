@@ -347,3 +347,30 @@ class TestIsValidGdriveFileId:
 
     def test_rejects_empty(self):
         assert is_valid_gdrive_file_id("") is False
+
+
+class TestMalformedURLsRaiseDomainErrors:
+    """A bare urlparse ValueError (e.g. an unmatched '[') must be wrapped in the
+    caller's domain error so the upload routes count it as an invalid line
+    instead of letting it escape to a generic 500."""
+
+    @pytest.mark.parametrize("bad", ["http://[", "[title](https://www.youtube.com/watch?v=dQw4w9WgXcQ)"])
+    def test_validate_youtube_wraps_value_error(self, bad):
+        with pytest.raises(YouTubeURLError):
+            validate_youtube_url(bad)
+
+    def test_validate_youtube_playlist_wraps_value_error(self):
+        with pytest.raises(YouTubeURLError):
+            validate_youtube_playlist_url("http://[")
+
+    def test_validate_google_drive_wraps_value_error(self):
+        with pytest.raises(GoogleDriveURLError):
+            validate_google_drive_url("http://[")
+
+    def test_validate_twitter_wraps_value_error(self):
+        with pytest.raises(TwitterURLError):
+            validate_twitter_url("http://[")
+
+    @pytest.mark.parametrize("checker", [is_youtube_playlist_url, is_google_drive_url, is_twitter_url])
+    def test_is_helpers_return_false_on_malformed(self, checker):
+        assert checker("http://[") is False

@@ -25,6 +25,7 @@ import json
 import logging
 import logging.config
 import os
+import re
 from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
@@ -150,6 +151,23 @@ _RESERVED_LOGRECORD_ATTRS = frozenset(
     }
 )  # fmt: skip
 
+# Structured ``extra={}`` field names whose value is redacted in the JSON log,
+# so a call site that accidentally passes a token / password / raw URL (which
+# may carry inline credentials) cannot leak it. Matched as a whole
+# underscore-delimited word (or the whole key) rather than a bare substring, so
+# ``redis_url`` / ``source_url`` / ``hf_token`` / ``api_key`` are redacted while
+# ``curl_command`` / ``tokenizer_name`` (which merely contain "url" / "token")
+# are not.
+_SENSITIVE_KEY_RE = re.compile(
+    r"(?:^|_)(?:password|passwd|secret|token|authorization|api_?key|url)(?:_|$)",
+    re.IGNORECASE,
+)
+_REDACTED = "***"
+
+
+def _is_sensitive_key(key: str) -> bool:
+    return bool(_SENSITIVE_KEY_RE.search(key))
+
 
 class JsonFormatter(logging.Formatter):
     """Render each LogRecord as one JSON line (selected when ``LOG_JSON`` is set).
@@ -173,7 +191,7 @@ class JsonFormatter(logging.Formatter):
         }
         for key, value in record.__dict__.items():
             if key not in _RESERVED_LOGRECORD_ATTRS and not key.startswith("_"):
-                payload[key] = value
+                payload[key] = _REDACTED if _is_sensitive_key(key) else value
         if record.exc_info:
             payload["exc"] = self.formatException(record.exc_info)
         if record.stack_info:
@@ -181,8 +199,15 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False, default=str)
 
 
-def setup_logging() -> None:
+def setup_logging(*, log_level: str | None = None, log_json: bool | None = None) -> None:
     """Apply the project-wide ``dictConfig``; safe to call multiple times.
+
+    ``log_level`` / ``log_json`` come from :class:`~whisper_ui.core.config.Settings`
+    (so a value in ``.env`` is honoured — pydantic-settings loads ``.env`` into
+    Settings, not ``os.environ``, so the old ``os.getenv`` read silently ignored
+    ``.env``). When a parameter is None the ``LOG_LEVEL`` / ``LOG_JSON`` process
+    environment variable is used as a fallback, which keeps the earliest startup
+    call (before Settings is loaded) working.
 
     Pins ``rq`` / ``rq.worker`` to WARNING so the every-13-minute
     ``cleaning registries for queue ...`` heartbeat does not crowd out
@@ -190,8 +215,9 @@ def setup_logging() -> None:
     stock access log lacks user_id / request_id and is replaced by the
     structured access log emitted from :mod:`whisper_ui.web.middleware.request_id`.
     """
-    level = _resolve_level(os.getenv("LOG_LEVEL"))
-    formatter = "json" if _resolve_json(os.getenv("LOG_JSON")) else "default"
+    level = _resolve_level(log_level if log_level is not None else os.getenv("LOG_LEVEL"))
+    use_json = log_json if log_json is not None else _resolve_json(os.getenv("LOG_JSON"))
+    formatter = "json" if use_json else "default"
 
     config: dict = {
         "version": 1,

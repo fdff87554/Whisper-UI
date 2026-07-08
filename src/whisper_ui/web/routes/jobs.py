@@ -27,7 +27,13 @@ from whisper_ui.web.deps import (
     make_content_disposition,
     templates,
 )
-from whisper_ui.web.validation import clamp_num_speakers, normalize_status_filter, validate_hex_id
+from whisper_ui.web.validation import (
+    clamp_num_speakers,
+    mark_enqueue_failed,
+    normalize_status_filter,
+    validate_hex_id,
+    validate_upload_options,
+)
 from whisper_ui.worker.pipeline_dispatcher import enqueue_pipeline
 from whisper_ui.worker.progress import RedisProgressReporter
 
@@ -174,28 +180,35 @@ def _probe_retry_duration(job: Job) -> float | None:
 
 
 async def _reset_and_enqueue_retry(job: Job, db, redis, settings, filestore) -> bool:
-    """Reset a FAILED job's progress fields and re-enqueue its pipeline.
+    """Atomically claim a FAILED job for retry and re-enqueue its pipeline.
 
     Shared by single retry, bulk retry, and batch retry so the reset field
-    list and the failure label cannot drift apart. Returns True when the
-    enqueue succeeded; on failure the job is flipped back to FAILED with the
-    shared enqueue-failure label and the exception is logged.
+    list and the failure label cannot drift apart. The FAILED -> QUEUED
+    transition goes through ``db.try_claim_retry`` so a double-click (or a bulk
+    retry racing a single retry) cannot build two pipelines for one job — the
+    losing caller sees the claim fail and returns False without enqueuing.
+    Returns True when the enqueue succeeded; on enqueue failure the job is
+    flipped back to FAILED with the shared enqueue-failure label.
     """
+    retry_duration = await asyncio.to_thread(_probe_retry_duration, job)
+    # DB writes stay on the event-loop thread: app.state.db is a single shared
+    # SQLite connection that must not be touched from a worker thread (see the
+    # JobDatabase thread-safety contract). try_claim_retry is one fast atomic
+    # UPDATE, so it belongs on the loop like insert_job / update_job.
+    if not db.try_claim_retry(job.id, retry_duration):
+        logger.info("retry skipped for job %s: no longer FAILED (already retried?)", job.id)
+        return False
+    # Reflect the claimed state onto the in-memory snapshot for enqueue + logging.
+    job.status = JobStatus.QUEUED
+    job.error = None
+    job.progress = 0.0
+    job.progress_message = ""
+    job.result_path = None
+    job.duration = retry_duration
     try:
-        retry_duration = await asyncio.to_thread(_probe_retry_duration, job)
-        job.status = JobStatus.QUEUED
-        job.error = None
-        job.progress = 0.0
-        job.progress_message = ""
-        job.result_path = None
-        job.duration = retry_duration
-        db.update_job(job)
         await asyncio.to_thread(enqueue_pipeline, job, redis=redis, settings=settings, filestore=filestore)
     except Exception:
-        logger.exception("Failed to enqueue retry for job %s", job.id)
-        job.status = JobStatus.FAILED
-        job.error = ui_labels.UPLOAD_ENQUEUE_FAILED
-        db.update_job(job)
+        mark_enqueue_failed(job, db)
         return False
     return True
 
@@ -297,13 +310,15 @@ async def bulk_job_action(
             if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
                 failed += 1
                 continue
+            # Row-first conditional delete closes the delete/retry race (see the
+            # single-delete route); a job a retry just claimed is left alone.
+            if not db.delete_terminal_job(job.id):
+                failed += 1
+                continue
             try:
                 await asyncio.to_thread(filestore.delete_job_files, job.id)
             except OSError:
-                logger.exception("bulk delete: filestore reclaim failed for job %s", job.id)
-                failed += 1
-                continue
-            db.delete_job(job.id)
+                logger.error("bulk delete: row removed but filestore reclaim failed for job %s", job.id)
             deleted_keys.append(f"job:{job.id}")
             succeeded += 1
 
@@ -387,12 +402,11 @@ async def re_transcribe_job(
     if src is None or src.status != JobStatus.COMPLETED:
         return Response(status_code=404)
 
-    # escape(): these labels reflect the raw form value back in a text/html
+    # escape(): the label reflects the raw form value back in a text/html
     # response, same convention as upload.py's _htmx_error.
-    if language not in LANGUAGE_CHOICES:
-        return HTMLResponse(escape(ui_labels.UPLOAD_INVALID_LANGUAGE.format(value=language)), status_code=400)
-    if model_name not in WHISPER_MODELS:
-        return HTMLResponse(escape(ui_labels.UPLOAD_INVALID_MODEL.format(value=model_name)), status_code=400)
+    option_error = validate_upload_options(language, model_name)
+    if option_error:
+        return HTMLResponse(escape(option_error.message), status_code=400)
 
     # Flat chain: every version points at the original root so grouping is a
     # single lookup. Re-transcribing a version re-roots to the same source.
@@ -418,7 +432,7 @@ async def re_transcribe_job(
         # URL jobs always re-download: enqueue_pipeline prepends a download
         # stage whenever source_url is set, so there is no local media to
         # copy. Point filepath at the new job's own dir, like upload_url_submit.
-        new_job.filepath = str(filestore.prepare_upload_path(new_job.id, "_").parent)
+        new_job.filepath = str(filestore.prepare_upload_dir(new_job.id))
     else:
         # Copy from the source job's OWN upload dir (each version owns an
         # independent copy), not the root — so deleting any version never
@@ -449,10 +463,7 @@ async def re_transcribe_job(
             language,
         )
     except Exception:
-        logger.exception("Failed to enqueue re-transcribe job %s", new_job.id)
-        new_job.status = JobStatus.FAILED
-        new_job.error = ui_labels.UPLOAD_ENQUEUE_FAILED
-        db.update_job(new_job)
+        mark_enqueue_failed(new_job, db)
 
     return Response(status_code=204, headers={"HX-Trigger": "refreshJobList"})
 
@@ -466,20 +477,24 @@ async def delete_job(job_id: str, db: DbDep, filestore: FileStoreDep, redis: Red
     if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
         return Response(status_code=409)
 
+    # Remove the row first, gated on a still-terminal status. This closes the
+    # delete/retry TOCTOU: if a concurrent retry claimed the job (FAILED ->
+    # QUEUED) in the window after the check above, the conditional delete
+    # matches nothing and we return 409 rather than reclaiming files out from
+    # under a freshly-requeued attempt. A file-reclaim failure after the row is
+    # gone leaves orphaned files (logged for manual/retention cleanup) — the
+    # deliberate trade of a rare orphan over acting on a live job.
+    if not db.delete_terminal_job(job.id):
+        return Response(status_code=409)
     try:
         await asyncio.to_thread(filestore.delete_job_files, job.id)
     except OSError as exc:
-        # Keep the DB row + Redis state + audit log silent so retrying the
-        # delete is a no-op-then-real-delete instead of "DB row gone but
-        # files still on disk".
         logger.error(
-            "job delete aborted: filestore reclaim failed for job_id=%s user_id=%s: %s",
+            "job delete: row removed but filestore reclaim failed for job_id=%s user_id=%s: %s",
             job.id,
             user.id,
             exc.__class__.__name__,
         )
-        return Response(status_code=500)
-    db.delete_job(job.id)
     await asyncio.to_thread(redis.delete, f"job:{job.id}")
     logger.info(
         "job deleted: job_id=%s user_id=%s filename=%r status_at_delete=%s",
@@ -535,22 +550,23 @@ async def delete_batch(batch_id: str, db: DbDep, filestore: FileStoreDep, redis:
     for job in all_jobs:
         if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
             continue
+        # Row-first conditional delete closes the delete/retry race; a job a
+        # retry claimed in the window is spared. See the single-delete route.
+        if not db.delete_terminal_job(job.id):
+            failed += 1
+            continue
         try:
             await asyncio.to_thread(filestore.delete_job_files, job.id)
         except OSError as exc:
-            # Per-job atomicity: keep the failing job's DB row + Redis
-            # state so the user can retry just that one. Other jobs in
-            # the batch still get cleaned.
+            # Row already removed; a reclaim failure leaves orphaned files
+            # (logged for manual/retention cleanup). Other jobs still get cleaned.
             logger.error(
-                "batch delete skipped one job: job_id=%s batch_id=%s user_id=%s: %s",
+                "batch delete: row removed but filestore reclaim failed: job_id=%s batch_id=%s user_id=%s: %s",
                 job.id,
                 batch_id,
                 user.id,
                 exc.__class__.__name__,
             )
-            failed += 1
-            continue
-        db.delete_job(job.id)
         deleted_keys.append(f"job:{job.id}")
         deleted += 1
 

@@ -11,7 +11,7 @@ negative (other user cannot) case.
 from __future__ import annotations
 
 import uuid
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -89,13 +89,17 @@ def test_alice_dashboard_counts_exclude_bobs_jobs(app, db, filestore, test_user,
     for i in range(3):
         _save_completed_job(db, filestore, owner_id=bob.id, filename=f"b{i}.mp3")
     _save_completed_job(db, filestore, owner_id=test_user.id, filename="a.mp3")
+
+    # Structured assertion on the actual count source: bob's 3 must not leak
+    # into alice's owner-filtered totals. "1 in resp.text" was near-tautological.
+    alice_counts = db.get_status_counts(owner_id=test_user.id)
+    bob_counts = db.get_status_counts(owner_id=bob.id)
+    assert alice_counts.get(JobStatus.COMPLETED.value, 0) == 1
+    assert bob_counts.get(JobStatus.COMPLETED.value, 0) == 3
+
     client = authed_test_client(app, test_user)
-
     resp = client.get("/")
-
     assert resp.status_code == 200
-    # Alice has exactly 1 completed; the dashboard exposes that as a stat.
-    assert "1" in resp.text
 
 
 def test_alice_gets_404_on_bobs_viewer_page(app, db, filestore, test_user, bob):
@@ -261,21 +265,44 @@ def test_legacy_null_owner_job_invisible_to_alice_but_visible_to_admin(app, db, 
     assert "legacy.mp3" in admin_jobs.text
 
 
-def test_upload_assigns_owner_id_to_uploaded_job(app, db, test_user):
-    """An /upload submission must persist the caller's id on the new Job."""
+def test_file_upload_assigns_owner_id_to_uploaded_job(app, db, test_user):
+    """A file /upload submission must persist the caller's id on the new Job.
+    Asserts directly on the Job handed to enqueue_pipeline (patched), not an
+    indirect /jobs 200 — a regression that set owner_id=None must fail here."""
     client = authed_test_client(app, test_user)
 
-    # We can't actually run the pipeline in a unit test, but inserting a job
-    # via the upload route would require a real file + real ffmpeg + Redis.
-    # The behaviour we care about — owner_id assignment — happens before any
-    # of that. Use the /jobs view to confirm alice sees jobs she creates
-    # (the upload route's Job(owner_id=user.id) is the only way that
-    # population can happen).
-    resp = client.get("/jobs")
-    assert resp.status_code == 200
-    # Tested in detail via test_upload_routes — here we only need the
-    # smoke-level guarantee that the alice client gets a 200 (i.e. the
-    # `user: CurrentUserDep` parameter wired correctly).
+    with patch("whisper_ui.web.routes.upload.enqueue_pipeline") as mock_enqueue:
+        resp = client.post(
+            "/upload",
+            data={"language": "zh", "model_name": "large-v3", "num_speakers": "0"},
+            files=[("files", ("a.mp3", b"ID3 fake audio", "audio/mpeg"))],
+            follow_redirects=False,
+        )
+
+    assert resp.status_code == 303
+    mock_enqueue.assert_called_once()
+    assert mock_enqueue.call_args[0][0].owner_id == test_user.id
+
+
+def test_url_upload_assigns_owner_id_to_uploaded_job(app, db, test_user):
+    """A URL /upload/url submission must also persist the caller's id."""
+    client = authed_test_client(app, test_user)
+
+    with patch("whisper_ui.web.routes.upload.enqueue_pipeline") as mock_enqueue:
+        resp = client.post(
+            "/upload/url",
+            data={
+                "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                "language": "zh",
+                "model_name": "large-v3",
+                "num_speakers": "0",
+            },
+            follow_redirects=False,
+        )
+
+    assert resp.status_code == 303
+    mock_enqueue.assert_called_once()
+    assert mock_enqueue.call_args[0][0].owner_id == test_user.id
 
 
 def test_alice_cannot_view_bobs_viewer_page_via_url_guess(app, db, filestore, test_user, bob):

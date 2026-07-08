@@ -72,6 +72,7 @@ UPLOAD_DRAG_DROP = "將檔案拖曳至此處，或點擊下方選擇檔案"
 UPLOAD_UPLOADING = "上傳中..."
 UPLOAD_FILE_TOO_LARGE = "檔案「{name}」超過大小限制（{limit}）。"
 UPLOAD_INVALID_FILE_CONTENT = "檔案「{name}」不是有效的音訊或影片。"
+UPLOAD_SAVE_FAILED = "無法儲存檔案「{name}」，已略過。"
 UPLOAD_INVALID_LANGUAGE = "不支援的語言：{value}"
 UPLOAD_INVALID_MODEL = "不支援的模型：{value}"
 UPLOAD_TAB_URL = "網址下載"
@@ -156,6 +157,15 @@ JOBS_PAGE_PREV = "上一頁"
 JOBS_PAGE_NEXT = "下一頁"
 JOBS_STALE_ERROR = "任務逾時或 Worker 異常終止"
 JOBS_TIMEOUT_ERROR = "任務總執行時間超出上限（{seconds} 秒），音檔可能過長或裝置繁忙，請調整 JOB_TIMEOUT_MAX 後重試"
+# Per-stage generic failure messages shown to the user. The raw exception text
+# (which can carry ffmpeg / whisper-cli stderr and internal filesystem paths)
+# is logged server-side only; the user sees which stage failed, not the detail.
+JOBS_STAGE_FAILED_DOWNLOAD = "媒體下載失敗，請確認來源網址後重試。"
+JOBS_STAGE_FAILED_PREPROCESS = "音訊前處理失敗，檔案可能損毀或格式不支援。"
+JOBS_STAGE_FAILED_TRANSCRIPTION = "轉錄失敗，請稍後重試。"
+JOBS_STAGE_FAILED_ALIGNMENT = "字詞對齊失敗，請稍後重試。"
+JOBS_STAGE_FAILED_DIARIZATION = "語者分離失敗，請稍後重試。"
+JOBS_STAGE_FAILED_GENERIC = "任務處理失敗，請稍後重試。"
 JOBS_SEARCH_PLACEHOLDER = "搜尋檔案名稱或網址..."
 JOBS_INLINE_EXPORT = "匯出"
 JOBS_SELECT_ROW = "選取此任務"
@@ -254,7 +264,12 @@ AUTH_PASSWORD_SHOW = "顯示密碼"
 AUTH_PASSWORD_HIDE = "隱藏密碼"
 AUTH_LOGIN_FAILED = "帳號或密碼錯誤，請再試一次。"
 AUTH_ACCOUNT_INACTIVE = "此帳號已停用，請聯絡管理員。"
+# Admin-facing (an authorised admin may be told a name is taken).
 AUTH_USERNAME_TAKEN = "此使用者名稱已被使用，請選擇另一個。"
+# Public self-service registration: deliberately does NOT confirm whether the
+# username exists, so /register is not a username-enumeration oracle. The
+# server log still records the real reason for operators.
+AUTH_REGISTER_UNAVAILABLE = "無法完成註冊，請改用其他名稱或稍後再試。"
 AUTH_USERNAME_INVALID = "使用者名稱格式無效（3-32 字元，僅英文字母、數字、底線與連字號）。"
 AUTH_PASSWORD_TOO_SHORT = "密碼長度至少 8 個字元。"
 AUTH_LOGIN_LINK = "已有帳號？前往登入"

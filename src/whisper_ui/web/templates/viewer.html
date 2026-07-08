@@ -265,7 +265,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
 window.viewerData = function(segmentCount) {
   return {
     search: '',

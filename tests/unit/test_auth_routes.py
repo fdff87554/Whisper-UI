@@ -365,7 +365,10 @@ def test_register_second_account_is_not_admin(app, db, test_admin):
     assert created.is_admin is False
 
 
-def test_register_duplicate_username_returns_error(app, db, test_user, test_admin):
+def test_register_duplicate_username_returns_generic_error(app, db, test_user, test_admin):
+    """Registering a taken username must NOT confirm the account exists: the
+    redirect carries a generic 'unavailable' code, not 'username_taken', so
+    /register is not an enumeration oracle."""
     client = _anon_client(app)
 
     resp = client.post(
@@ -374,7 +377,8 @@ def test_register_duplicate_username_returns_error(app, db, test_user, test_admi
     )
 
     assert resp.status_code == 302
-    assert resp.headers["location"].startswith("/register?error=username_taken")
+    assert resp.headers["location"].startswith("/register?error=unavailable")
+    assert "username_taken" not in resp.headers["location"]
 
 
 def test_register_invalid_username_pattern_returns_error(app, test_admin):
@@ -575,18 +579,23 @@ def test_client_ip_ignores_xff_when_proxy_headers_untrusted(app, db, test_user):
     assert any("testclient" in k or "127" in k or "unknown" in k for k in keys), keys
 
 
-def test_client_ip_uses_xff_when_proxy_headers_trusted(app, db, test_user, monkeypatch):
-    """With TRUST_PROXY_HEADERS=true the left-most XFF entry becomes the
-    bucket key, so each real client behind a proxy gets their own quota.
+def test_client_ip_uses_rightmost_trusted_xff_hop_when_proxy_headers_trusted(app, db, test_user, monkeypatch):
+    """With TRUST_PROXY_HEADERS=true and a single trusted proxy, the client IP
+    is the RIGHT-most XFF entry (the one our proxy appended), not the
+    attacker-controlled left-most one. A spoofed prefix must not create its own
+    bucket, so per-IP rate limiting cannot be evaded by rotating XFF values.
     """
     monkeypatch.setattr(app.state.settings, "trust_proxy_headers", True)
+    monkeypatch.setattr(app.state.settings, "trusted_proxy_count", 1)
     client = _anon_client(app)
+    # Attacker prepends a forged 1.2.3.4; our trusted proxy appends the real 10.0.0.1.
     client.headers["X-Forwarded-For"] = "1.2.3.4, 10.0.0.1"
     redis = app.state.redis
 
     client.post("/login", data={"username": "alice", "password": "wrong"})
 
-    assert int(redis.get("auth:rl:ip:1.2.3.4") or 0) == 1
+    assert int(redis.get("auth:rl:ip:10.0.0.1") or 0) == 1
+    assert redis.get("auth:rl:ip:1.2.3.4") is None, "forged left-most XFF must not get its own bucket"
 
 
 def test_change_password_invalidates_existing_session(app, db, test_user):

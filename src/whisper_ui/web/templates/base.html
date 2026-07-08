@@ -28,7 +28,7 @@
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"
           integrity="sha384-X9kJyAubVxnP0hcA+AMMs21U445qsnqhnUF8EBlEpP3a42Kh/JwWjlv2ZcvGfphb"
           crossorigin="anonymous"></script>
-  <script>
+  <script nonce="{{ csp_nonce }}">
   // Idiomorph's syncBooleanAttribute always re-syncs `checked` (ignoreActiveValue
   // only protects `value`), so anything that needs to keep the user's local
   // toggle state across a morph must opt out via data-morph-skip-checked.
@@ -45,7 +45,7 @@
     }
   };
   </script>
-  <script>
+  <script nonce="{{ csp_nonce }}">
   document.addEventListener('alpine:init', () => {
     Alpine.store('nav', { activePage: '{{ active_page }}' });
 
@@ -125,7 +125,7 @@
   {% endif %}
 
   {# htmx event listeners for page loader and toasts #}
-  <script>
+  <script nonce="{{ csp_nonce }}">
   (function() {
     const loader = document.getElementById('page-loader');
     let loaderTimeout;

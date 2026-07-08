@@ -40,7 +40,7 @@ from whisper_ui.web.playlist import (
     PlaylistUnavailableError,
     expand_playlist,
 )
-from whisper_ui.web.validation import clamp_num_speakers
+from whisper_ui.web.validation import clamp_num_speakers, mark_enqueue_failed, validate_upload_options
 from whisper_ui.worker.pipeline_dispatcher import enqueue_pipeline
 
 _READ_CHUNK_SIZE = 1024 * 1024  # 1 MB
@@ -128,7 +128,9 @@ async def _stream_to_file(upload: UploadFile, dest: Path, max_size: int) -> bool
                 total += len(chunk)
                 if total > max_size:
                     return False
-                f.write(chunk)
+                # Offload the blocking disk write so a slow disk during a
+                # GB-scale upload does not stall the event loop between reads.
+                await asyncio.to_thread(f.write, chunk)
     except (Exception, asyncio.CancelledError):
         dest.unlink(missing_ok=True)
         raise
@@ -189,12 +191,13 @@ async def upload_submit(
     htmx = _is_htmx(request)
 
     # Server-side validation of select inputs
-    if language not in LANGUAGE_CHOICES:
-        msg = ui_labels.UPLOAD_INVALID_LANGUAGE.format(value=language)
-        return _error_redirect_or_fragment(request, f"/upload?error=invalid_language&value={quote(language)}", msg)
-    if model_name not in WHISPER_MODELS:
-        msg = ui_labels.UPLOAD_INVALID_MODEL.format(value=model_name)
-        return _error_redirect_or_fragment(request, f"/upload?error=invalid_model&value={quote(model_name)}", msg)
+    option_error = validate_upload_options(language, model_name)
+    if option_error:
+        return _error_redirect_or_fragment(
+            request,
+            f"/upload?error={option_error.error_code}&value={quote(option_error.value)}",
+            option_error.message,
+        )
 
     # Distinguish "no file selected" from "unsupported format"
     has_any_files = files and any(f.filename for f in files)
@@ -264,7 +267,20 @@ async def upload_submit(
         )
 
         dest = filestore.prepare_upload_path(job.id, display_name)
-        within_limit = await _stream_to_file(uploaded_file, dest, max_size)
+        try:
+            within_limit = await _stream_to_file(uploaded_file, dest, max_size)
+        except OSError:
+            # Disk full / permission / I/O error while saving. Degrade to a
+            # per-file skip like the content and size checks above, instead of
+            # letting the OSError escape to a 500 that aborts the whole batch
+            # (leaving earlier files already queued and prompting a re-upload).
+            dest.unlink(missing_ok=True)
+            logger.error("upload skipped (write failed): user_id=%s filename=%r", user.id, display_name)
+            skipped_count += 1
+            if first_skip is None:
+                msg = ui_labels.UPLOAD_SAVE_FAILED.format(name=display_name)
+                first_skip = (f"/upload?error=save_failed&name={quote(display_name)}", msg)
+            continue
         if not within_limit:
             dest.unlink(missing_ok=True)
             limit_str = _format_size(max_size)
@@ -305,10 +321,7 @@ async def upload_submit(
             await asyncio.to_thread(enqueue_pipeline, job, redis=redis, settings=settings, filestore=filestore)
             submitted_count += 1
         except Exception:
-            logger.exception("Failed to enqueue job %s", job.id)
-            job.status = JobStatus.FAILED
-            job.error = ui_labels.UPLOAD_ENQUEUE_FAILED
-            db.update_job(job)
+            mark_enqueue_failed(job, db)
             failed_count += 1
 
     logger.info(
@@ -352,12 +365,13 @@ async def upload_url_submit(
 ):
     htmx = _is_htmx(request)
 
-    if language not in LANGUAGE_CHOICES:
-        msg = ui_labels.UPLOAD_INVALID_LANGUAGE.format(value=language)
-        return _error_redirect_or_fragment(request, f"/upload?error=invalid_language&value={quote(language)}", msg)
-    if model_name not in WHISPER_MODELS:
-        msg = ui_labels.UPLOAD_INVALID_MODEL.format(value=model_name)
-        return _error_redirect_or_fragment(request, f"/upload?error=invalid_model&value={quote(model_name)}", msg)
+    option_error = validate_upload_options(language, model_name)
+    if option_error:
+        return _error_redirect_or_fragment(
+            request,
+            f"/upload?error={option_error.error_code}&value={quote(option_error.value)}",
+            option_error.message,
+        )
 
     # Parse textarea: split by newlines, strip whitespace, filter empty lines
     raw_lines = url.replace("\r\n", "\n").split("\n")
@@ -483,7 +497,7 @@ async def upload_url_submit(
             owner_id=user.id,
         )
 
-        upload_dir = filestore.prepare_upload_path(job.id, "_").parent
+        upload_dir = filestore.prepare_upload_dir(job.id)
         job.filepath = str(upload_dir)
         job.status = JobStatus.QUEUED
         db.insert_job(job)
@@ -502,10 +516,7 @@ async def upload_url_submit(
             await asyncio.to_thread(enqueue_pipeline, job, redis=redis, settings=settings, filestore=filestore)
             submitted_count += 1
         except Exception:
-            logger.exception("Failed to enqueue URL job %s", job.id)
-            job.status = JobStatus.FAILED
-            job.error = ui_labels.UPLOAD_ENQUEUE_FAILED
-            db.update_job(job)
+            mark_enqueue_failed(job, db)
             failed_count += 1
 
     logger.info(

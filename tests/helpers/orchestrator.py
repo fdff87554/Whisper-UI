@@ -11,16 +11,19 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from rq.timeouts import BaseTimeoutException
-
 from whisper_ui.core.exceptions import PipelineError
 from whisper_ui.pipeline.progress_bands import build_stage_weights
+from whisper_ui.worker.stage_tasks import _banded_progress, _execute_stage
 
 if TYPE_CHECKING:
     from whisper_ui.core.models import TranscriptResult
     from whisper_ui.pipeline.base import PipelineStage, ProgressCallback
 
 logger = logging.getLogger(__name__)
+
+
+def _noop_progress(_p: float, _m: str) -> None:
+    pass
 
 
 class PipelineOrchestrator:
@@ -35,30 +38,22 @@ class PipelineOrchestrator:
         self._stage_weights = stage_weights or build_stage_weights(has_download=False, has_llm=False)
 
     def run(self, context: dict[str, Any]) -> TranscriptResult:
+        # Reuse the production stage runner + band mapping so this helper cannot
+        # drift from worker/stage_tasks on error classification, cleanup, or the
+        # local->global progress formula (the two used to be copies).
+        throttled = self._on_progress or _noop_progress
         for stage in self._stages:
             stage_name = stage.name
             weight = self._stage_weights.get(stage_name, (0.0, 1.0))
-
             logger.info("Starting stage: %s", stage_name)
-
-            def stage_progress(p: float, msg: str, _w: tuple[float, float] = weight) -> None:
-                global_p = _w[0] + p * (_w[1] - _w[0])
-                if self._on_progress:
-                    self._on_progress(global_p, msg)
-
             try:
-                context = stage.execute(context, on_progress=stage_progress)
-            except BaseTimeoutException:
-                # RQ's death penalty must propagate unchanged so the
-                # dispatcher can classify it as a timeout rather than a
-                # stage-specific failure.
-                raise
-            except PipelineError:
-                raise
-            except Exception as e:
-                raise PipelineError(f"Stage '{stage_name}' failed: {e}") from e
+                context = _execute_stage(
+                    stage,
+                    context,
+                    _banded_progress(throttled, weight),
+                    stage_name=stage_name,
+                )
             finally:
-                stage.cleanup()
                 logger.info("Finished stage: %s", stage_name)
 
         result = context.get("transcript_result")
