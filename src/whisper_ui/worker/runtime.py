@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import re
+import sqlite3
 import threading
 import time
 from contextlib import contextmanager
@@ -30,7 +31,7 @@ from whisper_ui.core.constants import (
 from whisper_ui.core.redis_client import create_redis
 from whisper_ui.storage.database import JobDatabase
 from whisper_ui.storage.filestore import FileStore
-from whisper_ui.worker.progress import RedisProgressReporter
+from whisper_ui.worker.progress import ProgressWriteOutcome, RedisProgressReporter
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -195,13 +196,14 @@ class _ThrottledProgressReporter:
     def _mirror(self, progress: float, message: str) -> bool:
         """Write to Redis and mirror to SQLite. Return False if the write was
         rejected as stale (so the caller leaves throttle state untouched)."""
-        # reporter.report returns False exactly when its Lua script found the
-        # caller's generation strictly older than the stored one (the parent
-        # job was retried under a newer attempt). We must NOT touch the Job
-        # object or its SQLite row then: db.update_job does a full-column
-        # UPDATE from the in-memory snapshot, so a stale Job would overwrite
-        # the current attempt's status / result_path / error.
-        if not self._reporter.report(progress, message):
+        outcome = self._reporter.report(progress, message)
+        # REJECTED means the Lua script found the caller's generation strictly
+        # older than the stored one (the parent job was retried under a newer
+        # attempt). We must NOT touch the Job object or its SQLite row then:
+        # db.update_job does a full-column UPDATE from the in-memory snapshot,
+        # so a stale Job would overwrite the current attempt's status /
+        # result_path / error.
+        if outcome is ProgressWriteOutcome.REJECTED:
             logger.debug(
                 "progress write for %s dropped server-side (stale generation); "
                 "skipping DB mirror to avoid overwriting the current attempt",
@@ -218,9 +220,21 @@ class _ThrottledProgressReporter:
         # lower progress here. That is fine because no live path reads progress
         # from the DB; if one is ever added, give this mirror a max(old, new)
         # guard first.
+        #
+        # The mirror is best-effort like the Redis write: a SQLite lock or I/O
+        # error while recording progress must never fail a multi-hour stage, so
+        # any DB error is logged and swallowed. DEGRADED (Redis outage) cannot
+        # confirm generation, so it takes the progress-only field-level UPDATE
+        # to avoid a full-column overwrite from a possibly-stale writer.
         self._job.progress = progress
         self._job.progress_message = message
-        self._db.update_job(self._job)
+        try:
+            if outcome is ProgressWriteOutcome.DEGRADED:
+                self._db.update_job_progress(self._job.id, progress, message)
+            else:
+                self._db.update_job(self._job)
+        except sqlite3.Error:
+            logger.warning("SQLite progress mirror failed for %s; continuing", self._job.id, exc_info=True)
         return True
 
 

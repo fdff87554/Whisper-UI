@@ -73,6 +73,30 @@ def test_update_job(db: JobDatabase):
     assert fetched.progress == 1.0
 
 
+def test_update_job_progress_only_touches_progress_fields(db: JobDatabase):
+    """The field-level progress mirror must never overwrite status /
+    result_path / error — that is what makes it safe to use during a Redis
+    outage when generation gating cannot be verified. A COMPLETED job with a
+    result must stay COMPLETED with its result even if a stale writer nudges
+    its progress.
+    """
+    job = Job(filename="test.mp3", filepath="/tmp/test.mp3")
+    job.status = JobStatus.COMPLETED
+    job.progress = 1.0
+    job.result_path = "/out/result.json"
+    db.insert_job(job)
+
+    db.update_job_progress(job.id, 0.5, "stale heartbeat")
+
+    fetched = db.get_job(job.id)
+    assert fetched is not None
+    assert fetched.progress == 0.5
+    assert fetched.progress_message == "stale heartbeat"
+    # Untouched: the fields a stale full-column overwrite would have clobbered.
+    assert fetched.status == JobStatus.COMPLETED
+    assert fetched.result_path == "/out/result.json"
+
+
 def test_delete_job(db: JobDatabase):
     job = Job(filename="test.mp3", filepath="/tmp/test.mp3")
     db.insert_job(job)

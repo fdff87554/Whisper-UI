@@ -285,6 +285,24 @@ class JobDatabase:
         self._conn.execute(f"UPDATE jobs SET {set_clause} WHERE id = ?", values)
         self._conn.commit()
 
+    def update_job_progress(self, job_id: str, progress: float, message: str) -> None:
+        """Persist only the progress fields, never status/result_path/error.
+
+        The full-column :meth:`update_job` overwrites every column from an
+        in-memory snapshot, which is only safe once generation gating has
+        confirmed the writer owns the current attempt. During a Redis outage
+        gating cannot be checked, so the progress mirror falls back to this
+        targeted UPDATE: a stale writer can at worst nudge the progress number,
+        never resurrect a COMPLETED row to PROCESSING or drop its result_path.
+        ``updated_at`` is refreshed so an actively-reporting job is not falsely
+        reaped as stale.
+        """
+        self._conn.execute(
+            "UPDATE jobs SET progress = ?, progress_message = ?, updated_at = ? WHERE id = ?",
+            (progress, message, datetime.now(UTC).isoformat(), job_id),
+        )
+        self._conn.commit()
+
     def list_jobs_by_batch(self, batch_id: str, *, owner_id: int | None = None) -> list[Job]:
         if owner_id is not None:
             rows = self._conn.execute(
