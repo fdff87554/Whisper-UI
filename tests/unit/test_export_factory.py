@@ -74,3 +74,38 @@ def test_docx_export_renders_body_without_error():
     )
     data = get_exporter("docx").export(result)
     assert data[:2] == b"PK"  # docx is a zip container
+
+
+def test_txt_export_without_speakers_emits_plain_lines():
+    result = TranscriptResult(
+        segments=[
+            Segment(start=0.0, end=1.0, text="first line"),
+            Segment(start=1.0, end=2.0, text="second line"),
+        ],
+        language="en",
+        duration=2.0,
+    )
+    text = get_exporter("txt").export(result).decode("utf-8")
+    # No speakers -> no "[SPEAKER_*]" headers, just the text lines in order.
+    assert text == "first line\nsecond line"
+
+
+def test_txt_export_empty_segments_is_empty_bytes():
+    result = TranscriptResult(segments=[], language="en", duration=0.0)
+    assert get_exporter("txt").export(result) == b""
+
+
+def test_txt_export_groups_consecutive_same_speaker_under_one_header():
+    result = TranscriptResult(
+        segments=[
+            Segment(start=0.0, end=1.0, text="a", speaker="SPEAKER_00"),
+            Segment(start=1.0, end=2.0, text="b", speaker="SPEAKER_00"),
+            Segment(start=2.0, end=3.0, text="c", speaker="SPEAKER_01"),
+        ],
+        language="en",
+        duration=3.0,
+    )
+    text = get_exporter("txt").export(result).decode("utf-8")
+    # One header per speaker change, not per segment.
+    assert text.count("[SPEAKER_00]") == 1
+    assert text.count("[SPEAKER_01]") == 1

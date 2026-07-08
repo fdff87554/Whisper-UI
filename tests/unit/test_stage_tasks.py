@@ -131,6 +131,47 @@ def test_execute_stage_wraps_non_timeout_errors_as_pipeline_error():
     assert "Stage 'boom' failed" in str(excinfo.value)
 
 
+class _TimingOutStage:
+    name = "slow"
+
+    def execute(self, context, on_progress=None):
+        from rq.timeouts import JobTimeoutException
+
+        raise JobTimeoutException("Task exceeded maximum timeout value (10 seconds)")
+
+    def cleanup(self) -> None:
+        self.cleanup_called = True
+
+
+def test_execute_stage_propagates_timeout_unwrapped_and_cleans_up():
+    """RQ's death penalty must pass through unchanged (not be reclassified as a
+    generic PipelineError), so finalize_failure records a timeout — and cleanup
+    still runs. This is the documented contract the finding flagged as untested."""
+    from rq.timeouts import BaseTimeoutException
+
+    stage = _TimingOutStage()
+    with pytest.raises(BaseTimeoutException):
+        _execute_stage(stage, {}, lambda p, m: None, stage_name="slow")
+    assert stage.cleanup_called is True
+
+
+class _PipelineErrorStage:
+    name = "domain"
+
+    def execute(self, context, on_progress=None):
+        raise PipelineError("already a domain error")
+
+    def cleanup(self) -> None:
+        pass
+
+
+def test_execute_stage_reraises_pipeline_error_without_double_wrapping():
+    with pytest.raises(PipelineError) as excinfo:
+        _execute_stage(_PipelineErrorStage(), {}, lambda p, m: None, stage_name="domain")
+    # Not re-wrapped as "Stage 'domain' failed: ...".
+    assert str(excinfo.value) == "already a domain error"
+
+
 def test_execute_stage_always_cleans_up():
     stage = _RecordingStage({"audio_path": "/tmp/x"})
     _execute_stage(stage, {}, lambda p, m: None, stage_name="fake")
