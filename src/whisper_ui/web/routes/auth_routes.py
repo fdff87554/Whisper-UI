@@ -21,6 +21,7 @@ the ``?bootstrap=1`` query param — that param only controls UI wording.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import re
@@ -185,8 +186,9 @@ async def login_submit(
     if user_row is None:
         # Unknown user: do a dummy argon2 verify so the unknown-user
         # branch takes a comparable wall-clock time to the wrong-password
-        # branch below.
-        users_repo.dummy_verify(password)
+        # branch below. Offloaded because argon2 is a deliberately expensive
+        # (~50-200 ms) CPU hash that would otherwise block the event loop.
+        await asyncio.to_thread(users_repo.dummy_verify, password)
         logger.debug("login failed: unknown username %s", mask_username(username))
         _record_failure(redis, settings, username=username, ip=ip)
         return _login_error_redirect(request, next_url, "invalid")
@@ -196,7 +198,7 @@ async def login_submit(
     # observe whether the account is deactivated, which is an account-
     # enumeration leak. Verifying first means the inactive branch is only
     # reachable by someone who can already authenticate as the user.
-    if not users_repo.verify_password(user_row, password):
+    if not await asyncio.to_thread(users_repo.verify_password, user_row, password):
         logger.info("login failed: wrong password for %s", mask_username(user_row.username))
         _record_failure(redis, settings, username=user_row.username, ip=ip)
         return _login_error_redirect(request, next_url, "invalid")

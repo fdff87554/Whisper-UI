@@ -115,7 +115,10 @@ async def export_download(job_id: str, format_name: str, db: DbDep, filestore: F
     except ValueError:
         # Fixed message: do not echo the caller-supplied format name back.
         raise HTTPException(status_code=400, detail="Unsupported export format") from None
-    data = exporter.export(result)
+    # Offload the export like the batch path (jobs.py create_batch_zip): a DOCX
+    # or a very long transcript is CPU-bound (python-docx builds the whole XML
+    # tree) and would otherwise block the single event loop for seconds.
+    data = await asyncio.to_thread(exporter.export, result)
     filename = f"{Path(job.filename).stem}{exporter.file_extension}"
 
     return Response(

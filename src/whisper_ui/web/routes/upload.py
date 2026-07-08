@@ -128,7 +128,9 @@ async def _stream_to_file(upload: UploadFile, dest: Path, max_size: int) -> bool
                 total += len(chunk)
                 if total > max_size:
                     return False
-                f.write(chunk)
+                # Offload the blocking disk write so a slow disk during a
+                # GB-scale upload does not stall the event loop between reads.
+                await asyncio.to_thread(f.write, chunk)
     except (Exception, asyncio.CancelledError):
         dest.unlink(missing_ok=True)
         raise
