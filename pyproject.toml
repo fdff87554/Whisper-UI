@@ -1,12 +1,12 @@
 [project]
 name = "whisper-ui"
-version = "2.17.0"
+version = "2.19.0"
 description = "Speech-to-text system using OpenAI Whisper with speaker diarization and Docker GPU support"
 license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
   "pydantic>=2.0,<3",
-  "pydantic-settings>=2.0,<3",
+  "pydantic-settings>=2.14.2,<3",
   "redis>=8.0.0,<9",
   "rq>=2.9.1,<3",
 ]

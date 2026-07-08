@@ -8,8 +8,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 Pre-release hardening pass: resilience, security, and correctness fixes with
-no user-facing feature or schema changes. One additive migration
-(`idx_jobs_created_at`).
+no user-facing feature changes. Adds two additive migrations
+(`idx_jobs_created_at`, plus the merged `share_token` from 2.19.0).
 
 ### Security
 
@@ -53,6 +53,35 @@ no user-facing feature or schema changes. One additive migration
 - Pinned whisperx / CPU torch / compose sidecar image versions; deduplicated
   upload-option validation, the enqueue-failure tail, and the FileStore
   upload-dir idiom.
+
+## [2.19.0] - 2026-07-07
+
+Transcript sharing via public links.
+
+### Added
+
+- Share button on the viewer page: generates a unique public link that anyone
+  can open without logging in to view the transcript and play back media.
+- Public shared viewer (`/shared/{token}`) with read-only transcript display,
+  media player, segment sync, search, and keyboard shortcuts.
+- Revoke sharing: the transcript owner can disable the link at any time.
+- New DB migration: `share_token` column with unique index on the jobs table.
+
+## [2.18.0] - 2026-07-06
+
+Inline media playback on the viewer page, synchronized with the transcript.
+
+### Added
+
+- HTML5 audio/video player on the viewer page: uploaded MP4, MP3 and other
+  supported formats play directly in the browser without downloading.
+- Transcript sync: clicking a segment timestamp seeks the player to that point;
+  during playback the active segment highlights and auto-scrolls.
+- Keyboard shortcuts for media playback: `Space` (play/pause), `J` (rewind 5s),
+  `L` (forward 5s).
+- The media endpoint now serves direct file uploads (not just URL-sourced jobs),
+  so the "Download Media" button and inline player work for all job types.
+- Added missing MIME types: `.mp3`, `.aac`, `.flac`, `.wma`.
 
 ## [2.17.0] - 2026-06-17
 
@@ -980,7 +1009,8 @@ Error` JSON body while logging the full traceback, so an
   classification, missing-job handling) are now covered by unit tests
   in `test_pipeline_dispatcher.py` and `test_stage_tasks.py`.
 
-[Unreleased]: https://github.com/fdff87554/Whisper-UI/compare/v2.17.0...HEAD
+[Unreleased]: https://github.com/fdff87554/Whisper-UI/compare/v2.18.0...HEAD
+[2.18.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.18.0
 [2.17.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.17.0
 [2.16.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.16.0
 [2.15.0]: https://github.com/fdff87554/Whisper-UI/releases/tag/v2.15.0

@@ -56,7 +56,7 @@ PUBLIC_PATHS = frozenset({"/login", "/register", "/logout", "/health", "/metrics
 
 # Path prefixes that never require authentication. ``/static/`` covers
 # CSS, vendored JS, and any future static assets.
-PUBLIC_PREFIXES = ("/static/",)
+PUBLIC_PREFIXES = ("/static/", "/shared/")
 
 # HTTP methods that require CSRF protection. GET / HEAD / OPTIONS are
 # considered safe; the route handlers must not perform mutating actions

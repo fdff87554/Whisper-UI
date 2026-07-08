@@ -6,7 +6,7 @@ import sqlite3
 
 logger = logging.getLogger(__name__)
 
-_CREATE_INDEX_RE = re.compile(r"CREATE INDEX IF NOT EXISTS (\w+)", re.IGNORECASE)
+_CREATE_INDEX_RE = re.compile(r"CREATE (?:UNIQUE )?INDEX IF NOT EXISTS (\w+)", re.IGNORECASE)
 _DROP_INDEX_RE = re.compile(r"DROP INDEX IF EXISTS (\w+)", re.IGNORECASE)
 
 
@@ -101,6 +101,10 @@ _MIGRATIONS: list[str] = [
     # equality filter and the ordering from the index. idx_jobs_status_updated_at
     # cannot serve this — its sort key is updated_at, not created_at.
     "CREATE INDEX IF NOT EXISTS idx_jobs_owner_created_at ON jobs(owner_id, created_at)",
+    # Public transcript sharing: nullable opaque token, unique so a lookup by
+    # token maps to at most one job.
+    "ALTER TABLE jobs ADD COLUMN share_token TEXT",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_share_token ON jobs(share_token)",
 ]
 
 

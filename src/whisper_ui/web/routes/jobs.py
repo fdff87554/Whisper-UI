@@ -60,14 +60,18 @@ def _get_progress_data(redis, jobs: list[Job]) -> dict[str, dict[str, str]]:
 
 
 def _build_media_available_map(filestore, jobs: list[Job]) -> dict[str, bool]:
-    """Pre-compute which URL jobs still have their downloaded media on disk.
+    """Pre-compute which jobs still have their media file on disk.
 
     The Download Media button in _job_card.html should hide once retention
     has reclaimed the source media; doing the stat() up front (rather than
     inside the template) keeps the template free of FS access and matches
     the pattern used for `media_available` on the viewer route.
     """
-    return {job.id: filestore.get_source_media_path(job.id) is not None for job in jobs if job.source_url}
+    return {
+        job.id: filestore.get_any_media_path(job.id, job.filepath) is not None
+        for job in jobs
+        if job.source_url or job.filepath
+    }
 
 
 def build_list_context(db: JobDatabase, redis, filestore, status: str, page: int, owner_id: int | None) -> dict:

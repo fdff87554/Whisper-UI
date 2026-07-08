@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_icons.html" import icon_copy, icon_check, icon_search, icon_download %}
+{% from "_icons.html" import icon_copy, icon_check, icon_search, icon_download, icon_link %}
 {% from "_alert.html" import alert %}
 
 {% block content %}
@@ -52,42 +52,27 @@
 <p class="text-sm opacity-50 mb-4">{{ labels.VIEWER_METADATA.format(minutes=minutes, seconds=seconds, segments=result.segments|length, language=result.language) }}</p>
 {% endif %}
 
+{% if media_available %}
+<div class="player-wrapper">
+  {% if media_is_video %}
+  <video id="media-player" controls preload="metadata">
+    <source src="/viewer/{{ job.id }}/media">
+    <p>{{ labels.VIEWER_PLAYER_UNAVAILABLE }}</p>
+  </video>
+  {% else %}
+  <audio id="media-player" controls preload="metadata" class="p-2">
+    <source src="/viewer/{{ job.id }}/media">
+    <p>{{ labels.VIEWER_PLAYER_UNAVAILABLE }}</p>
+  </audio>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if result.segments %}
 {% set _speaker_glyphs = ['●', '▲', '■', '◆', '★', '✦', '◉', '♦'] %}
-<div x-data="{
-  search: '',
-  activeIndex: 0,
-  shortcutsOpen: false,
-  get matchCount() {
-    if (!this.search) return {{ result.segments|length }};
-    const q = this.search.toLowerCase();
-    return Array.from(document.querySelectorAll('.segment[data-text]')).filter(el => el.dataset.text.includes(q)).length;
-  },
-  _visibleSegments() {
-    return Array.from(document.querySelectorAll('.segment')).filter(el => el.offsetParent !== null);
-  },
-  focusSearch() {
-    const el = document.querySelector('input[type=search]');
-    if (el) { el.focus(); el.select(); }
-  },
-  navigateSegments(delta) {
-    const visible = this._visibleSegments();
-    if (!visible.length) return;
-    this.activeIndex = Math.max(0, Math.min(visible.length - 1, this.activeIndex + delta));
-    const target = visible[this.activeIndex];
-    if (target) target.scrollIntoView({block: 'center', behavior: 'smooth'});
-  },
-  copyActive() {
-    const visible = this._visibleSegments();
-    const target = visible[this.activeIndex];
-    const text = target?.querySelector('button[data-copy-text]')?.dataset?.copyText;
-    if (text) {
-      navigator.clipboard.writeText(text)
-        .then(() => $store.toasts.add({ message: '{{ labels.VIEWER_SEGMENT_COPIED }}', type: 'success' }));
-    }
-  },
-  clearSearch() { this.search = ''; }
-}"
+<div class="{{ 'has-player' if media_available else '' }}"
+     x-data="viewerData({{ result.segments|length }})"
+     x-init="initPlayer()"
 @keydown.window="
   const tag = document.activeElement.tagName;
   const inField = tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement.isContentEditable;
@@ -97,6 +82,9 @@
   else if (!inField && $event.key === 'ArrowUp') { $event.preventDefault(); navigateSegments(-1); }
   {# Bare c only: Ctrl+C / Cmd+C is the user copying their own selection and must not be hijacked. #}
   else if (!inField && !$event.ctrlKey && !$event.metaKey && ($event.key === 'c' || $event.key === 'C')) { copyActive(); }
+  else if (!inField && $event.key === ' ' && document.getElementById('media-player')) { $event.preventDefault(); togglePlayPause(); }
+  else if (!inField && ($event.key === 'j' || $event.key === 'J') && document.getElementById('media-player')) { $event.preventDefault(); seekDelta(-5); }
+  else if (!inField && ($event.key === 'l' || $event.key === 'L') && document.getElementById('media-player')) { $event.preventDefault(); seekDelta(5); }
 ">
   {# Sticky toolbar #}
   <div class="sticky top-0 z-10 bg-base-100 border-b border-line pb-3 mb-4 pt-2">
@@ -109,7 +97,7 @@
           {{ fmt|upper }}
         </a>
         {% endfor %}
-        {% if job.source_url and media_available %}
+        {% if media_available %}
         <a href="/viewer/{{ job.id }}/media" class="btn btn-sm btn-outline" download>
           {{ icon_download("w-4 h-4") }} {{ labels.VIEWER_DOWNLOAD_MEDIA }}
         </a>
@@ -130,6 +118,34 @@
           <span class="flex items-center gap-1 text-success">{{ icon_check("w-4 h-4") }} {{ labels.VIEWER_COPIED }}</span>
         </template>
       </button>
+
+      {# Share button #}
+      {% if job.share_token %}
+      <div class="flex items-center gap-1" x-data="{ linkCopied: false }">
+        <button class="btn btn-sm btn-ghost gap-1"
+                @click="
+                  window.whisperCopy(window.location.origin + '/shared/{{ job.share_token }}')
+                    .then(() => { linkCopied = true; setTimeout(() => linkCopied = false, 2000) });
+                ">
+          <template x-if="!linkCopied">
+            <span class="flex items-center gap-1">{{ icon_link("w-4 h-4") }} {{ labels.VIEWER_SHARE_COPY_LINK }}</span>
+          </template>
+          <template x-if="linkCopied">
+            <span class="flex items-center gap-1 text-success">{{ icon_check("w-4 h-4") }} {{ labels.VIEWER_SHARE_LINK_COPIED }}</span>
+          </template>
+        </button>
+        <button class="btn btn-sm btn-ghost text-error"
+                hx-delete="/viewer/{{ job.id }}/share"
+                hx-confirm="{{ labels.VIEWER_SHARE_REVOKE_CONFIRM }}">
+          {{ labels.VIEWER_SHARE_REVOKE }}
+        </button>
+      </div>
+      {% else %}
+      <button class="btn btn-sm btn-ghost gap-1"
+              hx-post="/viewer/{{ job.id }}/share">
+        {{ icon_link("w-4 h-4") }} {{ labels.VIEWER_SHARE }}
+      </button>
+      {% endif %}
     </div>
 
     {% if search_disabled %}
@@ -159,6 +175,10 @@
       <div class="flex items-center gap-2"><kbd class="kbd kbd-xs">↑</kbd><kbd class="kbd kbd-xs">↓</kbd><span>{{ labels.VIEWER_SHORTCUTS_NAV }}</span></div>
       <div class="flex items-center gap-2"><kbd class="kbd kbd-xs">C</kbd><span>{{ labels.VIEWER_SHORTCUTS_COPY }}</span></div>
       <div class="flex items-center gap-2"><kbd class="kbd kbd-xs">Esc</kbd><span>{{ labels.VIEWER_SHORTCUTS_CLEAR }}</span></div>
+      {% if media_available %}
+      <div class="flex items-center gap-2"><kbd class="kbd kbd-xs">Space</kbd><span>{{ labels.VIEWER_SHORTCUTS_PLAY_PAUSE }}</span></div>
+      <div class="flex items-center gap-2"><kbd class="kbd kbd-xs">J</kbd><kbd class="kbd kbd-xs">L</kbd><span>{{ labels.VIEWER_SHORTCUTS_SEEK }}</span></div>
+      {% endif %}
     </dl>
     {% endif %}
   </div>
@@ -169,10 +189,18 @@
     {%- set _color_class = speaker_colors.get(seg.speaker, '') if seg.speaker else '' -%}
     {%- set _glyph_idx_raw = _color_class.rsplit('-', 1)[-1] if _color_class else '' -%}
     <div class="segment group flex gap-3 py-2 px-3 rounded-box hover:bg-base-200 transition-colors"
+         data-seg-idx="{{ loop.index0 }}" data-start="{{ seg.start }}" data-end="{{ seg.end }}"
+         :class="{ 'segment-active': currentSegIdx === {{ loop.index0 }} }"
          {% if not search_disabled %}data-text="{{ seg.text|lower|e }}"
          x-show="!search || $el.dataset.text.includes(search.toLowerCase())"
          x-transition.opacity{% endif %}>
+      {% if media_available %}
+      <button type="button" class="timestamp-btn text-xs font-mono opacity-40 whitespace-nowrap pt-0.5"
+              title="{{ labels.VIEWER_SEEK_TO }}"
+              @click="seekTo({{ seg.start }})">{{ seg.start|format_time }}</button>
+      {% else %}
       <code class="text-xs font-mono opacity-40 whitespace-nowrap pt-0.5">{{ seg.start|format_time }}</code>
+      {% endif %}
       <div class="flex-1 min-w-0">
         {% if seg.speaker %}
         <strong class="text-xs font-medium {{ _color_class }}">
@@ -222,7 +250,7 @@
         {{ fmt|upper }}
       </a>
       {% endfor %}
-      {% if job.source_url and media_available %}
+      {% if media_available %}
       <a href="/viewer/{{ job.id }}/media" class="btn btn-sm btn-outline" download>
         {{ icon_download("w-4 h-4") }} {{ labels.VIEWER_DOWNLOAD_MEDIA }}
       </a>
@@ -238,31 +266,123 @@
 
 {% block scripts %}
 <script nonce="{{ csp_nonce }}">
+window.viewerData = function(segmentCount) {
+  return {
+    search: '',
+    activeIndex: 0,
+    shortcutsOpen: false,
+    currentSegIdx: -1,
+    _segments: [],
+    _lastScrollTime: 0,
+    _segmentCount: segmentCount,
+    get matchCount() {
+      if (!this.search) return this._segmentCount;
+      var q = this.search.toLowerCase();
+      return Array.from(document.querySelectorAll('.segment[data-text]')).filter(function(el) { return el.dataset.text.includes(q); }).length;
+    },
+    _visibleSegments() {
+      return Array.from(document.querySelectorAll('.segment')).filter(function(el) { return el.offsetParent !== null; });
+    },
+    focusSearch() {
+      var el = document.querySelector('input[type=search]');
+      if (el) { el.focus(); el.select(); }
+    },
+    navigateSegments(delta) {
+      var visible = this._visibleSegments();
+      if (!visible.length) return;
+      this.activeIndex = Math.max(0, Math.min(visible.length - 1, this.activeIndex + delta));
+      var target = visible[this.activeIndex];
+      if (target) target.scrollIntoView({block: 'center', behavior: 'smooth'});
+    },
+    copyActive() {
+      var visible = this._visibleSegments();
+      var target = visible[this.activeIndex];
+      var text = target && target.querySelector('button[data-copy-text]');
+      text = text && text.dataset && text.dataset.copyText;
+      if (text) {
+        window.whisperCopy(text);
+      }
+    },
+    clearSearch() { this.search = ''; },
+    initPlayer() {
+      var player = document.getElementById('media-player');
+      if (!player) return;
+      var segs = Array.from(document.querySelectorAll('.segment[data-start]'));
+      this._segments = segs.map(function(el) {
+        return { start: parseFloat(el.dataset.start), end: parseFloat(el.dataset.end) };
+      });
+      var self = this;
+      player.addEventListener('timeupdate', function() { self._onTimeUpdate(player.currentTime); });
+    },
+    _onTimeUpdate(t) {
+      var segs = this._segments;
+      var idx = -1;
+      var lo = 0, hi = segs.length - 1;
+      while (lo <= hi) {
+        var mid = (lo + hi) >> 1;
+        if (segs[mid].start <= t) { idx = mid; lo = mid + 1; }
+        else { hi = mid - 1; }
+      }
+      if (idx >= 0 && t > segs[idx].end) idx = -1;
+      if (idx === this.currentSegIdx) return;
+      this.currentSegIdx = idx;
+      if (idx < 0) return;
+      var now = Date.now();
+      if (now - this._lastScrollTime < 1000) return;
+      this._lastScrollTime = now;
+      var el = document.querySelector('[data-seg-idx="' + idx + '"]');
+      if (el && el.offsetParent !== null) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    },
+    seekTo(time) {
+      var player = document.getElementById('media-player');
+      if (!player) return;
+      player.currentTime = time;
+      player.play();
+    },
+    togglePlayPause() {
+      var player = document.getElementById('media-player');
+      if (!player) return;
+      if (player.paused) player.play(); else player.pause();
+    },
+    seekDelta(delta) {
+      var player = document.getElementById('media-player');
+      if (!player) return;
+      player.currentTime = Math.max(0, player.currentTime + delta);
+    }
+  };
+};
+
 (function() {
-  // Escape HTML so user-supplied transcript text can never inject markup,
-  // then wrap matches of `query` in <mark> for visible highlighting.
-  const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-  })[c]);
-  const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  var escapeHtml = function(s) { return String(s).replace(/[&<>"']/g, function(c) {
+    return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+  }); };
+  var escapeRegex = function(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); };
   window.whisperHighlight = function(text, query) {
     if (!query) return escapeHtml(text);
-    const q = String(query).trim();
+    var q = String(query).trim();
     if (!q) return escapeHtml(text);
     try {
-      // Split the RAW text on the query, then escape each part. Escaping
-      // before the regex (the previous approach) corrupted entities: a
-      // search for "amp" inside text containing "&" would match the "amp"
-      // of "&amp;" and produce "&<mark>amp</mark>;". Splitting first keeps
-      // the match aligned with the source text; every part — including the
-      // matched run — is still escaped, so the output stays XSS-safe.
-      const parts = text.split(new RegExp('(' + escapeRegex(q) + ')', 'gi'));
-      return parts
-        .map((part, i) => (i % 2 === 0 ? escapeHtml(part) : '<mark>' + escapeHtml(part) + '</mark>'))
-        .join('');
+      var parts = text.split(new RegExp('(' + escapeRegex(q) + ')', 'gi'));
+      return parts.map(function(part, i) {
+        return i % 2 === 0 ? escapeHtml(part) : '<mark>' + escapeHtml(part) + '</mark>';
+      }).join('');
     } catch (_) {
       return escapeHtml(text);
     }
+  };
+  window.whisperCopy = function(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    return Promise.resolve();
   };
 })();
 </script>

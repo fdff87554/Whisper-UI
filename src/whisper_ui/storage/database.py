@@ -52,6 +52,7 @@ _JOB_COLUMNS = [
     "owner_id",
     "source_job_id",
     "quality_warning",
+    "share_token",
 ]
 
 
@@ -150,6 +151,12 @@ class JobDatabase:
             ).fetchone()
         else:
             row = self._conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        if row is None:
+            return None
+        return _row_to_job(row)
+
+    def get_job_by_share_token(self, share_token: str) -> Job | None:
+        row = self._conn.execute("SELECT * FROM jobs WHERE share_token = ?", (share_token,)).fetchone()
         if row is None:
             return None
         return _row_to_job(row)

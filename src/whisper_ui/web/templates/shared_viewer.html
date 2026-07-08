@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-Hant"
+      x-data="{ theme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'whisper-dark' : 'whisper-light' }"
+      :data-theme="theme">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ labels.VIEWER_SHARED_TITLE.format(name=job.filename) }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+  <script nonce="{{ csp_nonce }}">
+  window.sharedViewerData = function(segmentCount) {
+    return {
+      search: '',
+      currentSegIdx: -1,
+      _segments: [],
+      _lastScrollTime: 0,
+      _segmentCount: segmentCount,
+      get matchCount() {
+        if (!this.search) return this._segmentCount;
+        var q = this.search.toLowerCase();
+        return Array.from(document.querySelectorAll('.segment[data-text]')).filter(function(el) { return el.dataset.text.includes(q); }).length;
+      },
+      initPlayer() {
+        var player = document.getElementById('media-player');
+        if (!player) return;
+        var segs = Array.from(document.querySelectorAll('.segment[data-start]'));
+        this._segments = segs.map(function(el) {
+          return { start: parseFloat(el.dataset.start), end: parseFloat(el.dataset.end) };
+        });
+        var self = this;
+        player.addEventListener('timeupdate', function() { self._onTimeUpdate(player.currentTime); });
+      },
+      _onTimeUpdate(t) {
+        var segs = this._segments;
+        var idx = -1;
+        var lo = 0, hi = segs.length - 1;
+        while (lo <= hi) {
+          var mid = (lo + hi) >> 1;
+          if (segs[mid].start <= t) { idx = mid; lo = mid + 1; }
+          else { hi = mid - 1; }
+        }
+        if (idx >= 0 && t > segs[idx].end) idx = -1;
+        if (idx === this.currentSegIdx) return;
+        this.currentSegIdx = idx;
+        if (idx < 0) return;
+        var now = Date.now();
+        if (now - this._lastScrollTime < 1000) return;
+        this._lastScrollTime = now;
+        var el = document.querySelector('[data-seg-idx="' + idx + '"]');
+        if (el && el.offsetParent !== null) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      },
+      seekTo(time) {
+        var player = document.getElementById('media-player');
+        if (!player) return;
+        player.currentTime = time;
+        player.play();
+      },
+      togglePlayPause() {
+        var player = document.getElementById('media-player');
+        if (!player) return;
+        if (player.paused) player.play(); else player.pause();
+      },
+      seekDelta(delta) {
+        var player = document.getElementById('media-player');
+        if (!player) return;
+        player.currentTime = Math.max(0, player.currentTime + delta);
+      }
+    };
+  };
+
+  (function() {
+    var escapeHtml = function(s) { return String(s).replace(/[&<>"']/g, function(c) {
+      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+    }); };
+    var escapeRegex = function(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); };
+    window.whisperHighlight = function(text, query) {
+      if (!query) return escapeHtml(text);
+      var q = String(query).trim();
+      if (!q) return escapeHtml(text);
+      try {
+        var parts = text.split(new RegExp('(' + escapeRegex(q) + ')', 'gi'));
+        return parts.map(function(part, i) {
+          return i % 2 === 0 ? escapeHtml(part) : '<mark>' + escapeHtml(part) + '</mark>';
+        }).join('');
+      } catch (_) {
+        return escapeHtml(text);
+      }
+    };
+  })();
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"
+          integrity="sha384-X9kJyAubVxnP0hcA+AMMs21U445qsnqhnUF8EBlEpP3a42Kh/JwWjlv2ZcvGfphb"
+          crossorigin="anonymous"></script>
+</head>
+<body class="min-h-screen bg-base-100 text-base-content leading-relaxed">
+  <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+
+    <div class="flex items-center gap-2 mb-2">
+      <span class="badge badge-outline badge-sm">{{ labels.VIEWER_SHARED_BADGE }}</span>
+    </div>
+
+    <h1 class="text-xl font-medium mb-2">{{ job.filename }}</h1>
+
+    {% if result.duration > 0 %}
+    {% set minutes = (result.duration // 60)|int %}
+    {% set seconds = (result.duration % 60)|int %}
+    <p class="text-sm opacity-50 mb-4">{{ labels.VIEWER_METADATA.format(minutes=minutes, seconds=seconds, segments=result.segments|length, language=result.language) }}</p>
+    {% endif %}
+
+    {% if media_available %}
+    <div class="player-wrapper">
+      {% if media_is_video %}
+      <video id="media-player" controls preload="metadata">
+        <source src="/shared/{{ share_token }}/media">
+        <p>{{ labels.VIEWER_PLAYER_UNAVAILABLE }}</p>
+      </video>
+      {% else %}
+      <audio id="media-player" controls preload="metadata" class="p-2">
+        <source src="/shared/{{ share_token }}/media">
+        <p>{{ labels.VIEWER_PLAYER_UNAVAILABLE }}</p>
+      </audio>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if result.segments %}
+    {% set _speaker_glyphs = ['●', '▲', '■', '◆', '★', '✦', '◉', '♦'] %}
+    <div class="{{ 'has-player' if media_available else '' }}"
+         x-data="sharedViewerData({{ result.segments|length }})"
+         x-init="initPlayer()"
+         @keydown.window="
+           const tag = document.activeElement.tagName;
+           const inField = tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement.isContentEditable;
+           if (!inField && $event.key === ' ' && document.getElementById('media-player')) { $event.preventDefault(); togglePlayPause(); }
+           else if (!inField && ($event.key === 'j' || $event.key === 'J') && document.getElementById('media-player')) { $event.preventDefault(); seekDelta(-5); }
+           else if (!inField && ($event.key === 'l' || $event.key === 'L') && document.getElementById('media-player')) { $event.preventDefault(); seekDelta(5); }
+         ">
+
+      {# Search #}
+      {% if result.segments|length <= 5000 %}
+      <div class="sticky top-0 z-10 bg-base-100 border-b border-line pb-3 mb-4 pt-2">
+        <div class="relative max-w-sm">
+          <span class="absolute left-3 top-1/2 -translate-y-1/2 opacity-40">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          </span>
+          <input type="search" class="input input-sm w-full pl-9 pr-20" x-model="search"
+                 placeholder="{{ labels.VIEWER_SEARCH_PLACEHOLDER }}">
+          <span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs opacity-40"
+                x-show="search"
+                x-text="matchCount + ' / {{ result.segments|length }}'"></span>
+        </div>
+      </div>
+      {% endif %}
+
+      {# Segments #}
+      <div class="transcript-container">
+        {% for seg in result.segments %}
+        {%- set _color_class = speaker_colors.get(seg.speaker, '') if seg.speaker else '' -%}
+        {%- set _glyph_idx_raw = _color_class.rsplit('-', 1)[-1] if _color_class else '' -%}
+        <div class="segment group flex gap-3 py-2 px-3 rounded-box hover:bg-base-200 transition-colors"
+             data-seg-idx="{{ loop.index0 }}" data-start="{{ seg.start }}" data-end="{{ seg.end }}"
+             :class="{ 'segment-active': currentSegIdx === {{ loop.index0 }} }"
+             {% if result.segments|length <= 5000 %}data-text="{{ seg.text|lower|e }}"
+             x-show="!search || $el.dataset.text.includes(search.toLowerCase())"
+             x-transition.opacity{% endif %}>
+          {% if media_available %}
+          <button type="button" class="timestamp-btn text-xs font-mono opacity-40 whitespace-nowrap pt-0.5"
+                  title="{{ labels.VIEWER_SEEK_TO }}"
+                  @click="seekTo({{ seg.start }})">{{ seg.start|format_time }}</button>
+          {% else %}
+          <code class="text-xs font-mono opacity-40 whitespace-nowrap pt-0.5">{{ seg.start|format_time }}</code>
+          {% endif %}
+          <div class="flex-1 min-w-0">
+            {% if seg.speaker %}
+            <strong class="text-xs font-medium {{ _color_class }}">
+              {% if _glyph_idx_raw in ('1','2','3','4','5','6','7','8') %}
+              <span class="font-mono mr-0.5" aria-hidden="true">{{ _speaker_glyphs[_glyph_idx_raw|int - 1] }}</span>
+              {% endif %}
+              [{{ seg.speaker }}]
+            </strong>
+            {% endif %}
+            <span {% if result.segments|length <= 5000 %}data-raw="{{ seg.text|e }}"
+                  x-html="window.whisperHighlight($el.dataset.raw, search)"{% endif %}>{{ seg.text }}</span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% if result.segments|length <= 5000 %}
+      <p class="text-center py-8 opacity-50"
+         x-show="search && matchCount === 0"
+         x-transition.opacity>
+        {{ labels.VIEWER_SEARCH_NO_RESULTS }}
+      </p>
+      {% endif %}
+    </div>
+    {% else %}
+    <p class="text-sm opacity-50">{{ labels.VIEWER_NO_SEGMENTS }}</p>
+    {% endif %}
+
+    <div class="text-center mt-8 opacity-40 text-xs">
+      Whisper UI
+    </div>
+  </div>
+</body>
+</html>
