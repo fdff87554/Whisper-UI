@@ -80,8 +80,25 @@ class TestFormatFailureMessage:
         msg = format_failure_message(JobTimeoutException, None)
         assert "?" in msg
 
-    def test_plain_exception_uses_str(self):
-        assert format_failure_message(RuntimeError, RuntimeError("boom")) == "boom"
+    def test_plain_exception_uses_generic_message_not_raw_text(self):
+        # Raw exception text (which can carry stderr / paths) must never be the
+        # user-facing message; an unmapped exception gets the generic label.
+        from whisper_ui.ui import labels as ui_labels
 
-    def test_no_information_falls_back(self):
-        assert format_failure_message(None, None) == "unknown pipeline failure"
+        msg = format_failure_message(RuntimeError, RuntimeError("/secret/path: ffmpeg exploded"))
+        assert msg == ui_labels.JOBS_STAGE_FAILED_GENERIC
+        assert "ffmpeg" not in msg
+        assert "/secret/path" not in msg
+
+    def test_domain_exception_maps_to_its_stage_message(self):
+        from whisper_ui.core.exceptions import TranscriptionError
+        from whisper_ui.ui import labels as ui_labels
+
+        msg = format_failure_message(TranscriptionError, TranscriptionError("whisper stderr: cudaMalloc failed"))
+        assert msg == ui_labels.JOBS_STAGE_FAILED_TRANSCRIPTION
+        assert "stderr" not in msg
+
+    def test_no_information_falls_back_to_generic(self):
+        from whisper_ui.ui import labels as ui_labels
+
+        assert format_failure_message(None, None) == ui_labels.JOBS_STAGE_FAILED_GENERIC

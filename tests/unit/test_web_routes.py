@@ -126,6 +126,19 @@ class TestMetricsEndpoint:
         assert "text/plain" in resp.headers["content-type"]
         assert "whisper_jobs_total" in resp.text
 
+    def test_metrics_open_by_default(self, client):
+        # No METRICS_TOKEN configured -> open (backward-compatible).
+        assert client.get("/metrics").status_code == 200
+
+    def test_metrics_requires_bearer_token_when_configured(self, client, app):
+        app.state.settings = app.state.settings.model_copy(update={"metrics_token": "scrape-secret"})
+
+        assert client.get("/metrics").status_code == 401
+        assert client.get("/metrics", headers={"Authorization": "Bearer wrong"}).status_code == 401
+        ok = client.get("/metrics", headers={"Authorization": "Bearer scrape-secret"})
+        assert ok.status_code == 200
+        assert "whisper_jobs_total" in ok.text
+
 
 class TestDashboardRoutes:
     def test_root_serves_dashboard(self, client):

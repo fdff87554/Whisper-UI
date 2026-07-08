@@ -207,6 +207,26 @@ def test_json_formatter_emits_structured_extra_fields():
     assert payload["elapsed_ms"] == 651060
 
 
+def test_json_formatter_redacts_sensitive_extra_fields():
+    """A call site that accidentally passes a token / password / raw URL via
+    extra={} must not leak it: sensitive-named fields are redacted in the JSON
+    log while ordinary fields pass through."""
+    record = logging.LogRecord("w", logging.INFO, "p", 1, "op", (), None)
+    record.hf_token = "hf_realsecret"
+    record.password = "hunter2"
+    record.redis_url = "redis://:pw@host:6379/0"
+    record.api_key = "sk-live-123"
+    record.job_id = "abc123"  # ordinary field, must survive
+
+    payload = json.loads(JsonFormatter().format(record))
+
+    assert payload["hf_token"] == "***"
+    assert payload["password"] == "***"
+    assert payload["redis_url"] == "***"
+    assert payload["api_key"] == "***"
+    assert payload["job_id"] == "abc123"
+
+
 def test_json_formatter_includes_rendered_exception():
     import sys
 

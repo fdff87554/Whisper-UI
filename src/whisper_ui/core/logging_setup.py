@@ -150,6 +150,18 @@ _RESERVED_LOGRECORD_ATTRS = frozenset(
     }
 )  # fmt: skip
 
+# Substrings (case-insensitive) that mark a structured ``extra={}`` field as
+# sensitive. Any matching field is redacted in the JSON log rather than copied
+# verbatim, so a call site that accidentally passes a token / password / raw
+# URL (which may carry inline credentials) cannot leak it into the logs.
+_SENSITIVE_KEY_MARKERS = ("token", "password", "passwd", "secret", "authorization", "api_key", "apikey", "url")
+_REDACTED = "***"
+
+
+def _is_sensitive_key(key: str) -> bool:
+    lowered = key.lower()
+    return any(marker in lowered for marker in _SENSITIVE_KEY_MARKERS)
+
 
 class JsonFormatter(logging.Formatter):
     """Render each LogRecord as one JSON line (selected when ``LOG_JSON`` is set).
@@ -173,7 +185,7 @@ class JsonFormatter(logging.Formatter):
         }
         for key, value in record.__dict__.items():
             if key not in _RESERVED_LOGRECORD_ATTRS and not key.startswith("_"):
-                payload[key] = value
+                payload[key] = _REDACTED if _is_sensitive_key(key) else value
         if record.exc_info:
             payload["exc"] = self.formatException(record.exc_info)
         if record.stack_info:

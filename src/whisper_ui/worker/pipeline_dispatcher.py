@@ -574,16 +574,18 @@ def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> No
 
     meta_generation = extract_meta_generation(rq_job)
     error_msg = format_failure_message(_exc_type, exc_value)
-    # Surface the raw exception class — distinct from the localised
-    # error_msg the UI shows — so operators can grep finalize_failure
-    # entries to count timeouts vs preprocess errors vs pyannote OOMs
-    # without having to translate the Chinese error labels.
+    # Log the raw exception class AND the raw detail (str(exc_value)) here,
+    # server-side only. error_msg is the generic message the UI shows; the raw
+    # detail — which can carry ffmpeg / whisper-cli stderr and internal paths —
+    # stays in the operator log so debugging is unaffected while the user sees
+    # only the sanitised per-stage message.
     logger.error(
-        "Pipeline failure for job %s (sub_job=%s generation=%s exception=%s message=%r)",
+        "Pipeline failure for job %s (sub_job=%s generation=%s exception=%s detail=%r user_message=%r)",
         parent_job_id,
         rq_job.id,
         meta_generation if meta_generation is not None else "-",
         _exc_type.__name__ if _exc_type is not None else "?",
+        str(exc_value) if exc_value is not None else "-",
         error_msg,
     )
 

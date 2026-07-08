@@ -157,6 +157,15 @@ JOBS_PAGE_PREV = "上一頁"
 JOBS_PAGE_NEXT = "下一頁"
 JOBS_STALE_ERROR = "任務逾時或 Worker 異常終止"
 JOBS_TIMEOUT_ERROR = "任務總執行時間超出上限（{seconds} 秒），音檔可能過長或裝置繁忙，請調整 JOB_TIMEOUT_MAX 後重試"
+# Per-stage generic failure messages shown to the user. The raw exception text
+# (which can carry ffmpeg / whisper-cli stderr and internal filesystem paths)
+# is logged server-side only; the user sees which stage failed, not the detail.
+JOBS_STAGE_FAILED_DOWNLOAD = "媒體下載失敗，請確認來源網址後重試。"
+JOBS_STAGE_FAILED_PREPROCESS = "音訊前處理失敗，檔案可能損毀或格式不支援。"
+JOBS_STAGE_FAILED_TRANSCRIPTION = "轉錄失敗，請稍後重試。"
+JOBS_STAGE_FAILED_ALIGNMENT = "字詞對齊失敗，請稍後重試。"
+JOBS_STAGE_FAILED_DIARIZATION = "語者分離失敗，請稍後重試。"
+JOBS_STAGE_FAILED_GENERIC = "任務處理失敗，請稍後重試。"
 JOBS_SEARCH_PLACEHOLDER = "搜尋檔案名稱或網址..."
 JOBS_INLINE_EXPORT = "匯出"
 JOBS_SELECT_ROW = "選取此任務"

@@ -136,6 +136,12 @@ class Settings(BaseSettings):
     # preserves the original open-signup behaviour.
     allow_registration: bool = True
 
+    # Optional bearer token for the /metrics endpoint. Empty (default) keeps
+    # /metrics open (it exposes only counts/depths, no PII) — an operator
+    # exposing the box publicly should either set this or block /metrics at the
+    # reverse proxy. When set, a scrape must send ``Authorization: Bearer <token>``.
+    metrics_token: str = ""
+
     # Upload
     max_upload_size: int = 2 * 1024 * 1024 * 1024  # 2 GB
     # Optional retention: when > 0, the web app's background loop reclaims
