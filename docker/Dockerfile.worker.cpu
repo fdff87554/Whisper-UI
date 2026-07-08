@@ -26,7 +26,10 @@ RUN curl -fsSL -o /tmp/deno.zip \
 WORKDIR /app
 
 ARG PIP_INDEX_URL=
-ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+# Deliberately NOT re-exported as ENV: an ARG is already visible to RUN as
+# an env var during build, so pip still honours it, but it does not persist
+# into the final image config where a credentialed private index URL could
+# leak via `docker inspect` / `docker history`.
 
 # Dependency layer: only project metadata plus a stub package, so editing
 # src/ does not invalidate the expensive ML-dependency install below.
@@ -47,9 +50,10 @@ RUN mkdir -p src/whisper_ui && touch src/whisper_ui/__init__.py
 RUN uv export --frozen --no-emit-project --no-hashes \
         --no-emit-package torch --no-emit-package torchaudio --no-emit-package triton \
         --extra worker --extra worker-llm -o /tmp/constraints.txt && \
-    pip install --no-cache-dir "torch==2.10.*" "torchaudio==2.10.*" --index-url https://download.pytorch.org/whl/cpu && \
-    pip install --no-cache-dir --no-deps "whisperx>=3.8,<3.9" && \
-    pip install --no-cache-dir -c /tmp/constraints.txt ".[worker,worker-llm]"
+    pip install --no-cache-dir "torch==2.10.0" "torchaudio==2.10.0" --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir --no-deps "whisperx==3.8.6" && \
+    pip install --no-cache-dir -c /tmp/constraints.txt ".[worker,worker-llm]" && \
+    python -c "import whisperx"
 
 # Project layer: cheap to rebuild on every code change. --force-reinstall
 # replaces the stub install of whisper-ui itself; --no-deps keeps it from
