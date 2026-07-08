@@ -194,7 +194,12 @@ def test_stage_failure_cancels_downstream_and_marks_job_failed(monkeypatch, fake
 
     assert job.status == JobStatus.FAILED
     assert job.error is not None
-    assert "kaboom" in job.error
+    # The user-facing error is the sanitised generic message; the raw exception
+    # detail ("kaboom") is logged server-side, never stored on the job.
+    from whisper_ui.ui import labels as ui_labels
+
+    assert job.error == ui_labels.JOBS_STAGE_FAILED_GENERIC
+    assert "kaboom" not in job.error
 
     # Every non-failing sub-job should end up either cancelled or never run.
     gen = pipeline_dispatcher._current_generation(fake_redis, job.id)
