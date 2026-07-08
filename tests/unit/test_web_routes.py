@@ -90,6 +90,33 @@ class TestHealthEndpoint:
         assert resp.json() == {"status": "ok"}
 
 
+class TestSecurityHeaders:
+    def test_response_carries_csp_and_base_headers(self, client):
+        resp = client.get("/jobs")
+        assert resp.headers["X-Content-Type-Options"] == "nosniff"
+        assert resp.headers["X-Frame-Options"] == "SAMEORIGIN"
+        csp = resp.headers["Content-Security-Policy"]
+        assert "default-src 'self'" in csp
+        assert "object-src 'none'" in csp
+        assert "frame-ancestors 'self'" in csp
+        assert "https://cdn.jsdelivr.net" in csp
+        assert "'nonce-" in csp
+
+    def test_inline_scripts_carry_the_response_nonce(self, client):
+        resp = client.get("/jobs")
+        csp = resp.headers["Content-Security-Policy"]
+        nonce = csp.split("'nonce-", 1)[1].split("'", 1)[0]
+        assert nonce  # non-empty per-request nonce
+        # The page's inline <script> blocks must carry the same nonce or the
+        # browser would refuse to run them under this CSP.
+        assert f'<script nonce="{nonce}">' in resp.text
+
+    def test_nonce_differs_per_request(self, client):
+        first = client.get("/jobs").headers["Content-Security-Policy"]
+        second = client.get("/jobs").headers["Content-Security-Policy"]
+        assert first != second
+
+
 class TestMetricsEndpoint:
     def test_metrics_returns_prometheus_exposition(self, client):
         # app fixture uses a MagicMock redis, so the RQ gauges degrade out; the

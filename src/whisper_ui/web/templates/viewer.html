@@ -237,7 +237,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
 (function() {
   // Escape HTML so user-supplied transcript text can never inject markup,
   // then wrap matches of `query` in <mark> for visible highlighting.

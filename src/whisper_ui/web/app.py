@@ -19,20 +19,51 @@ from whisper_ui.web.deps import templates
 from whisper_ui.web.middleware.request_id import RequestIdMiddleware
 
 
+def _build_csp(nonce: str) -> str:
+    """Pragmatic Content-Security-Policy for the htmx + Alpine.js frontend.
+
+    ``script-src`` allowlists jsDelivr (htmx / Alpine are loaded from there with
+    SRI) and carries a per-request nonce for the handful of inline ``<script>``
+    blocks. ``'unsafe-eval'`` is required because Alpine's standard build
+    evaluates its ``x-*`` directive expressions via ``new Function`` — dropping
+    it would need the @alpinejs/csp build and an inline-expression rewrite, a
+    much larger change. Everything else is locked to ``'self'`` so this still
+    adds real XSS defence-in-depth: no framing, no plugins, no base-tag or
+    form-action hijack, no off-origin data exfiltration.
+    """
+    return "; ".join(
+        (
+            "default-src 'self'",
+            f"script-src 'self' 'nonce-{nonce}' 'unsafe-eval' https://cdn.jsdelivr.net",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data:",
+            "font-src 'self'",
+            "connect-src 'self'",
+            "object-src 'none'",
+            "base-uri 'self'",
+            "form-action 'self'",
+            "frame-ancestors 'self'",
+        )
+    )
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Defense-in-depth headers for the internal-network deployment.
 
-    No CSP because the templates load htmx and Alpine.js from jsDelivr;
-    crafting a working source list belongs in a separate deployment-time
-    pass. No HSTS because TLS is expected to be terminated by an
-    upstream reverse proxy that owns the TLS-related headers.
+    A per-request CSP nonce is stashed on ``request.state`` before the route
+    runs so the templates' inline ``<script>`` blocks can reference it (see the
+    ``csp_nonce`` template context processor). No HSTS because TLS is expected
+    to be terminated by an upstream reverse proxy that owns the TLS headers.
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
+        nonce = secrets.token_urlsafe(16)
+        request.state.csp_nonce = nonce
         response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
         response.headers.setdefault("Referrer-Policy", "same-origin")
+        response.headers.setdefault("Content-Security-Policy", _build_csp(nonce))
         return response
 
 

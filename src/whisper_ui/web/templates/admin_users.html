@@ -155,7 +155,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
 function resetPasswordDialog() {
   return {
     action: '',
