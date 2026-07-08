@@ -86,6 +86,27 @@ def test_setup_logging_defaults_to_info_when_env_unset(monkeypatch):
     assert logging.getLogger().getEffectiveLevel() == logging.INFO
 
 
+def test_setup_logging_param_log_level_overrides_env(monkeypatch):
+    """A Settings-supplied log_level (from .env, which os.getenv cannot see)
+    takes precedence over the process-env fallback."""
+    monkeypatch.setenv("LOG_LEVEL", "ERROR")
+
+    setup_logging(log_level="DEBUG")
+
+    assert logging.getLogger().getEffectiveLevel() == logging.DEBUG
+
+
+def test_setup_logging_param_log_json_true_selects_json_formatter(monkeypatch, capsys):
+    monkeypatch.delenv("LOG_JSON", raising=False)  # env says text; param must win
+
+    setup_logging(log_json=True)
+    logging.getLogger("whisper_ui.test").warning("hello json")
+
+    err = capsys.readouterr().err.strip().splitlines()[-1]
+    parsed = json.loads(err)  # would raise if the text formatter were used
+    assert parsed["message"] == "hello json"
+
+
 def test_setup_logging_pins_rq_loggers_to_warning(monkeypatch):
     monkeypatch.setenv("LOG_LEVEL", "DEBUG")
 

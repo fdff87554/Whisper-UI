@@ -253,12 +253,13 @@ def create_app() -> FastAPI:
     from whisper_ui.core.config import get_settings
     from whisper_ui.core.logging_setup import setup_logging
 
-    # Apply the project-wide dictConfig before anything else logs. Calling
-    # later would leave early startup lines (Settings validation, etc.)
-    # going through Python's default WARNING-only root logger.
+    # Apply the project-wide dictConfig before anything else logs (env-based),
+    # so early startup lines are formatted, then re-apply from Settings so a
+    # LOG_LEVEL / LOG_JSON in .env (which get_settings loads) takes effect.
+    # dictConfig is idempotent, so the second call simply supersedes the first.
     setup_logging()
-
     settings = get_settings()
+    setup_logging(log_level=settings.log_level, log_json=settings.log_json)
     application = FastAPI(title="Whisper UI", lifespan=lifespan)
     # bootstrap_done flips True after the first active admin is observed.
     # Initialised here (not in lifespan) so AuthMiddleware can read it

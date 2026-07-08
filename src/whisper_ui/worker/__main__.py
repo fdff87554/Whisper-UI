@@ -18,7 +18,14 @@ from whisper_ui.core.logging_setup import setup_logging
 
 
 def main() -> None:
+    # Env-based first so any log line during Settings load is formatted, then
+    # re-apply from Settings so LOG_LEVEL / LOG_JSON in .env is honoured too.
     setup_logging()
+    from whisper_ui.core.config import get_settings
+
+    settings = get_settings()
+    setup_logging(log_level=settings.log_level, log_json=settings.log_json)
+
     from rq.cli import main as rq_main
 
     rq_main()

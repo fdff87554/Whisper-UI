@@ -79,6 +79,13 @@ class Settings(BaseSettings):
     # loop from spreading. -1 keeps whisper.cpp's own default.
     whispercpp_max_context: int = 0
 
+    # Logging. Exposed as Settings fields (not just process env) so a value in
+    # .env is honoured — setup_logging reads these. log_level is validated /
+    # normalised in logging_setup._resolve_level (an unknown value falls back to
+    # INFO), so no validator is needed here.
+    log_level: str = "INFO"
+    log_json: bool = False
+
     # Language
     language: str = "zh"
 

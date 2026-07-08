@@ -193,8 +193,15 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False, default=str)
 
 
-def setup_logging() -> None:
+def setup_logging(*, log_level: str | None = None, log_json: bool | None = None) -> None:
     """Apply the project-wide ``dictConfig``; safe to call multiple times.
+
+    ``log_level`` / ``log_json`` come from :class:`~whisper_ui.core.config.Settings`
+    (so a value in ``.env`` is honoured — pydantic-settings loads ``.env`` into
+    Settings, not ``os.environ``, so the old ``os.getenv`` read silently ignored
+    ``.env``). When a parameter is None the ``LOG_LEVEL`` / ``LOG_JSON`` process
+    environment variable is used as a fallback, which keeps the earliest startup
+    call (before Settings is loaded) working.
 
     Pins ``rq`` / ``rq.worker`` to WARNING so the every-13-minute
     ``cleaning registries for queue ...`` heartbeat does not crowd out
@@ -202,8 +209,9 @@ def setup_logging() -> None:
     stock access log lacks user_id / request_id and is replaced by the
     structured access log emitted from :mod:`whisper_ui.web.middleware.request_id`.
     """
-    level = _resolve_level(os.getenv("LOG_LEVEL"))
-    formatter = "json" if _resolve_json(os.getenv("LOG_JSON")) else "default"
+    level = _resolve_level(log_level if log_level is not None else os.getenv("LOG_LEVEL"))
+    use_json = log_json if log_json is not None else _resolve_json(os.getenv("LOG_JSON"))
+    formatter = "json" if use_json else "default"
 
     config: dict = {
         "version": 1,
