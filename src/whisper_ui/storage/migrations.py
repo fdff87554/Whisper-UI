@@ -89,7 +89,7 @@ _MIGRATIONS: list[str] = [
     # Hot-path indexes for the polled job list / dashboard / metrics and the
     # background sweeps, which filter on status and range-scan updated_at
     # (list_jobs_filtered, get_status_counts, count_completed_since,
-    # list_stale_processing_job_ids) or filter on batch_id (list_jobs_by_batch).
+    # list_stale_active_job_ids) or filter on batch_id (list_jobs_by_batch).
     # owner_id is already covered by idx_jobs_owner_id. Cheap to maintain on a
     # write-light table; high-leverage as job history grows.
     "CREATE INDEX IF NOT EXISTS idx_jobs_status_updated_at ON jobs(status, updated_at)",

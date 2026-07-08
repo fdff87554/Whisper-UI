@@ -660,7 +660,7 @@ def finalize_failure(rq_job, connection, _exc_type, exc_value, _traceback) -> No
 
 
 def is_pipeline_dead(redis: Redis, parent_job_id: str) -> bool:
-    """Return True when a PROCESSING parent has no live RQ work left.
+    """Return True when a QUEUED/PROCESSING parent has no live RQ work left.
 
     "Live" means at least one current-generation sub-job is still queued,
     deferred, scheduled, or started. A parent whose sub-jobs are all finished,
@@ -710,12 +710,19 @@ def recover_stale_pipeline_jobs(
 ) -> int:
     """Fail only genuinely-dead stale jobs; spare jobs still waiting in RQ.
 
-    Replaces the blind wall-age reaper. A parent PROCESSING for longer than
-    ``timeout_seconds`` is failed only if :func:`is_pipeline_dead` confirms none
-    of its current-generation sub-jobs is still alive in RQ. This stops a
+    Replaces the blind wall-age reaper. A parent QUEUED/PROCESSING for longer
+    than ``timeout_seconds`` is failed only if :func:`is_pipeline_dead` confirms
+    none of its current-generation sub-jobs is still alive in RQ. This stops a
     single-/slow-worker box from mass-failing a healthy batch whose tail had
     simply not been reached yet (the production incident: 31/38 jobs reaped
     while their transcribe sub-jobs were still queued behind one worker).
+
+    QUEUED is a candidate too, which closes the state-machine dead-end where a
+    job stranded in QUEUED (its worker crashed, or RQ data was lost, before any
+    stage promoted it to PROCESSING) could never be recovered, retried, or
+    deleted. is_pipeline_dead returns True for such a job (no live sub-jobs), so
+    it is failed and becomes retryable; a job merely waiting in a backed-up
+    queue keeps live sub-jobs and is spared.
 
     For each job it does fail, the generation counter is bumped so any zombie
     sub-job that later resurfaces drops its writes through the existing
@@ -723,7 +730,7 @@ def recover_stale_pipeline_jobs(
     so a backlog deeper than PIPELINE_STATE_TTL_SECONDS cannot expire them
     into a false "dead" verdict on a later round.
     """
-    candidates = db.list_stale_processing_job_ids(timeout_seconds)
+    candidates = db.list_stale_active_job_ids(timeout_seconds)
     if not candidates:
         return 0
     dead: list[str] = []

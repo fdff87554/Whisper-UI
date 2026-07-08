@@ -696,7 +696,31 @@ def test_get_batch_stats_with_owner(db: JobDatabase):
     assert admin_stats["b1"]["completed"] == 2
 
 
-def test_recover_stale_jobs_ignores_non_processing(db: JobDatabase):
+def test_recover_stale_jobs_ignores_terminal_and_pending(db: JobDatabase):
+    """Recovery targets active (QUEUED/PROCESSING) jobs; it must never touch
+    PENDING (not yet enqueued) or terminal (COMPLETED/FAILED) rows even when
+    their updated_at is ancient."""
+    untouched = {}
+    for status in (JobStatus.PENDING, JobStatus.COMPLETED, JobStatus.FAILED):
+        job = Job(filename=f"{status.value}.mp3", filepath=f"/tmp/{status.value}.mp3")
+        job.status = status
+        db.insert_job(job)
+        untouched[status] = job.id
+
+    db._conn.execute("UPDATE jobs SET updated_at = '2000-01-01T00:00:00+00:00'")
+    db._conn.commit()
+
+    recovered = db.recover_stale_jobs(timeout_seconds=60, error_message="timeout")
+    assert recovered == 0
+    for status, job_id in untouched.items():
+        fetched = db.get_job(job_id)
+        assert fetched is not None
+        assert fetched.status == status
+
+
+def test_recover_stale_jobs_recovers_stranded_queued(db: JobDatabase):
+    """A job stranded in QUEUED (worker crashed before promoting it to
+    PROCESSING) must be recoverable so it stops being a state-machine dead-end."""
     queued = Job(filename="queued.mp3", filepath="/tmp/queued.mp3")
     queued.status = JobStatus.QUEUED
     db.insert_job(queued)
@@ -708,33 +732,31 @@ def test_recover_stale_jobs_ignores_non_processing(db: JobDatabase):
     db._conn.commit()
 
     recovered = db.recover_stale_jobs(timeout_seconds=60, error_message="timeout")
-    assert recovered == 0
-
+    assert recovered == 1
     fetched = db.get_job(queued.id)
     assert fetched is not None
-    assert fetched.status == JobStatus.QUEUED
+    assert fetched.status == JobStatus.FAILED
 
 
-def test_list_stale_processing_job_ids_returns_old_processing_only(db: JobDatabase):
-    stale = Job(filename="stale.mp3", filepath="/tmp/stale.mp3")
-    stale.status = JobStatus.PROCESSING
-    db.insert_job(stale)
+def test_list_stale_active_job_ids_returns_old_queued_and_processing(db: JobDatabase):
+    stale_proc = Job(filename="stale.mp3", filepath="/tmp/stale.mp3")
+    stale_proc.status = JobStatus.PROCESSING
+    db.insert_job(stale_proc)
+    stale_queued = Job(filename="queued.mp3", filepath="/tmp/queued.mp3")
+    stale_queued.status = JobStatus.QUEUED
+    db.insert_job(stale_queued)
     fresh = Job(filename="fresh.mp3", filepath="/tmp/fresh.mp3")
     fresh.status = JobStatus.PROCESSING
     db.insert_job(fresh)
-    queued = Job(filename="queued.mp3", filepath="/tmp/queued.mp3")
-    queued.status = JobStatus.QUEUED
-    db.insert_job(queued)
 
-    # Backdate the stale PROCESSING job and the (irrelevant) QUEUED job; only
-    # the old PROCESSING one is a stale-recovery candidate.
+    # Backdate both active jobs; the fresh one stays recent and is excluded.
     db._conn.execute(
         "UPDATE jobs SET updated_at = '2000-01-01T00:00:00+00:00' WHERE id IN (?, ?)",
-        (stale.id, queued.id),
+        (stale_proc.id, stale_queued.id),
     )
     db._conn.commit()
 
-    assert db.list_stale_processing_job_ids(timeout_seconds=60) == [stale.id]
+    assert set(db.list_stale_active_job_ids(timeout_seconds=60)) == {stale_proc.id, stale_queued.id}
 
 
 def test_recover_stale_jobs_only_ids_restricts_to_subset(db: JobDatabase):

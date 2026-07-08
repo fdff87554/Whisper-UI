@@ -1549,6 +1549,46 @@ def test_recover_stale_pipeline_jobs_spares_live_and_fails_dead(tmp_path):
         db.close()
 
 
+def test_recover_stale_pipeline_jobs_recovers_stranded_queued_job(tmp_path):
+    """A parent stranded in QUEUED whose pipeline is dead (no live sub-jobs) is
+    recovered, closing the dead-end where such a job could never be retried or
+    deleted. A QUEUED parent whose sub-jobs are still live is spared."""
+    from whisper_ui.storage.database import JobDatabase
+    from whisper_ui.ui.labels import JOBS_STALE_ERROR
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    settings = _build_settings(ollama="")
+    filestore = _build_filestore(tmp_path)
+    db = JobDatabase(tmp_path / "stale.db")
+    try:
+        dead = Job(id="qdead", filename="d.mp3", filepath=str(tmp_path / "d.mp3"), status=JobStatus.QUEUED)
+        live = Job(id="qlive", filename="l.mp3", filepath=str(tmp_path / "l.mp3"), status=JobStatus.QUEUED)
+        db.insert_job(dead)
+        db.insert_job(live)
+        enqueue_pipeline(dead, redis=redis, settings=settings, filestore=filestore)
+        enqueue_pipeline(live, redis=redis, settings=settings, filestore=filestore)
+
+        # dead: cancel every sub-job so the pipeline has no live work; the parent
+        # DB row is still QUEUED (it never got promoted to PROCESSING).
+        for sub in _load_subjobs(redis, dead.id):
+            sub.cancel()
+
+        db._conn.execute(
+            "UPDATE jobs SET updated_at = '2000-01-01T00:00:00+00:00' WHERE status = ?",
+            (JobStatus.QUEUED.value,),
+        )
+        db._conn.commit()
+
+        recovered = pd.recover_stale_pipeline_jobs(db, redis, timeout_seconds=60, error_message=JOBS_STALE_ERROR)
+
+        assert recovered == 1
+        assert db.get_job(dead.id).status == JobStatus.FAILED
+        assert db.get_job(live.id).status == JobStatus.QUEUED, "a QUEUED job with live sub-jobs must be spared"
+    finally:
+        db.close()
+
+
 def test_recover_stale_pipeline_jobs_refreshes_ttl_of_spared_candidates(tmp_path):
     """A spared candidate's generation/subjobs keys get their TTL re-armed so a
     backlog deeper than PIPELINE_STATE_TTL_SECONDS cannot expire them and flip
