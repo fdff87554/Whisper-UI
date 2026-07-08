@@ -523,10 +523,16 @@ def finalize_success(rq_job, connection, _result) -> None:
             logger.error("finalize_success could not find parent job %s", parent_job_id)
             return
 
-        if job.status == JobStatus.COMPLETED:
+        if job.status in (JobStatus.COMPLETED, JobStatus.FAILED):
+            # Never resurrect a terminal job. COMPLETED guards a duplicate
+            # finalize; FAILED guards a late/zombie success callback arriving
+            # after the stale reaper (or a fail callback) already failed the
+            # job — without this, a callback whose meta generation is absent
+            # (ungated) could flip a FAILED row back to COMPLETED.
             logger.debug(
-                "finalize_success: job %s already COMPLETED, skipping duplicate finalize",
+                "finalize_success: job %s already terminal (%s); skipping finalize to avoid resurrecting it",
                 parent_job_id,
+                job.status.value,
             )
             return
 

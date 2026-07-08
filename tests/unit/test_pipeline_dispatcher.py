@@ -667,6 +667,44 @@ def test_finalize_success_skips_already_completed_job(monkeypatch, tmp_path):
     runtime.db.update_job.assert_not_called()
 
 
+def test_finalize_success_does_not_resurrect_failed_job(monkeypatch, tmp_path):
+    """A late/zombie success callback for a job the stale reaper already FAILED
+    must not flip it back to COMPLETED, even when its meta generation is absent
+    (the ungated path the Python stale-callback guard cannot catch)."""
+    from whisper_ui.worker import pipeline_dispatcher as pd
+
+    redis = fakeredis.FakeRedis()
+    job = Job(
+        id="job-already-failed",
+        filename="m.mp3",
+        filepath=str(tmp_path / "m.mp3"),
+        status=JobStatus.FAILED,
+    )
+
+    runtime = MagicMock()
+    runtime.redis = redis
+    runtime.db.get_job.return_value = job
+    runtime.settings.redis_processing_expiry = 7200
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _fake_builder(job_id, *, generation=None):
+        runtime.reporter = MagicMock()
+        yield runtime
+
+    monkeypatch.setattr(pd, "build_worker_runtime", _fake_builder)
+
+    fake_rq_job = MagicMock()
+    fake_rq_job.meta = {"parent_job_id": job.id}  # no generation -> ungated path
+
+    pd.finalize_success(fake_rq_job, redis, None)
+
+    runtime.filestore.save_result.assert_not_called()
+    runtime.db.update_job.assert_not_called()
+    assert job.status == JobStatus.FAILED
+
+
 def test_finalize_failure_marks_job_failed_and_cancels_siblings(monkeypatch, tmp_path):
     from whisper_ui.worker import pipeline_dispatcher as pd
 
