@@ -116,6 +116,34 @@ class TestSecurityHeaders:
         second = client.get("/jobs").headers["Content-Security-Policy"]
         assert first != second
 
+    def test_csp_allows_google_fonts(self, client):
+        """base.html / shared_viewer.html load Noto Sans TC from Google Fonts;
+        the CSP must allow those hosts or the font is blocked on every page that
+        extends base (the /login-only check that shipped originally missed this)."""
+        csp = client.get("/jobs").headers["Content-Security-Policy"]
+        assert "https://fonts.googleapis.com" in csp  # the CSS
+        assert "https://fonts.gstatic.com" in csp  # the font files
+
+    def test_csp_covers_every_external_host_referenced_by_templates(self):
+        """Guard against a future template pulling in an off-origin resource the
+        CSP does not allow. Every external https host referenced by a template
+        (minus SVG xmlns, which is not fetched) must appear in the CSP."""
+        import pathlib
+        import re
+
+        from whisper_ui.web.app import _build_csp
+
+        csp = _build_csp("test-nonce")
+        templates_dir = pathlib.Path(__file__).resolve().parents[2] / "src/whisper_ui/web/templates"
+        hosts = set()
+        for tpl in templates_dir.rglob("*.html"):
+            for url in re.findall(r"https://[a-zA-Z0-9._-]+", tpl.read_text()):
+                host = url[len("https://") :]
+                if host != "www.w3.org":  # SVG namespace URI, not a fetched resource
+                    hosts.add("https://" + host)
+        missing = sorted(h for h in hosts if h not in csp)
+        assert missing == [], f"templates reference hosts not allowed by the CSP: {missing}"
+
 
 class TestMetricsEndpoint:
     def test_metrics_returns_prometheus_exposition(self, client):

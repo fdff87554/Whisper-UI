@@ -35,9 +35,11 @@ def _build_csp(nonce: str) -> str:
         (
             "default-src 'self'",
             f"script-src 'self' 'nonce-{nonce}' 'unsafe-eval' https://cdn.jsdelivr.net",
-            "style-src 'self' 'unsafe-inline'",
+            # base.html and shared_viewer.html load the Noto Sans TC stylesheet
+            # from fonts.googleapis.com and its font files from fonts.gstatic.com.
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
             "img-src 'self' data:",
-            "font-src 'self'",
+            "font-src 'self' https://fonts.gstatic.com",
             "connect-src 'self'",
             "object-src 'none'",
             "base-uri 'self'",
