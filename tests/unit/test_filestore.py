@@ -219,10 +219,11 @@ def test_copy_source_for_new_job_raises_when_source_is_directory(filestore: File
 
 
 def test_delete_job_files_raises_on_filesystem_failure(filestore: FileStore, monkeypatch):
-    """Manual delete routes rely on this raising — if shutil.rmtree fails,
-    the route must see the OSError and keep the DB row, not silently
-    proceed to db.delete_job (which would leave files on disk while UI /
-    audit log claim the job was deleted).
+    """delete_job_files must surface a filesystem error rather than swallow it,
+    so the caller can react. The manual delete routes are row-first (atomic
+    terminal-gated row delete, then this best-effort reclaim), so a raise here
+    means the row is already gone and the route logs the orphaned files for
+    cleanup — see delete_job_files' docstring and the row-first delete routes.
     """
     import shutil
 
