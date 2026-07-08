@@ -120,13 +120,14 @@ class FileStore:
     def delete_job_files(self, job_id: str) -> None:
         """Remove both upload and output dirs for ``job_id``; raise on any failure.
 
-        Manual delete routes (``DELETE /jobs/{id}``, ``DELETE /jobs/batch/{id}``)
-        rely on this strict 'either both gone or both kept' contract: if a
-        filesystem error leaves files behind, the route MUST NOT delete the
-        DB row, otherwise the UI / audit log shows the job as deleted while
-        the storage is still occupied. Best-effort cleanup (which suits
-        the retention sweep) belongs in :meth:`delete_upload_files`, not
-        here.
+        Raising on failure lets the caller decide how to handle a partial
+        reclaim. The manual delete routes (``DELETE /jobs/{id}``,
+        ``DELETE /jobs/batch/{id}``) call this **after** an atomic, terminal-
+        gated row delete (row-first ordering, to close the delete/retry TOCTOU),
+        so a filesystem error here leaves orphaned files that the route logs for
+        manual/retention cleanup rather than a dangling DB row. Best-effort
+        cleanup that never raises (which suits the retention sweep) belongs in
+        :meth:`delete_upload_files`, not here.
         """
         removed: list[str] = []
         for base, label in ((self._upload_dir, "upload"), (self._output_dir, "output")):
