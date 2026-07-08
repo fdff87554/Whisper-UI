@@ -89,10 +89,14 @@ if TYPE_CHECKING:
 # success, 0 if the write was rejected because the caller's generation was
 # stale (the parent job has been retried under a new generation).
 #
-# Generation gating lives in three places that must agree on the
-# "writer is stale if its generation < central" rule. See
-# worker/pipeline_callbacks.py ``is_stale_callback`` and
-# worker/progress.py ``_LUA_TERMINAL_GENERATION_GATE``.
+# Generation gating lives in three places. Note the rule here is subtly
+# different from the other two: this HSET gate is an EQUALITY gate — it drops a
+# write unless the caller IS the current generation (``current ~= expected`` →
+# reject), and it ACCEPTS when no counter exists yet. The callback / terminal
+# gates (worker/pipeline_callbacks.py ``is_stale_callback`` and
+# worker/progress.py ``_LUA_TERMINAL_GENERATION_GATE``) use a ``<`` staleness
+# rule (reject only a strictly-older writer). The stage-output write is stricter
+# on purpose: only the exact owning attempt may mutate the shared context hash.
 #
 # KEYS[1] = context hash key (whisper:ctx:<parent>)
 # KEYS[2] = generation counter key (whisper:pipeline:<parent>:generation)

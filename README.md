@@ -118,10 +118,10 @@ Settings specific to this backend:
 Open <http://localhost:8080> in your browser.
 
 > **Production note:** the bundled Redis starts without authentication
-> when `REDIS_PASSWORD` is unset (the compose snippet only adds
-> `--requirepass` when the variable is non-empty). For any deployment
-> reachable beyond the local Docker network — even on a trusted LAN —
-> set `REDIS_PASSWORD` in `.env` before bringing the stack up.
+> when `REDIS_PASSWORD` is unset — compose always passes
+> `--requirepass "${REDIS_PASSWORD:-}"`, and an empty password means no auth.
+> For any deployment reachable beyond the local Docker network — even on a
+> trusted LAN — set `REDIS_PASSWORD` in `.env` before bringing the stack up.
 
 ### Pre-built Images
 
@@ -639,8 +639,12 @@ src/whisper_ui/
 core <- pipeline <- worker <- web
 core <- storage  <- worker <- web
 core <- export              <- web
-ui                          <- web
+ui               <- worker <- web
 ```
+
+`ui` holds shared UI strings (`ui/labels.py`); the worker imports them too
+(e.g. `worker/pipeline_callbacks.py` uses the per-stage failure labels), so
+`ui` sits above `worker`, not only `web`.
 
 ## Troubleshooting
 
