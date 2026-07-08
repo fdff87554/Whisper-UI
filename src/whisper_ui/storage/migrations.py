@@ -94,6 +94,13 @@ _MIGRATIONS: list[str] = [
     # write-light table; high-leverage as job history grows.
     "CREATE INDEX IF NOT EXISTS idx_jobs_status_updated_at ON jobs(status, updated_at)",
     "CREATE INDEX IF NOT EXISTS idx_jobs_batch_id ON jobs(batch_id)",
+    # The polled per-user jobs list (list_jobs_filtered) runs
+    # ``WHERE owner_id = ? [AND status = ?] ORDER BY created_at DESC`` every few
+    # seconds. Without a created_at index SQLite range-scans + sorts the whole
+    # owner's history on each poll; (owner_id, created_at) lets it satisfy the
+    # equality filter and the ordering from the index. idx_jobs_status_updated_at
+    # cannot serve this — its sort key is updated_at, not created_at.
+    "CREATE INDEX IF NOT EXISTS idx_jobs_owner_created_at ON jobs(owner_id, created_at)",
 ]
 
 

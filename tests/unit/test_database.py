@@ -429,6 +429,30 @@ def test_hot_path_indexes_are_created(tmp_path):
 
     assert "idx_jobs_status_updated_at" in names
     assert "idx_jobs_batch_id" in names
+    assert "idx_jobs_owner_created_at" in names
+
+
+def test_jobs_list_query_uses_created_at_index(tmp_path):
+    """The per-user list query (owner filter + created_at ordering) must be
+    served by an index, not a full scan + sort of the owner's history."""
+    import sqlite3 as _sqlite3
+
+    from whisper_ui.storage import migrations
+
+    conn = _sqlite3.connect(tmp_path / "plan.db")
+    try:
+        migrations.init_db(conn)
+        plan = conn.execute(
+            "EXPLAIN QUERY PLAN SELECT * FROM jobs WHERE owner_id = ? ORDER BY created_at DESC LIMIT ?",
+            (1, 20),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    plan_text = " ".join(str(row) for row in plan)
+    assert "idx_jobs_owner_created_at" in plan_text
+    # The ordering must come from the index, not a temp b-tree sort.
+    assert "USE TEMP B-TREE FOR ORDER BY" not in plan_text
 
 
 def test_has_active_jobs_empty(db: JobDatabase):
