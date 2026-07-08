@@ -26,6 +26,19 @@ class Settings(BaseSettings):
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
+    # Socket timeouts for the web/worker Redis clients built by
+    # ``core.redis_client.create_redis``. Without these, a Redis host that
+    # accepts the connection but then goes silent (kernel freeze, firewall
+    # drop, network partition) blocks the caller's recv indefinitely — the web
+    # event loop or a worker would hang instead of raising RedisError and
+    # taking the existing graceful-degradation path. Seconds; 0 disables the
+    # bound (legacy blocking behaviour). These do not apply to the RQ worker
+    # loop's own connection (see core/redis_client.py).
+    redis_socket_timeout: int = 10
+    redis_socket_connect_timeout: int = 5
+    # PING an idle pooled connection after this many seconds so a half-open
+    # connection surfaces as an error before the next command blocks on it.
+    redis_health_check_interval: int = 30
 
     # Storage
     database_path: Path = Field(default=_PROJECT_ROOT / "data" / "db" / "whisper_ui.db")
@@ -321,6 +334,12 @@ class Settings(BaseSettings):
             raise ValueError(f"job_timeout_audio_multiplier must be > 0, got {self.job_timeout_audio_multiplier}")
         if self.stale_job_buffer < 0:
             raise ValueError(f"stale_job_buffer must be >= 0, got {self.stale_job_buffer}")
+        if self.redis_socket_timeout < 0:
+            raise ValueError(f"redis_socket_timeout must be >= 0, got {self.redis_socket_timeout}")
+        if self.redis_socket_connect_timeout < 0:
+            raise ValueError(f"redis_socket_connect_timeout must be >= 0, got {self.redis_socket_connect_timeout}")
+        if self.redis_health_check_interval < 0:
+            raise ValueError(f"redis_health_check_interval must be >= 0, got {self.redis_health_check_interval}")
         if self.diarize_heartbeat_interval < 0:
             raise ValueError(f"diarize_heartbeat_interval must be >= 0, got {self.diarize_heartbeat_interval}")
         # Redis progress keys must outlive the longest possible job run,

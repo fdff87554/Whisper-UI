@@ -138,11 +138,11 @@ def _run_stale_recovery(db_path, redis, timeout_seconds: int, error_message: str
 async def lifespan(app: FastAPI):
     from datetime import UTC, datetime, timedelta
 
-    from redis import Redis
     from redis.exceptions import RedisError
 
     from whisper_ui.core.config import get_settings
     from whisper_ui.core.constants import STALE_JOB_CHECK_INTERVAL
+    from whisper_ui.core.redis_client import create_redis
     from whisper_ui.storage.database import JobDatabase
     from whisper_ui.storage.filestore import FileStore
     from whisper_ui.ui.labels import JOBS_STALE_ERROR
@@ -151,7 +151,7 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.db = JobDatabase(settings.database_path)
     app.state.filestore = FileStore(settings.upload_dir, settings.output_dir)
-    app.state.redis = Redis.from_url(settings.redis_url)
+    app.state.redis = create_redis(settings)
     try:
         app.state.redis.ping()
     except RedisError:

@@ -22,19 +22,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from redis import Redis
-
 from whisper_ui.core.config import get_settings
 from whisper_ui.core.constants import (
     PROGRESS_WRITE_MIN_DELTA,
     PROGRESS_WRITE_MIN_INTERVAL_SEC,
 )
+from whisper_ui.core.redis_client import create_redis
 from whisper_ui.storage.database import JobDatabase
 from whisper_ui.storage.filestore import FileStore
 from whisper_ui.worker.progress import RedisProgressReporter
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
+
+    from redis import Redis
 
     from whisper_ui.core.config import Settings
     from whisper_ui.core.models import Job
@@ -77,7 +78,7 @@ def build_worker_runtime(job_id: str, *, generation: int | None = None) -> Itera
         from whisper_ui.core.device import configure_torch_for_rocm
 
         configure_torch_for_rocm()
-    redis = Redis.from_url(settings.redis_url)
+    redis = create_redis(settings)
     reporter = RedisProgressReporter(
         redis,
         job_id,
