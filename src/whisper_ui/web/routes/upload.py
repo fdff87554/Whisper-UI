@@ -40,7 +40,7 @@ from whisper_ui.web.playlist import (
     PlaylistUnavailableError,
     expand_playlist,
 )
-from whisper_ui.web.validation import clamp_num_speakers
+from whisper_ui.web.validation import clamp_num_speakers, mark_enqueue_failed, validate_upload_options
 from whisper_ui.worker.pipeline_dispatcher import enqueue_pipeline
 
 _READ_CHUNK_SIZE = 1024 * 1024  # 1 MB
@@ -189,12 +189,13 @@ async def upload_submit(
     htmx = _is_htmx(request)
 
     # Server-side validation of select inputs
-    if language not in LANGUAGE_CHOICES:
-        msg = ui_labels.UPLOAD_INVALID_LANGUAGE.format(value=language)
-        return _error_redirect_or_fragment(request, f"/upload?error=invalid_language&value={quote(language)}", msg)
-    if model_name not in WHISPER_MODELS:
-        msg = ui_labels.UPLOAD_INVALID_MODEL.format(value=model_name)
-        return _error_redirect_or_fragment(request, f"/upload?error=invalid_model&value={quote(model_name)}", msg)
+    option_error = validate_upload_options(language, model_name)
+    if option_error:
+        return _error_redirect_or_fragment(
+            request,
+            f"/upload?error={option_error.error_code}&value={quote(option_error.value)}",
+            option_error.message,
+        )
 
     # Distinguish "no file selected" from "unsupported format"
     has_any_files = files and any(f.filename for f in files)
@@ -318,10 +319,7 @@ async def upload_submit(
             await asyncio.to_thread(enqueue_pipeline, job, redis=redis, settings=settings, filestore=filestore)
             submitted_count += 1
         except Exception:
-            logger.exception("Failed to enqueue job %s", job.id)
-            job.status = JobStatus.FAILED
-            job.error = ui_labels.UPLOAD_ENQUEUE_FAILED
-            db.update_job(job)
+            mark_enqueue_failed(job, db)
             failed_count += 1
 
     logger.info(
@@ -365,12 +363,13 @@ async def upload_url_submit(
 ):
     htmx = _is_htmx(request)
 
-    if language not in LANGUAGE_CHOICES:
-        msg = ui_labels.UPLOAD_INVALID_LANGUAGE.format(value=language)
-        return _error_redirect_or_fragment(request, f"/upload?error=invalid_language&value={quote(language)}", msg)
-    if model_name not in WHISPER_MODELS:
-        msg = ui_labels.UPLOAD_INVALID_MODEL.format(value=model_name)
-        return _error_redirect_or_fragment(request, f"/upload?error=invalid_model&value={quote(model_name)}", msg)
+    option_error = validate_upload_options(language, model_name)
+    if option_error:
+        return _error_redirect_or_fragment(
+            request,
+            f"/upload?error={option_error.error_code}&value={quote(option_error.value)}",
+            option_error.message,
+        )
 
     # Parse textarea: split by newlines, strip whitespace, filter empty lines
     raw_lines = url.replace("\r\n", "\n").split("\n")
@@ -515,10 +514,7 @@ async def upload_url_submit(
             await asyncio.to_thread(enqueue_pipeline, job, redis=redis, settings=settings, filestore=filestore)
             submitted_count += 1
         except Exception:
-            logger.exception("Failed to enqueue URL job %s", job.id)
-            job.status = JobStatus.FAILED
-            job.error = ui_labels.UPLOAD_ENQUEUE_FAILED
-            db.update_job(job)
+            mark_enqueue_failed(job, db)
             failed_count += 1
 
     logger.info(

@@ -27,7 +27,13 @@ from whisper_ui.web.deps import (
     make_content_disposition,
     templates,
 )
-from whisper_ui.web.validation import clamp_num_speakers, normalize_status_filter, validate_hex_id
+from whisper_ui.web.validation import (
+    clamp_num_speakers,
+    mark_enqueue_failed,
+    normalize_status_filter,
+    validate_hex_id,
+    validate_upload_options,
+)
 from whisper_ui.worker.pipeline_dispatcher import enqueue_pipeline
 from whisper_ui.worker.progress import RedisProgressReporter
 
@@ -194,10 +200,7 @@ async def _reset_and_enqueue_retry(job: Job, db, redis, settings, filestore) -> 
     try:
         await asyncio.to_thread(enqueue_pipeline, job, redis=redis, settings=settings, filestore=filestore)
     except Exception:
-        logger.exception("Failed to enqueue retry for job %s", job.id)
-        job.status = JobStatus.FAILED
-        job.error = ui_labels.UPLOAD_ENQUEUE_FAILED
-        db.update_job(job)
+        mark_enqueue_failed(job, db)
         return False
     return True
 
@@ -391,12 +394,11 @@ async def re_transcribe_job(
     if src is None or src.status != JobStatus.COMPLETED:
         return Response(status_code=404)
 
-    # escape(): these labels reflect the raw form value back in a text/html
+    # escape(): the label reflects the raw form value back in a text/html
     # response, same convention as upload.py's _htmx_error.
-    if language not in LANGUAGE_CHOICES:
-        return HTMLResponse(escape(ui_labels.UPLOAD_INVALID_LANGUAGE.format(value=language)), status_code=400)
-    if model_name not in WHISPER_MODELS:
-        return HTMLResponse(escape(ui_labels.UPLOAD_INVALID_MODEL.format(value=model_name)), status_code=400)
+    option_error = validate_upload_options(language, model_name)
+    if option_error:
+        return HTMLResponse(escape(option_error.message), status_code=400)
 
     # Flat chain: every version points at the original root so grouping is a
     # single lookup. Re-transcribing a version re-roots to the same source.
@@ -453,10 +455,7 @@ async def re_transcribe_job(
             language,
         )
     except Exception:
-        logger.exception("Failed to enqueue re-transcribe job %s", new_job.id)
-        new_job.status = JobStatus.FAILED
-        new_job.error = ui_labels.UPLOAD_ENQUEUE_FAILED
-        db.update_job(new_job)
+        mark_enqueue_failed(new_job, db)
 
     return Response(status_code=204, headers={"HX-Trigger": "refreshJobList"})
 
