@@ -1265,6 +1265,34 @@ class TestUploadPost:
         )
         assert flash_messages(page.text) == [expected]
 
+    def test_upload_skips_file_when_write_fails_but_submits_valid_ones(self, client, db, app):
+        """A disk write failure on one file degrades to a per-file skip (like
+        the content/size checks), not a 500 that aborts the whole batch and
+        strands the already-queued files."""
+        calls = {"n": 0}
+
+        async def _fake_stream(uploaded_file, dest, max_size):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise OSError("disk full")
+            dest.write_bytes(b"ID3 fake audio")
+            return True
+
+        files = [
+            ("files", ("good.mp3", b"ID3 good audio", "audio/mpeg")),
+            ("files", ("bad.mp3", b"ID3 also audio", "audio/mpeg")),
+        ]
+        with (
+            patch("whisper_ui.web.routes.upload.enqueue_pipeline") as mock_enqueue,
+            patch("whisper_ui.web.routes.upload._stream_to_file", side_effect=_fake_stream),
+        ):
+            resp = self._upload(client, files=files)
+
+        assert resp.status_code == 303  # success path, not a 500
+        assert mock_enqueue.call_count == 1
+        jobs = list_jobs(db)
+        assert len(jobs) == 1 and jobs[0].filename == "good.mp3"
+
     def test_upload_clamps_diarization_and_llm_when_unavailable(self, client, db, app):
         # Force neither hf_token nor ollama_base_url, so both opt-in flags must
         # be clamped to False at persistence even when posted true.

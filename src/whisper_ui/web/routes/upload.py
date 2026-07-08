@@ -264,7 +264,20 @@ async def upload_submit(
         )
 
         dest = filestore.prepare_upload_path(job.id, display_name)
-        within_limit = await _stream_to_file(uploaded_file, dest, max_size)
+        try:
+            within_limit = await _stream_to_file(uploaded_file, dest, max_size)
+        except OSError:
+            # Disk full / permission / I/O error while saving. Degrade to a
+            # per-file skip like the content and size checks above, instead of
+            # letting the OSError escape to a 500 that aborts the whole batch
+            # (leaving earlier files already queued and prompting a re-upload).
+            dest.unlink(missing_ok=True)
+            logger.error("upload skipped (write failed): user_id=%s filename=%r", user.id, display_name)
+            skipped_count += 1
+            if first_skip is None:
+                msg = ui_labels.UPLOAD_SAVE_FAILED.format(name=display_name)
+                first_skip = (f"/upload?error=save_failed&name={quote(display_name)}", msg)
+            continue
         if not within_limit:
             dest.unlink(missing_ok=True)
             limit_str = _format_size(max_size)
