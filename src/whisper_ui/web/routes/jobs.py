@@ -424,7 +424,7 @@ async def re_transcribe_job(
         # URL jobs always re-download: enqueue_pipeline prepends a download
         # stage whenever source_url is set, so there is no local media to
         # copy. Point filepath at the new job's own dir, like upload_url_submit.
-        new_job.filepath = str(filestore.prepare_upload_path(new_job.id, "_").parent)
+        new_job.filepath = str(filestore.prepare_upload_dir(new_job.id))
     else:
         # Copy from the source job's OWN upload dir (each version owns an
         # independent copy), not the root — so deleting any version never

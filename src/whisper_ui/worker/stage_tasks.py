@@ -360,7 +360,7 @@ def _seed_download_context(job: Job, runtime: WorkerRuntime, context: dict[str, 
     from a URL source.
     """
     context.setdefault("source_url", job.source_url or "")
-    download_dir = str(runtime.filestore.prepare_upload_path(job.id, "_").parent)
+    download_dir = str(runtime.filestore.prepare_upload_dir(job.id))
     context["download_dir"] = download_dir
     context["input_path"] = context.get("input_path", "")
     # Persist the seeded keys so DownloadStage running in this same task

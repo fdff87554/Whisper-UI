@@ -235,3 +235,10 @@ def test_delete_job_files_raises_on_filesystem_failure(filestore: FileStore, mon
 
     with pytest.raises(PermissionError):
         filestore.delete_job_files("job-fail")
+
+
+def test_prepare_upload_dir_creates_and_returns_directory(filestore: FileStore):
+    job_dir = filestore.prepare_upload_dir("jobdir1")
+    assert job_dir.is_dir()
+    # prepare_upload_path resolves to a file inside the same directory.
+    assert filestore.prepare_upload_path("jobdir1", "a.mp3").parent == job_dir

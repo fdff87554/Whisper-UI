@@ -497,7 +497,7 @@ async def upload_url_submit(
             owner_id=user.id,
         )
 
-        upload_dir = filestore.prepare_upload_path(job.id, "_").parent
+        upload_dir = filestore.prepare_upload_dir(job.id)
         job.filepath = str(upload_dir)
         job.status = JobStatus.QUEUED
         db.insert_job(job)

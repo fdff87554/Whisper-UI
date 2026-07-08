@@ -17,11 +17,20 @@ class FileStore:
         self._upload_dir.mkdir(parents=True, exist_ok=True)
         self._output_dir.mkdir(parents=True, exist_ok=True)
 
-    def prepare_upload_path(self, job_id: str, filename: str) -> Path:
-        """Create the upload directory for *job_id* and return the destination path."""
+    def prepare_upload_dir(self, job_id: str) -> Path:
+        """Create (if needed) and return the upload directory for *job_id*.
+
+        Callers that need the directory itself — the URL download stages write
+        ``video.<ext>`` into it — use this instead of the
+        ``prepare_upload_path(job_id, "_").parent`` sentinel idiom.
+        """
         job_dir = self._upload_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
-        return job_dir / Path(filename).name
+        return job_dir
+
+    def prepare_upload_path(self, job_id: str, filename: str) -> Path:
+        """Create the upload directory for *job_id* and return the destination path."""
+        return self.prepare_upload_dir(job_id) / Path(filename).name
 
     def copy_source_for_new_job(self, src_job_id: str, src_filename: str, new_job_id: str) -> Path:
         """Copy ``src_job_id``'s uploaded audio into ``new_job_id``'s upload dir.

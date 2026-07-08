@@ -264,7 +264,7 @@ def enqueue_pipeline(
     }
     if job.source_url:
         initial_context["source_url"] = job.source_url
-        initial_context["download_dir"] = str(filestore.prepare_upload_path(job.id, "_").parent)
+        initial_context["download_dir"] = str(filestore.prepare_upload_dir(job.id))
         initial_context["input_path"] = ""
     else:
         initial_context["input_path"] = job.filepath or ""
