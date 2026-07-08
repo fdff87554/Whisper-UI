@@ -10,7 +10,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [2.20.0] - 2026-07-08
 
 Pre-release hardening pass: resilience, security, and correctness fixes with
-no user-facing feature changes. One additive migration (`idx_jobs_created_at`).
+no user-facing feature changes. One additive migration (`idx_jobs_owner_created_at`).
 
 ### Security
 
@@ -50,7 +50,7 @@ no user-facing feature changes. One additive migration (`idx_jobs_created_at`).
 - Logging level/format (`LOG_LEVEL`/`LOG_JSON`) now honoured from `.env` via
   Settings (were silently ignored there before).
 - Blocking work (single-file export, argon2 verify, upload writes) moved off
-  the async event loop; added `idx_jobs_created_at` for the polled job list.
+  the async event loop; added `idx_jobs_owner_created_at` for the polled job list.
 - Pinned whisperx / CPU torch / compose sidecar image versions; deduplicated
   upload-option validation, the enqueue-failure tail, and the FileStore
   upload-dir idiom.
