@@ -120,6 +120,15 @@ class Settings(BaseSettings):
     # proxy resets these headers — otherwise a hostile client can spoof
     # them to evade rate limits and CSRF.
     trust_proxy_headers: bool = False
+    # Number of trusted reverse proxies in front of the app. When
+    # trust_proxy_headers is on, the client IP is read as the Nth entry from the
+    # RIGHT of X-Forwarded-For — the rightmost entries are appended by our own
+    # trusted proxies, so the (N)th-from-right is the real client while anything
+    # further left is client-controlled and must NOT be trusted for rate-limit
+    # bucketing. Default 1 = a single reverse proxy directly in front. Taking
+    # the left-most entry (the old behaviour) let a client spoof X-Forwarded-For
+    # to a fresh value per request and evade the per-IP limit entirely.
+    trusted_proxy_count: int = 1
     # Allow open self-service registration once the first admin exists. The
     # initial bootstrap account is always allowed (an admin must be created to
     # manage the instance); when this is False every later /register attempt
@@ -340,6 +349,8 @@ class Settings(BaseSettings):
             raise ValueError(f"redis_socket_connect_timeout must be >= 0, got {self.redis_socket_connect_timeout}")
         if self.redis_health_check_interval < 0:
             raise ValueError(f"redis_health_check_interval must be >= 0, got {self.redis_health_check_interval}")
+        if self.trusted_proxy_count < 1:
+            raise ValueError(f"trusted_proxy_count must be >= 1, got {self.trusted_proxy_count}")
         if self.diarize_heartbeat_interval < 0:
             raise ValueError(f"diarize_heartbeat_interval must be >= 0, got {self.diarize_heartbeat_interval}")
         # Redis progress keys must outlive the longest possible job run,

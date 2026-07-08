@@ -172,9 +172,10 @@ def test_client_ip_uses_request_client_when_proxy_headers_not_trusted(caplog):
         caplog.handler.removeFilter(caplog.handler.filters[-1])
 
 
-def test_client_ip_uses_leftmost_xff_when_proxy_headers_trusted(caplog):
-    """Reverse-proxy deployment opted in: XFF left-most wins so the log
-    records the original client, not the proxy's inner-network IP.
+def test_client_ip_uses_rightmost_trusted_xff_hop_when_proxy_headers_trusted(caplog):
+    """Reverse-proxy deployment opted in with one trusted hop: the RIGHT-most
+    XFF entry (appended by our proxy) is logged, not the spoofable left-most
+    one — so the access log records the address our proxy actually saw.
     """
     import logging
 
@@ -187,7 +188,7 @@ def test_client_ip_uses_leftmost_xff_when_proxy_headers_trusted(caplog):
         with caplog.at_level(logging.INFO):
             client.get("/ok", headers={"X-Forwarded-For": "9.9.9.9, 10.0.0.1"})
         access = next(r for r in caplog.records if r.name == "whisper_ui.web.access")
-        assert "ip=9.9.9.9" in access.getMessage()
+        assert "ip=10.0.0.1" in access.getMessage()
     finally:
         caplog.handler.removeFilter(caplog.handler.filters[-1])
 

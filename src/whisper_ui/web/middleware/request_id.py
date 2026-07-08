@@ -73,11 +73,11 @@ def _normalise_request_id(raw: str | None) -> str:
 def _client_ip(request: Request) -> str:
     """Best-effort client IP for the access log.
 
-    Mirrors :func:`whisper_ui.web.routes.auth_routes._client_ip` —
-    when ``settings.trust_proxy_headers`` is True (operator opt-in),
-    the **left-most** ``X-Forwarded-For`` entry wins, which is the
-    convention for "original client IP" when a chain of proxies adds
-    itself to the right. Otherwise fall back to ``request.client.host``.
+    Mirrors :func:`whisper_ui.web.routes.auth_routes.client_ip_from_request` —
+    when ``settings.trust_proxy_headers`` is True (operator opt-in), the client
+    IP is the ``trusted_proxy_count``-th entry from the **RIGHT** of
+    ``X-Forwarded-For`` (the entries our own trusted proxies appended), not the
+    spoofable left-most one. Otherwise fall back to ``request.client.host``.
 
     Returns ``'-'`` (not ``'unknown'`` like the auth_routes mirror) so
     the access log line stays formatted consistently with the
@@ -91,11 +91,10 @@ def _client_ip(request: Request) -> str:
     """
     settings = getattr(request.app.state, "settings", None)
     if settings is not None and getattr(settings, "trust_proxy_headers", False):
-        xff = request.headers.get("x-forwarded-for", "")
-        if xff:
-            first = xff.split(",")[0].strip()
-            if first:
-                return first
+        hops = getattr(settings, "trusted_proxy_count", 1)
+        parts = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+        if len(parts) >= hops:
+            return parts[-hops]
     client = request.client
     return client.host if client is not None else "-"
 

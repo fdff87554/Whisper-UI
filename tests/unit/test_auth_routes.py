@@ -575,18 +575,23 @@ def test_client_ip_ignores_xff_when_proxy_headers_untrusted(app, db, test_user):
     assert any("testclient" in k or "127" in k or "unknown" in k for k in keys), keys
 
 
-def test_client_ip_uses_xff_when_proxy_headers_trusted(app, db, test_user, monkeypatch):
-    """With TRUST_PROXY_HEADERS=true the left-most XFF entry becomes the
-    bucket key, so each real client behind a proxy gets their own quota.
+def test_client_ip_uses_rightmost_trusted_xff_hop_when_proxy_headers_trusted(app, db, test_user, monkeypatch):
+    """With TRUST_PROXY_HEADERS=true and a single trusted proxy, the client IP
+    is the RIGHT-most XFF entry (the one our proxy appended), not the
+    attacker-controlled left-most one. A spoofed prefix must not create its own
+    bucket, so per-IP rate limiting cannot be evaded by rotating XFF values.
     """
     monkeypatch.setattr(app.state.settings, "trust_proxy_headers", True)
+    monkeypatch.setattr(app.state.settings, "trusted_proxy_count", 1)
     client = _anon_client(app)
+    # Attacker prepends a forged 1.2.3.4; our trusted proxy appends the real 10.0.0.1.
     client.headers["X-Forwarded-For"] = "1.2.3.4, 10.0.0.1"
     redis = app.state.redis
 
     client.post("/login", data={"username": "alice", "password": "wrong"})
 
-    assert int(redis.get("auth:rl:ip:1.2.3.4") or 0) == 1
+    assert int(redis.get("auth:rl:ip:10.0.0.1") or 0) == 1
+    assert redis.get("auth:rl:ip:1.2.3.4") is None, "forged left-most XFF must not get its own bucket"
 
 
 def test_change_password_invalidates_existing_session(app, db, test_user):

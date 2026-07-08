@@ -113,26 +113,28 @@ def _login_error_message(error: str, lockout_seconds: int = 0) -> str | None:
     return None
 
 
-def _client_ip(request: Request, *, trust_proxy_headers: bool) -> str:
+def client_ip_from_request(request: Request, *, trust_proxy_headers: bool, trusted_proxy_count: int = 1) -> str:
     """Best-effort client IP for rate-limit bucketing.
 
-    When ``trust_proxy_headers`` is True (operator opt-in) the **left-most**
-    entry of the ``X-Forwarded-For`` header wins — that is the convention
-    for "original client IP" when a chain of proxies adds itself to the
-    right. The opt-in flag is critical: blindly trusting XFF lets a hostile
-    client spoof any IP they like and trivially evade the rate limit.
+    When ``trust_proxy_headers`` is True (operator opt-in), the client IP is the
+    ``trusted_proxy_count``-th entry from the **RIGHT** of ``X-Forwarded-For``.
+    The rightmost entries are the ones our own trusted proxies appended (each
+    records the peer it received the connection from), so the Nth-from-right is
+    the real client; everything further left is attacker-controlled. Reading the
+    left-most entry — the old behaviour — let a client spoof ``X-Forwarded-For``
+    to a fresh value per request and evade the per-IP rate limit entirely
+    (append-mode proxies such as nginx ``$proxy_add_x_forwarded_for`` keep the
+    forged prefix). If the header has fewer entries than the configured trusted
+    hop count, the header is not trusted and we fall back to the direct peer.
 
-    Falls back to ``request.client.host`` otherwise, and to the literal
-    string ``"unknown"`` when even that is unavailable (test clients,
-    unusual ASGI servers) so the rate-limit code can still bucket under
-    a stable key instead of crashing.
+    Falls back to ``request.client.host`` when not trusting proxies, and to the
+    literal ``"unknown"`` when even that is unavailable (test clients, unusual
+    ASGI servers) so the rate-limit code can still bucket under a stable key.
     """
     if trust_proxy_headers:
-        xff = request.headers.get("x-forwarded-for", "")
-        if xff:
-            first = xff.split(",")[0].strip()
-            if first:
-                return first
+        parts = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+        if len(parts) >= trusted_proxy_count:
+            return parts[-trusted_proxy_count]
     return request.client.host if request.client else "unknown"
 
 
@@ -163,7 +165,11 @@ async def login_submit(
     threshold we short-circuit without doing any DB / argon2 work, so
     locked accounts cannot be used as a CPU-burn vector.
     """
-    ip = _client_ip(request, trust_proxy_headers=settings.trust_proxy_headers)
+    ip = client_ip_from_request(
+        request,
+        trust_proxy_headers=settings.trust_proxy_headers,
+        trusted_proxy_count=settings.trusted_proxy_count,
+    )
     if rate_limit.is_locked(
         redis,
         username=username,
@@ -306,7 +312,11 @@ async def register_submit(
     # Rate-limit open registration per IP so account creation and the
     # username-taken oracle are bounded the way login attempts are. Bootstrap
     # is never throttled — the first admin must be creatable.
-    ip = _client_ip(request, trust_proxy_headers=settings.trust_proxy_headers)
+    ip = client_ip_from_request(
+        request,
+        trust_proxy_headers=settings.trust_proxy_headers,
+        trusted_proxy_count=settings.trusted_proxy_count,
+    )
     if not bootstrap and rate_limit.register_is_locked(
         redis, ip=ip, max_attempts=settings.max_register_attempts_per_ip
     ):
