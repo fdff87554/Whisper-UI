@@ -269,8 +269,10 @@ async def register_page(request: Request, db: DbDep, settings: SettingsDep, erro
 
 
 def _register_error_message(error: str) -> str | None:
-    if error == "username_taken":
-        return ui_labels.AUTH_USERNAME_TAKEN
+    if error == "unavailable":
+        # Generic: does not distinguish "username taken" from a transient error,
+        # so public registration cannot be used to enumerate existing accounts.
+        return ui_labels.AUTH_REGISTER_UNAVAILABLE
     if error == "username_invalid":
         return ui_labels.AUTH_USERNAME_INVALID
     if error == "password_short":
@@ -341,8 +343,11 @@ async def register_submit(
             is_admin=bootstrap,
         )
     except sqlite3.IntegrityError:
+        # Log the real reason for operators, but show the user a generic
+        # message (see _register_error_message) so /register does not confirm
+        # whether the account exists.
         logger.info("register failed: username %s already taken", mask_username(username))
-        return _redirect_after_auth(request, "/register?error=username_taken")
+        return _redirect_after_auth(request, "/register?error=unavailable")
 
     # Flip the bootstrap latch immediately so subsequent requests skip the
     # admin-count query.

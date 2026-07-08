@@ -241,7 +241,12 @@ AUTH_PASSWORD_SHOW = "顯示密碼"
 AUTH_PASSWORD_HIDE = "隱藏密碼"
 AUTH_LOGIN_FAILED = "帳號或密碼錯誤，請再試一次。"
 AUTH_ACCOUNT_INACTIVE = "此帳號已停用，請聯絡管理員。"
+# Admin-facing (an authorised admin may be told a name is taken).
 AUTH_USERNAME_TAKEN = "此使用者名稱已被使用，請選擇另一個。"
+# Public self-service registration: deliberately does NOT confirm whether the
+# username exists, so /register is not a username-enumeration oracle. The
+# server log still records the real reason for operators.
+AUTH_REGISTER_UNAVAILABLE = "無法完成註冊，請改用其他名稱或稍後再試。"
 AUTH_USERNAME_INVALID = "使用者名稱格式無效（3-32 字元，僅英文字母、數字、底線與連字號）。"
 AUTH_PASSWORD_TOO_SHORT = "密碼長度至少 8 個字元。"
 AUTH_LOGIN_LINK = "已有帳號？前往登入"

@@ -365,7 +365,10 @@ def test_register_second_account_is_not_admin(app, db, test_admin):
     assert created.is_admin is False
 
 
-def test_register_duplicate_username_returns_error(app, db, test_user, test_admin):
+def test_register_duplicate_username_returns_generic_error(app, db, test_user, test_admin):
+    """Registering a taken username must NOT confirm the account exists: the
+    redirect carries a generic 'unavailable' code, not 'username_taken', so
+    /register is not an enumeration oracle."""
     client = _anon_client(app)
 
     resp = client.post(
@@ -374,7 +377,8 @@ def test_register_duplicate_username_returns_error(app, db, test_user, test_admi
     )
 
     assert resp.status_code == 302
-    assert resp.headers["location"].startswith("/register?error=username_taken")
+    assert resp.headers["location"].startswith("/register?error=unavailable")
+    assert "username_taken" not in resp.headers["location"]
 
 
 def test_register_invalid_username_pattern_returns_error(app, test_admin):
