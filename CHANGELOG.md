@@ -7,6 +7,53 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+Pre-release hardening pass: resilience, security, and correctness fixes with
+no user-facing feature or schema changes. One additive migration
+(`idx_jobs_created_at`).
+
+### Security
+
+- Add a Content-Security-Policy (per-request nonce for inline scripts,
+  jsDelivr allowlist, `object-src 'none'`, `frame-ancestors`/`base-uri`/
+  `form-action 'self'`) and drop the uvicorn `Server` header.
+- Rate-limit / access-log client IP is now taken from the trusted proxy hop
+  (Nth-from-right of `X-Forwarded-For`, new `TRUSTED_PROXY_COUNT`) instead of
+  the spoofable left-most entry.
+- Public registration no longer confirms whether a username exists (generic
+  error), closing the enumeration oracle.
+- User-facing job errors are sanitised to a generic per-stage message; raw
+  exception text (ffmpeg/whisper stderr, paths) is logged server-side only.
+- Structured-log `extra` fields with sensitive names are redacted; the worker
+  passes `REDIS_URL` via `RQ_REDIS_URL` env instead of a world-readable argv.
+- Optional `METRICS_TOKEN` bearer auth for `/metrics`.
+- CI: third-party Actions pinned to commit SHAs, minimal workflow permissions,
+  and the `@claude` trigger gated to trusted authors.
+
+### Fixed
+
+- Redis clients get socket timeouts (new `REDIS_SOCKET_TIMEOUT` etc.) so a
+  silent Redis host can no longer hang the web loop or a worker indefinitely.
+- Auth rate limiting fails open on Redis errors instead of 500-ing login.
+- Progress DB mirror is best-effort and outage-safe: a SQLite error no longer
+  fails a running stage, and a Redis outage cannot let a stale writer overwrite
+  a COMPLETED row.
+- Jobs stranded in `QUEUED` are now recoverable by the liveness-aware reaper.
+- Retry is idempotent and delete is race-safe (atomic claim / conditional
+  delete), preventing duplicate pipelines and delete/retry TOCTOU.
+- `finalize_success` no longer resurrects a FAILED job.
+- Malformed URLs raise domain errors (no more bare-`ValueError` 500s); a
+  per-file upload write error degrades to a skip instead of failing the batch.
+
+### Changed
+
+- Logging level/format (`LOG_LEVEL`/`LOG_JSON`) now honoured from `.env` via
+  Settings (were silently ignored there before).
+- Blocking work (single-file export, argon2 verify, upload writes) moved off
+  the async event loop; added `idx_jobs_created_at` for the polled job list.
+- Pinned whisperx / CPU torch / compose sidecar image versions; deduplicated
+  upload-option validation, the enqueue-failure tail, and the FileStore
+  upload-dir idiom.
+
 ## [2.17.0] - 2026-06-17
 
 UI alignment with the Whisper UI design system (non-destructive presentation
