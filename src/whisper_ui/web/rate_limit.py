@@ -29,6 +29,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from redis.exceptions import RedisError
+
 from whisper_ui.core.logging_setup import mask_username
 
 if TYPE_CHECKING:
@@ -36,6 +38,14 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+# Fail-open policy: when Redis is unavailable the rate limiter cannot make a
+# decision. Rather than 500 every login/registration (which would take the
+# whole auth surface down with the queue store), we log a WARNING and allow the
+# attempt through. Password verification (argon2) and the per-user/session
+# checks still apply, so a Redis outage degrades brute-force throttling, not
+# authentication itself. This matches the deployment's internal-network threat
+# model; operators who need fail-closed should monitor the WARNING below.
 
 
 def _user_key(username: str) -> str:
@@ -91,12 +101,21 @@ def check_and_increment(
     Returns the same boolean regardless of which dimension triggered so the
     caller cannot leak which counter is full.
     """
-    pipe = redis.pipeline()
-    pipe.incr(_user_key(username))
-    pipe.expire(_user_key(username), window_seconds, nx=True)
-    pipe.incr(_ip_key(ip))
-    pipe.expire(_ip_key(ip), window_seconds, nx=True)
-    user_count, _, ip_count, _ = pipe.execute()
+    try:
+        pipe = redis.pipeline()
+        pipe.incr(_user_key(username))
+        pipe.expire(_user_key(username), window_seconds, nx=True)
+        pipe.incr(_ip_key(ip))
+        pipe.expire(_ip_key(ip), window_seconds, nx=True)
+        user_count, _, ip_count, _ = pipe.execute()
+    except RedisError:
+        logger.warning(
+            "rate-limit unavailable (Redis error); failing open for username=%s ip=%s",
+            mask_username(username),
+            ip,
+            exc_info=True,
+        )
+        return False
     tripped = _describe_trip(
         user_count=user_count,
         ip_count=ip_count,
@@ -142,8 +161,17 @@ def is_locked(
     argon2 work, so a locked account does not pay verification cost on
     every probe. Counters are not modified.
     """
-    user_count = int(redis.get(_user_key(username)) or 0)
-    ip_count = int(redis.get(_ip_key(ip)) or 0)
+    try:
+        user_count = int(redis.get(_user_key(username)) or 0)
+        ip_count = int(redis.get(_ip_key(ip)) or 0)
+    except RedisError:
+        logger.warning(
+            "rate-limit lock check unavailable (Redis error); failing open for username=%s ip=%s",
+            mask_username(username),
+            ip,
+            exc_info=True,
+        )
+        return False
     locked = user_count >= max_user_attempts or ip_count >= max_ip_attempts
     if locked:
         logger.debug(
@@ -170,7 +198,11 @@ def register_is_locked(redis: Redis, *, ip: str, max_attempts: int) -> bool:
     Counters are not modified — the caller records the attempt separately so
     a probe that crosses the threshold is still counted.
     """
-    count = int(redis.get(_register_ip_key(ip)) or 0)
+    try:
+        count = int(redis.get(_register_ip_key(ip)) or 0)
+    except RedisError:
+        logger.warning("register rate-limit unavailable (Redis error); failing open for ip=%s", ip, exc_info=True)
+        return False
     locked = count >= max_attempts
     if locked:
         logger.debug("register rate-limit short-circuit: ip=%s count=%d/%d", ip, count, max_attempts)
@@ -183,10 +215,13 @@ def record_register_attempt(redis: Redis, *, ip: str, window_seconds: int) -> No
     Like :func:`check_and_increment`, the window is set with ``EXPIRE NX`` so
     it slides from the first attempt of a burst rather than each subsequent one.
     """
-    pipe = redis.pipeline()
-    pipe.incr(_register_ip_key(ip))
-    pipe.expire(_register_ip_key(ip), window_seconds, nx=True)
-    pipe.execute()
+    try:
+        pipe = redis.pipeline()
+        pipe.incr(_register_ip_key(ip))
+        pipe.expire(_register_ip_key(ip), window_seconds, nx=True)
+        pipe.execute()
+    except RedisError:
+        logger.warning("register attempt not recorded (Redis error); ip=%s", ip, exc_info=True)
 
 
 def reset_user(redis: Redis, username: str) -> None:
@@ -196,6 +231,10 @@ def reset_user(redis: Redis, username: str) -> None:
     one valid credential should not be able to launder their IP through
     that account to keep probing others.
     """
-    deleted = redis.delete(_user_key(username))
+    try:
+        deleted = redis.delete(_user_key(username))
+    except RedisError:
+        logger.warning("rate-limit per-user counter not cleared (Redis error); username=%r", username, exc_info=True)
+        return
     if deleted:
         logger.info("rate-limit per-user counter cleared on successful login: username=%r", username)
