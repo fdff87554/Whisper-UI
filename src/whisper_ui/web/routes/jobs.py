@@ -191,7 +191,11 @@ async def _reset_and_enqueue_retry(job: Job, db, redis, settings, filestore) -> 
     flipped back to FAILED with the shared enqueue-failure label.
     """
     retry_duration = await asyncio.to_thread(_probe_retry_duration, job)
-    if not await asyncio.to_thread(db.try_claim_retry, job.id, retry_duration):
+    # DB writes stay on the event-loop thread: app.state.db is a single shared
+    # SQLite connection that must not be touched from a worker thread (see the
+    # JobDatabase thread-safety contract). try_claim_retry is one fast atomic
+    # UPDATE, so it belongs on the loop like insert_job / update_job.
+    if not db.try_claim_retry(job.id, retry_duration):
         logger.info("retry skipped for job %s: no longer FAILED (already retried?)", job.id)
         return False
     # Reflect the claimed state onto the in-memory snapshot for enqueue + logging.
@@ -308,7 +312,7 @@ async def bulk_job_action(
                 continue
             # Row-first conditional delete closes the delete/retry race (see the
             # single-delete route); a job a retry just claimed is left alone.
-            if not await asyncio.to_thread(db.delete_terminal_job, job.id):
+            if not db.delete_terminal_job(job.id):
                 failed += 1
                 continue
             try:
@@ -480,7 +484,7 @@ async def delete_job(job_id: str, db: DbDep, filestore: FileStoreDep, redis: Red
     # under a freshly-requeued attempt. A file-reclaim failure after the row is
     # gone leaves orphaned files (logged for manual/retention cleanup) — the
     # deliberate trade of a rare orphan over acting on a live job.
-    if not await asyncio.to_thread(db.delete_terminal_job, job.id):
+    if not db.delete_terminal_job(job.id):
         return Response(status_code=409)
     try:
         await asyncio.to_thread(filestore.delete_job_files, job.id)
@@ -548,7 +552,7 @@ async def delete_batch(batch_id: str, db: DbDep, filestore: FileStoreDep, redis:
             continue
         # Row-first conditional delete closes the delete/retry race; a job a
         # retry claimed in the window is spared. See the single-delete route.
-        if not await asyncio.to_thread(db.delete_terminal_job, job.id):
+        if not db.delete_terminal_job(job.id):
             failed += 1
             continue
         try:

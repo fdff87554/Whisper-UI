@@ -247,6 +247,21 @@ class TestUploadRoutes:
 
 
 class TestJobsRoutes:
+    def test_job_routes_do_not_offload_db_calls_to_threads(self):
+        """DB thread-safety contract: app.state.db is one shared SQLite
+        connection used only from the event-loop thread, so the atomic
+        retry/delete helpers must run on the loop — never inside
+        asyncio.to_thread, which would put a second thread on that connection.
+        Guards against reintroducing the to_thread(db.*) pattern.
+        """
+        import inspect
+        import re
+
+        from whisper_ui.web.routes import jobs as jobs_module
+
+        offloaded = re.findall(r"to_thread\(\s*db\.\w+", inspect.getsource(jobs_module))
+        assert offloaded == [], f"DB calls must stay on the event loop, found offloaded: {offloaded}"
+
     def test_jobs_page_empty(self, client):
         resp = client.get("/jobs")
         assert resp.status_code == 200
