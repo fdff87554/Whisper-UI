@@ -433,6 +433,40 @@ class JobDatabase:
         self._conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
         self._conn.commit()
 
+    def try_claim_retry(self, job_id: str, duration: float | None) -> bool:
+        """Atomically transition a FAILED job to QUEUED for a retry.
+
+        Returns True when this call performed the transition. A concurrent
+        double-click, or a bulk retry racing a single retry, sees False and must
+        not enqueue — otherwise two pipelines run for one job, wasting a full
+        GPU pass and letting two attempts write the same intermediate files. The
+        progress/error/result reset happens in the same statement so the claim
+        and the reset are one atomic write gated on ``status = 'failed'``.
+        """
+        cursor = self._conn.execute(
+            "UPDATE jobs SET status = ?, error = NULL, progress = 0.0, progress_message = '', "
+            "result_path = NULL, duration = ?, updated_at = ? WHERE id = ? AND status = ?",
+            (JobStatus.QUEUED.value, duration, datetime.now(UTC).isoformat(), job_id, JobStatus.FAILED.value),
+        )
+        self._conn.commit()
+        return cursor.rowcount == 1
+
+    def delete_terminal_job(self, job_id: str) -> bool:
+        """Delete a job row only while it is still terminal (COMPLETED/FAILED).
+
+        Returns True when a row was deleted. The terminal guard makes delete
+        mutually exclusive with :meth:`try_claim_retry`: if a retry wins a
+        concurrent race the status is QUEUED, this DELETE matches nothing, and
+        the caller reports "not deletable" instead of tearing the row (and, in
+        the route, the files) out from under a freshly-requeued attempt.
+        """
+        cursor = self._conn.execute(
+            "DELETE FROM jobs WHERE id = ? AND status IN (?, ?)",
+            (job_id, JobStatus.COMPLETED.value, JobStatus.FAILED.value),
+        )
+        self._conn.commit()
+        return cursor.rowcount == 1
+
     def list_terminal_job_ids_older_than(
         self,
         threshold_iso: str,

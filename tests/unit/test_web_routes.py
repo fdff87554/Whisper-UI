@@ -528,6 +528,22 @@ class TestJobsRoutes:
         assert retried_job.id == job.id
         assert retried_job.duration == 3600.0
 
+    def test_retry_is_idempotent_second_call_does_not_reenqueue(self, client, db):
+        """A repeated retry must not build a second pipeline: the first call
+        claims FAILED -> QUEUED, the second finds the job no longer FAILED (404)
+        and enqueues nothing. Enqueue happens exactly once."""
+        job = _create_failed_job(db)
+        with (
+            patch("whisper_ui.web.routes.jobs.enqueue_pipeline") as mock_enqueue,
+            patch("whisper_ui.web.routes.jobs.get_audio_duration_seconds", return_value=None),
+        ):
+            first = client.post(f"/jobs/{job.id}/retry")
+            second = client.post(f"/jobs/{job.id}/retry")
+
+        assert first.status_code == 204
+        assert second.status_code == 404
+        mock_enqueue.assert_called_once()
+
     def test_retry_file_job_with_unknown_duration_passes_none(self, client, db):
         job = _create_failed_job(db)
         with (
@@ -897,11 +913,11 @@ class TestJobsRoutes:
         assert f"toggle('{completed.id}', 'completed')" in resp.text
         assert f"toggle('{failed.id}', 'failed')" in resp.text
 
-    def test_delete_job_returns_500_and_preserves_db_row_when_filestore_fails(self, client, db, filestore, caplog):
-        """PR #53 review F2: a filesystem failure must NOT lead to a
-        DB-deleted-but-files-still-on-disk inconsistency. The route must
-        return 5xx, leave the row in place, and not emit the success
-        audit log.
+    def test_delete_job_removes_row_and_logs_when_filestore_fails(self, client, db, filestore, caplog):
+        """Row-first delete (C5): the row is removed atomically first to close
+        the delete/retry TOCTOU. If the subsequent file reclaim fails, the row
+        stays gone and the orphan is logged for manual/retention cleanup —
+        the deliberate trade of a rare orphan over acting on a live job.
         """
         import logging as _logging
 
@@ -913,12 +929,11 @@ class TestJobsRoutes:
         ):
             resp = client.delete(f"/jobs/{job.id}")
 
-        assert resp.status_code == 500
-        # DB row preserved so the user can retry.
-        assert db.get_job(job.id) is not None
-        # Audit log records the abort, not a misleading "job deleted".
-        assert any("job delete aborted" in r.getMessage() for r in caplog.records)
-        assert not any("job deleted:" in r.getMessage() for r in caplog.records)
+        assert resp.status_code == 204
+        # Row removed atomically before the file reclaim.
+        assert db.get_job(job.id) is None
+        # Orphaned files are logged so an operator can reclaim them.
+        assert any("filestore reclaim failed" in r.getMessage() for r in caplog.records)
 
 
 class TestViewerRoutes:
@@ -1907,11 +1922,11 @@ class TestBatchRoutes:
         assert "deleted=" in summary
         assert batch_id in summary
 
-    def test_delete_batch_keeps_db_rows_for_jobs_whose_filestore_delete_fails(self, client, db, filestore, caplog):
-        """PR #53 review F2: per-job atomicity in batch delete. If one
-        job's filesystem reclaim fails, that job's DB row must stay; the
-        rest of the batch still gets cleaned and the summary log reports
-        deleted + failed counts honestly.
+    def test_delete_batch_removes_all_rows_and_logs_orphan_on_filestore_failure(self, client, db, filestore, caplog):
+        """Row-first batch delete (C5): every terminal row is removed
+        atomically (closing the delete/retry race). A file-reclaim failure on
+        one job leaves that job's files orphaned (logged), not its DB row — so
+        the whole batch clears and the summary counts all rows deleted.
         """
         import logging as _logging
 
@@ -1938,16 +1953,16 @@ class TestBatchRoutes:
             resp = client.delete(f"/jobs/batch/{batch_id}")
 
         assert resp.status_code == 204
-        # First and third jobs succeeded; the middle one stayed.
+        # All rows removed row-first, including the one whose file reclaim failed.
         assert db.get_job(jobs[0].id) is None
-        assert db.get_job(jobs[1].id) is not None
+        assert db.get_job(jobs[1].id) is None
         assert db.get_job(jobs[2].id) is None
 
         summary = next(r.getMessage() for r in caplog.records if "batch deleted" in r.getMessage())
-        assert "deleted=2" in summary
-        assert "failed=1" in summary
+        assert "deleted=3" in summary
         assert "total=3" in summary
-        assert any("batch delete skipped one job" in r.getMessage() for r in caplog.records)
+        # The orphaned files from the failed reclaim are logged for cleanup.
+        assert any("row removed but filestore reclaim failed" in r.getMessage() for r in caplog.records)
 
 
 class TestRetentionSweep:

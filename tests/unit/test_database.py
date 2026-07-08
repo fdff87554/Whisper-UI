@@ -104,6 +104,44 @@ def test_delete_job(db: JobDatabase):
     assert db.get_job(job.id) is None
 
 
+def test_try_claim_retry_transitions_failed_to_queued_once(db: JobDatabase):
+    """The atomic retry claim succeeds exactly once: a second concurrent call
+    (job already QUEUED) returns False so two pipelines are never built."""
+    job = Job(filename="t.mp3", filepath="/tmp/t.mp3")
+    job.status = JobStatus.FAILED
+    job.error = "boom"
+    job.result_path = "/old.json"
+    db.insert_job(job)
+
+    assert db.try_claim_retry(job.id, duration=12.0) is True
+    fetched = db.get_job(job.id)
+    assert fetched.status == JobStatus.QUEUED
+    assert fetched.error is None
+    assert fetched.result_path is None
+    assert fetched.duration == 12.0
+
+    # Second claim loses: status is no longer FAILED.
+    assert db.try_claim_retry(job.id, duration=99.0) is False
+    assert db.get_job(job.id).duration == 12.0
+
+
+def test_delete_terminal_job_refuses_non_terminal(db: JobDatabase):
+    """Conditional delete only removes terminal rows, so a job a retry just
+    claimed (QUEUED) is never torn out from under the running attempt."""
+    job = Job(filename="t.mp3", filepath="/tmp/t.mp3")
+    job.status = JobStatus.QUEUED
+    db.insert_job(job)
+
+    assert db.delete_terminal_job(job.id) is False
+    assert db.get_job(job.id) is not None
+
+    completed = Job(filename="c.mp3", filepath="/tmp/c.mp3")
+    completed.status = JobStatus.COMPLETED
+    db.insert_job(completed)
+    assert db.delete_terminal_job(completed.id) is True
+    assert db.get_job(completed.id) is None
+
+
 def test_list_jobs_with_limit(db: JobDatabase):
     for i in range(5):
         db.insert_job(Job(filename=f"file{i}.mp3", filepath=f"/tmp/file{i}.mp3"))

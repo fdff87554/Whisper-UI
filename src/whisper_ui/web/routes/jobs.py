@@ -170,22 +170,28 @@ def _probe_retry_duration(job: Job) -> float | None:
 
 
 async def _reset_and_enqueue_retry(job: Job, db, redis, settings, filestore) -> bool:
-    """Reset a FAILED job's progress fields and re-enqueue its pipeline.
+    """Atomically claim a FAILED job for retry and re-enqueue its pipeline.
 
     Shared by single retry, bulk retry, and batch retry so the reset field
-    list and the failure label cannot drift apart. Returns True when the
-    enqueue succeeded; on failure the job is flipped back to FAILED with the
-    shared enqueue-failure label and the exception is logged.
+    list and the failure label cannot drift apart. The FAILED -> QUEUED
+    transition goes through ``db.try_claim_retry`` so a double-click (or a bulk
+    retry racing a single retry) cannot build two pipelines for one job — the
+    losing caller sees the claim fail and returns False without enqueuing.
+    Returns True when the enqueue succeeded; on enqueue failure the job is
+    flipped back to FAILED with the shared enqueue-failure label.
     """
+    retry_duration = await asyncio.to_thread(_probe_retry_duration, job)
+    if not await asyncio.to_thread(db.try_claim_retry, job.id, retry_duration):
+        logger.info("retry skipped for job %s: no longer FAILED (already retried?)", job.id)
+        return False
+    # Reflect the claimed state onto the in-memory snapshot for enqueue + logging.
+    job.status = JobStatus.QUEUED
+    job.error = None
+    job.progress = 0.0
+    job.progress_message = ""
+    job.result_path = None
+    job.duration = retry_duration
     try:
-        retry_duration = await asyncio.to_thread(_probe_retry_duration, job)
-        job.status = JobStatus.QUEUED
-        job.error = None
-        job.progress = 0.0
-        job.progress_message = ""
-        job.result_path = None
-        job.duration = retry_duration
-        db.update_job(job)
         await asyncio.to_thread(enqueue_pipeline, job, redis=redis, settings=settings, filestore=filestore)
     except Exception:
         logger.exception("Failed to enqueue retry for job %s", job.id)
@@ -293,13 +299,15 @@ async def bulk_job_action(
             if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
                 failed += 1
                 continue
+            # Row-first conditional delete closes the delete/retry race (see the
+            # single-delete route); a job a retry just claimed is left alone.
+            if not await asyncio.to_thread(db.delete_terminal_job, job.id):
+                failed += 1
+                continue
             try:
                 await asyncio.to_thread(filestore.delete_job_files, job.id)
             except OSError:
-                logger.exception("bulk delete: filestore reclaim failed for job %s", job.id)
-                failed += 1
-                continue
-            db.delete_job(job.id)
+                logger.error("bulk delete: row removed but filestore reclaim failed for job %s", job.id)
             deleted_keys.append(f"job:{job.id}")
             succeeded += 1
 
@@ -462,20 +470,24 @@ async def delete_job(job_id: str, db: DbDep, filestore: FileStoreDep, redis: Red
     if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
         return Response(status_code=409)
 
+    # Remove the row first, gated on a still-terminal status. This closes the
+    # delete/retry TOCTOU: if a concurrent retry claimed the job (FAILED ->
+    # QUEUED) in the window after the check above, the conditional delete
+    # matches nothing and we return 409 rather than reclaiming files out from
+    # under a freshly-requeued attempt. A file-reclaim failure after the row is
+    # gone leaves orphaned files (logged for manual/retention cleanup) — the
+    # deliberate trade of a rare orphan over acting on a live job.
+    if not await asyncio.to_thread(db.delete_terminal_job, job.id):
+        return Response(status_code=409)
     try:
         await asyncio.to_thread(filestore.delete_job_files, job.id)
     except OSError as exc:
-        # Keep the DB row + Redis state + audit log silent so retrying the
-        # delete is a no-op-then-real-delete instead of "DB row gone but
-        # files still on disk".
         logger.error(
-            "job delete aborted: filestore reclaim failed for job_id=%s user_id=%s: %s",
+            "job delete: row removed but filestore reclaim failed for job_id=%s user_id=%s: %s",
             job.id,
             user.id,
             exc.__class__.__name__,
         )
-        return Response(status_code=500)
-    db.delete_job(job.id)
     await asyncio.to_thread(redis.delete, f"job:{job.id}")
     logger.info(
         "job deleted: job_id=%s user_id=%s filename=%r status_at_delete=%s",
@@ -531,22 +543,23 @@ async def delete_batch(batch_id: str, db: DbDep, filestore: FileStoreDep, redis:
     for job in all_jobs:
         if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
             continue
+        # Row-first conditional delete closes the delete/retry race; a job a
+        # retry claimed in the window is spared. See the single-delete route.
+        if not await asyncio.to_thread(db.delete_terminal_job, job.id):
+            failed += 1
+            continue
         try:
             await asyncio.to_thread(filestore.delete_job_files, job.id)
         except OSError as exc:
-            # Per-job atomicity: keep the failing job's DB row + Redis
-            # state so the user can retry just that one. Other jobs in
-            # the batch still get cleaned.
+            # Row already removed; a reclaim failure leaves orphaned files
+            # (logged for manual/retention cleanup). Other jobs still get cleaned.
             logger.error(
-                "batch delete skipped one job: job_id=%s batch_id=%s user_id=%s: %s",
+                "batch delete: row removed but filestore reclaim failed: job_id=%s batch_id=%s user_id=%s: %s",
                 job.id,
                 batch_id,
                 user.id,
                 exc.__class__.__name__,
             )
-            failed += 1
-            continue
-        db.delete_job(job.id)
         deleted_keys.append(f"job:{job.id}")
         deleted += 1
 
