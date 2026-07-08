@@ -25,6 +25,7 @@ import json
 import logging
 import logging.config
 import os
+import re
 from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
@@ -150,17 +151,22 @@ _RESERVED_LOGRECORD_ATTRS = frozenset(
     }
 )  # fmt: skip
 
-# Substrings (case-insensitive) that mark a structured ``extra={}`` field as
-# sensitive. Any matching field is redacted in the JSON log rather than copied
-# verbatim, so a call site that accidentally passes a token / password / raw
-# URL (which may carry inline credentials) cannot leak it into the logs.
-_SENSITIVE_KEY_MARKERS = ("token", "password", "passwd", "secret", "authorization", "api_key", "apikey", "url")
+# Structured ``extra={}`` field names whose value is redacted in the JSON log,
+# so a call site that accidentally passes a token / password / raw URL (which
+# may carry inline credentials) cannot leak it. Matched as a whole
+# underscore-delimited word (or the whole key) rather than a bare substring, so
+# ``redis_url`` / ``source_url`` / ``hf_token`` / ``api_key`` are redacted while
+# ``curl_command`` / ``tokenizer_name`` (which merely contain "url" / "token")
+# are not.
+_SENSITIVE_KEY_RE = re.compile(
+    r"(?:^|_)(?:password|passwd|secret|token|authorization|api_?key|url)(?:_|$)",
+    re.IGNORECASE,
+)
 _REDACTED = "***"
 
 
 def _is_sensitive_key(key: str) -> bool:
-    lowered = key.lower()
-    return any(marker in lowered for marker in _SENSITIVE_KEY_MARKERS)
+    return bool(_SENSITIVE_KEY_RE.search(key))
 
 
 class JsonFormatter(logging.Formatter):

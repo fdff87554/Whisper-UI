@@ -248,6 +248,30 @@ def test_json_formatter_redacts_sensitive_extra_fields():
     assert payload["job_id"] == "abc123"
 
 
+def test_json_formatter_redaction_matches_whole_words_not_substrings():
+    """Boundary-aware matching: sensitive fields (whole-word markers) are
+    redacted, but fields that merely *contain* a marker substring
+    (curl_command → 'url', tokenizer_name → 'token') are kept."""
+    record = logging.LogRecord("w", logging.INFO, "p", 1, "op", (), None)
+    # Redacted: whole-word / delimited markers.
+    record.source_url = "https://x.com/watch?v=1"
+    record.authorization = "Bearer abc"
+    record.apikey = "sk-1"
+    # Kept: marker only appears as a substring inside another word.
+    record.curl_command = "curl https://ok"
+    record.curl_exit_code = 0
+    record.tokenizer_name = "whisper"
+
+    payload = json.loads(JsonFormatter().format(record))
+
+    assert payload["source_url"] == "***"
+    assert payload["authorization"] == "***"
+    assert payload["apikey"] == "***"
+    assert payload["curl_command"] == "curl https://ok"
+    assert payload["curl_exit_code"] == 0
+    assert payload["tokenizer_name"] == "whisper"
+
+
 def test_json_formatter_includes_rendered_exception():
     import sys
 
