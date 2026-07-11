@@ -107,4 +107,4 @@ docker compose --profile gpu -f compose.yml -f compose.dev.yml up -d
 
 ## Reporting Issues
 
-Please use [GitHub Issues](https://github.com/fdff87554/Whisper-UI/issues) to report bugs or request features.
+Please use [GitHub Issues](https://github.com/fdff87554/whisper-ui/issues) to report bugs or request features.

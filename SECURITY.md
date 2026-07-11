@@ -5,7 +5,7 @@
 If you discover a security vulnerability, please report it responsibly:
 
 1. **Do not** open a public issue
-2. Email the maintainers or use [GitHub's private vulnerability reporting](https://github.com/fdff87554/Whisper-UI/security/advisories/new)
+2. Email the maintainers or use [GitHub's private vulnerability reporting](https://github.com/fdff87554/whisper-ui/security/advisories/new)
 3. Include steps to reproduce and the potential impact
 
 We will acknowledge receipt within 48 hours and aim to provide a fix or mitigation plan within 7 days.
