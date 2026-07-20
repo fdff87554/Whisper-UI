@@ -4,6 +4,9 @@
 global:
   scrape_interval: 15s
   scrape_timeout: 10s
+# Alert rules (mounted alongside this file at /etc/prometheus/alerts.yml).
+rule_files:
+  - alerts.yml
 scrape_configs:
   # Whisper-UI app metrics (queue depth, job status, RQ workers). The frontend
   # container listens on 8000 internally (8080 is only the host port map).

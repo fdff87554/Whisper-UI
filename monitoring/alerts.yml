@@ -1,0 +1,32 @@
+# Prometheus alert rules for the `monitoring` compose profile. Loaded via
+# rule_files in prometheus.yml and mounted read-only into the prometheus
+# container. Without an Alertmanager (a documented follow-up) these still
+# surface as pending/firing in the Prometheus UI and the ALERTS series, so a
+# dashboard or a manual `up{alertstate="firing"}` check already catches them.
+groups:
+  - name: whisper-ui
+    rules:
+      # The 2026-07 incident: worker-rocm died on a boot-time GPU device race
+      # (/dev/dri not ready → exit 128) and Docker's restart policy gave up, so
+      # whisper:gpu jobs piled up with no consumer for days while the UI and the
+      # io/llm workers stayed healthy. whisper_rq_workers is a GLOBAL count (the
+      # io/llm workers kept it > 0), so it can't isolate a dead GPU worker — key
+      # off the gpu queue itself: a backlog with nothing in-flight = not
+      # draining, which is exactly a dead/stuck worker-rocm.
+      - alert: WhisperGpuQueueStalled
+        expr: whisper_queue_depth{queue="whisper:gpu"} > 0 and whisper_started_jobs{queue="whisper:gpu"} == 0
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "whisper:gpu backlog not draining (GPU worker likely down)"
+          description: "{{ $value }} job(s) queued on whisper:gpu with nothing in-flight for 15m — worker-rocm is probably dead (device race / crashed HIP context). Recovery: docker/whisper-rocm-heal.sh (install on the host as a systemd timer)."
+      # Full worker outage: Redis reachable but no RQ workers registered at all.
+      - alert: WhisperNoRqWorkers
+        expr: whisper_rq_workers == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No RQ workers registered"
+          description: "whisper_rq_workers == 0 for 5m — every worker is down or cannot reach Redis."
