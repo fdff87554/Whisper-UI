@@ -10,34 +10,87 @@
 # healthy — a silent multi-day whisper:gpu outage (observed 2026-07).
 #
 # An in-container entrypoint wait cannot fix this: the create-time device
-# failure means the entrypoint never runs. The fix has to live on the host.
-# Run this from a systemd timer (see docs/gpu-worker-recovery.md); it waits for
-# the device nodes, then re-runs `compose up` only if a worker-rocm is missing.
+# failure means the entrypoint never runs, so the fix has to live on the host.
+# This script only heals worker-rocm — frontend/redis/io/llm need no GPU and
+# recover on their own via `restart: unless-stopped`.
+#
+# Install (host systemd timer):
+#   sudo install -m0755 docker/whisper-rocm-heal.sh /usr/local/bin/whisper-rocm-heal.sh
+#
+#   sudo tee /etc/systemd/system/whisper-rocm-heal.service >/dev/null <<'UNIT'
+#   [Unit]
+#   Description=Heal whisper worker-rocm (bring up if fewer than desired run)
+#   After=docker.service
+#   Wants=docker.service
+#   [Service]
+#   Type=oneshot
+#   User=ubuntu
+#   # Override the deploy dir / desired count here if they differ:
+#   #   Environment=WHISPER_DEPLOY_DIR=/home/ubuntu/whisper-ui-deploy
+#   #   Environment=WHISPER_ROCM_SCALE=1
+#   ExecStart=/usr/local/bin/whisper-rocm-heal.sh
+#   UNIT
+#
+#   sudo tee /etc/systemd/system/whisper-rocm-heal.timer >/dev/null <<'UNIT'
+#   [Unit]
+#   Description=Periodic heal for whisper worker-rocm
+#   [Timer]
+#   OnBootSec=45s
+#   OnUnitActiveSec=2min
+#   AccuracySec=15s
+#   [Install]
+#   WantedBy=timers.target
+#   UNIT
+#
+#   sudo systemctl daemon-reload && sudo systemctl enable --now whisper-rocm-heal.timer
 #
 # Env:
 #   WHISPER_DEPLOY_DIR  deploy dir holding compose.yml + .env (default ~/whisper-ui-deploy)
 #   WHISPER_ROCM_SCALE  desired worker-rocm replicas (default 1)
-#   WHISPER_IO_SCALE    desired worker-io replicas (default 2)
 #   WHISPER_HEAL_LOG    log file (default $WHISPER_DEPLOY_DIR/whisper-rocm-heal.log)
-set -u
+set -euo pipefail
 
 DEPLOY="${WHISPER_DEPLOY_DIR:-$HOME/whisper-ui-deploy}"
 DESIRED="${WHISPER_ROCM_SCALE:-1}"
-IO_SCALE="${WHISPER_IO_SCALE:-2}"
 LOG="${WHISPER_HEAL_LOG:-$DEPLOY/whisper-rocm-heal.log}"
 
+case "$DESIRED" in
+'' | *[!0-9]*)
+	echo "$(date -Is) heal: invalid WHISPER_ROCM_SCALE=$DESIRED (need a non-negative integer)" >&2
+	exit 1
+	;;
+esac
+
+cd "$DEPLOY" || {
+	echo "$(date -Is) heal: deploy dir not found: $DEPLOY" >&2
+	exit 1
+}
+
 # Wait up to ~120s for the GPU device nodes so the compose up can succeed.
+devices_ready() { [ -e /dev/kfd ] && [ -e /dev/dri/renderD128 ]; }
+ready=0
 for _ in $(seq 1 60); do
-	[ -e /dev/kfd ] && [ -e /dev/dri/renderD128 ] && break
+	if devices_ready; then
+		ready=1
+		break
+	fi
 	sleep 2
 done
+if [ "$ready" -ne 1 ]; then
+	echo "$(date -Is) heal: GPU device nodes still absent after wait; aborting" >>"$LOG"
+	exit 1
+fi
 
-running=$(docker ps --filter 'name=worker-rocm' --format '{{.Names}}' | wc -l)
+# Count only THIS compose project's worker-rocm, not other deployments' by name.
+if ! running=$(docker compose --profile rocm ps -q --status running worker-rocm | wc -l); then
+	echo "$(date -Is) heal: 'docker compose ps' failed" >>"$LOG"
+	exit 1
+fi
+
 if [ "$running" -lt "$DESIRED" ]; then
-	cd "$DEPLOY" || exit 1
 	echo "$(date -Is) heal: $running/$DESIRED worker-rocm running, running compose up" >>"$LOG"
-	docker compose --profile rocm --profile io --profile llm-worker up -d --no-recreate \
-		--scale worker-io="$IO_SCALE" --scale worker-rocm="$DESIRED" \
-		frontend worker-rocm worker-io worker-llm >>"$LOG" 2>&1 ||
+	if ! docker compose --profile rocm up -d --no-recreate --scale worker-rocm="$DESIRED" worker-rocm >>"$LOG" 2>&1; then
 		echo "$(date -Is) heal: compose up failed" >>"$LOG"
+		exit 1
+	fi
 fi
