@@ -92,6 +92,15 @@ class Settings(BaseSettings):
     # HuggingFace
     hf_token: str = ""
 
+    # Diarization
+    # Initial state of the upload form's "enable speaker diarization" toggle.
+    # Diarization (pyannote) is the slowest pipeline stage — clustering runs on
+    # CPU and is unbounded when num_speakers is unset — so deployments that
+    # rarely need speaker labels can default it off and let users opt in per
+    # job. Only takes effect when diarization_available (an HF token is set);
+    # see the diarization_default_for_form property.
+    diarization_default_enabled: bool = True
+
     # Authentication
     # Signing key for session cookies. MUST be set to a stable random value in
     # production (e.g. ``openssl rand -hex 32``); leaving it empty causes
@@ -311,6 +320,16 @@ class Settings(BaseSettings):
         would only skip — see ``DiarizeStage.execute``.
         """
         return bool(self.hf_token)
+
+    @property
+    def diarization_default_for_form(self) -> bool:
+        """Initial value of the upload form's diarization toggle.
+
+        The operator default (``diarization_default_enabled``) clamped by
+        capability: never pre-check the box when diarization can't run at all,
+        so the rendered default always matches what a submit would persist.
+        """
+        return self.diarization_default_enabled and self.diarization_available
 
     @property
     def llm_correction_available(self) -> bool:

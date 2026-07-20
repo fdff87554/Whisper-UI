@@ -19,6 +19,10 @@ x-app-depends: &app-depends
     condition: service_completed_successfully
 x-core-env: &core-env
   REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/0
+  # Redis client resiliency — read by the web app and every worker.
+  REDIS_SOCKET_TIMEOUT: ${REDIS_SOCKET_TIMEOUT:-10}
+  REDIS_SOCKET_CONNECT_TIMEOUT: ${REDIS_SOCKET_CONNECT_TIMEOUT:-5}
+  REDIS_HEALTH_CHECK_INTERVAL: ${REDIS_HEALTH_CHECK_INTERVAL:-30}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   LOG_JSON: ${LOG_JSON:-false}
   DATABASE_PATH: /app/data/db/whisper_ui.db
@@ -84,6 +88,9 @@ services:
       WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
       HF_TOKEN: ${HF_TOKEN:-}
       DIARIZE_HEARTBEAT_INTERVAL: ${DIARIZE_HEARTBEAT_INTERVAL:-30}
+      # Initial state of the upload-form diarization toggle (clamped at render
+      # time by whether HF_TOKEN is set — see diarization_default_for_form).
+      DIARIZATION_DEFAULT_ENABLED: ${DIARIZATION_DEFAULT_ENABLED:-true}
       # LLM correction: the frontend only needs the gate + model name to
       # render the upload-form toggle; the client knobs stay worker-side.
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
@@ -101,8 +108,10 @@ services:
       SESSION_HTTPS_ONLY: ${SESSION_HTTPS_ONLY:-false}
       MAX_LOGIN_ATTEMPTS: ${MAX_LOGIN_ATTEMPTS:-5}
       MAX_LOGIN_ATTEMPTS_PER_IP: ${MAX_LOGIN_ATTEMPTS_PER_IP:-20}
+      MAX_REGISTER_ATTEMPTS_PER_IP: ${MAX_REGISTER_ATTEMPTS_PER_IP:-10}
       LOGIN_LOCKOUT_SECONDS: ${LOGIN_LOCKOUT_SECONDS:-900}
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
+      TRUSTED_PROXY_COUNT: ${TRUSTED_PROXY_COUNT:-1}
       # Registration gate (frontend-only).
       ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
     volumes:
@@ -400,6 +409,7 @@ services:
     image: prom/prometheus:v3.5.0
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus-data:/prometheus
     ports:
       - "127.0.0.1:9090:9090"

@@ -246,6 +246,21 @@ def test_diarization_available_reflects_hf_token(tmp_path):
     assert _make_settings(tmp_path, hf_token="hf-test-not-real").diarization_available is True
 
 
+def test_diarization_default_for_form_respects_setting_and_capability(tmp_path):
+    # No HF token: diarization can't run, so the form never pre-checks the box,
+    # regardless of the operator default — the rendered default matches submit.
+    assert _make_settings(tmp_path, hf_token="").diarization_default_for_form is False
+    assert _make_settings(tmp_path, hf_token="", diarization_default_enabled=True).diarization_default_for_form is False
+    # With a token, the form default follows diarization_default_enabled.
+    assert _make_settings(tmp_path, hf_token="hf-test-not-real").diarization_default_for_form is True  # default
+    assert (
+        _make_settings(
+            tmp_path, hf_token="hf-test-not-real", diarization_default_enabled=False
+        ).diarization_default_for_form
+        is False
+    )
+
+
 def test_llm_correction_available_reflects_ollama_base_url(tmp_path):
     assert _make_settings(tmp_path, ollama_base_url="").llm_correction_available is False
     assert _make_settings(tmp_path, ollama_base_url="http://ollama:11434").llm_correction_available is True
