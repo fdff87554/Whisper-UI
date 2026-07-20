@@ -7,6 +7,31 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.21.0] - 2026-07-20
+
+Deployment-wiring and GPU-worker reliability follow-ups to 2.20.0.
+
+### Added
+
+- `DIARIZATION_DEFAULT_ENABLED` sets the upload form's diarization toggle
+  default (clamped by `HF_TOKEN` availability). Diarization is the slowest
+  stage, so deployments that rarely need speaker labels can default it off
+  while users still opt in per job.
+- Prometheus alert rules (`monitoring/alerts.yml`): `WhisperGpuQueueStalled`
+  (a `whisper:gpu` backlog with nothing in-flight — the signature of a dead
+  GPU worker) and `WhisperNoRqWorkers`.
+- `docker/whisper-rocm-heal.sh`, a host systemd-timer script that recovers
+  `worker-rocm` after the boot-time GPU-device race that Docker's restart
+  policy gives up on — the cause of a silent multi-day `whisper:gpu` outage.
+
+### Fixed
+
+- Wire deployer-facing settings into the Compose `environment:` so a `.env`
+  value actually reaches the container (Compose has no `env_file`):
+  `TRUSTED_PROXY_COUNT`, `MAX_REGISTER_ATTEMPTS_PER_IP`, and the
+  `REDIS_SOCKET_TIMEOUT` / `REDIS_SOCKET_CONNECT_TIMEOUT` /
+  `REDIS_HEALTH_CHECK_INTERVAL` timeouts — all added in 2.20.0 but never wired.
+
 ## [2.20.0] - 2026-07-08
 
 Pre-release hardening pass: resilience, security, and correctness fixes with
@@ -1010,7 +1035,8 @@ Error` JSON body while logging the full traceback, so an
   classification, missing-job handling) are now covered by unit tests
   in `test_pipeline_dispatcher.py` and `test_stage_tasks.py`.
 
-[Unreleased]: https://github.com/fdff87554/whisper-ui/compare/v2.18.0...HEAD
+[Unreleased]: https://github.com/fdff87554/whisper-ui/compare/v2.21.0...HEAD
+[2.21.0]: https://github.com/fdff87554/whisper-ui/releases/tag/v2.21.0
 [2.18.0]: https://github.com/fdff87554/whisper-ui/releases/tag/v2.18.0
 [2.17.0]: https://github.com/fdff87554/whisper-ui/releases/tag/v2.17.0
 [2.16.0]: https://github.com/fdff87554/whisper-ui/releases/tag/v2.16.0
