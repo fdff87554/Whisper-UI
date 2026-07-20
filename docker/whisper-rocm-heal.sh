@@ -67,7 +67,14 @@ cd "$DEPLOY" || {
 }
 
 # Wait up to ~120s for the GPU device nodes so the compose up can succeed.
-devices_ready() { [ -e /dev/kfd ] && [ -e /dev/dri/renderD128 ]; }
+# Match any render node (renderD128, renderD129, ...), not just the gfx1151 one.
+devices_ready() {
+	[ -e /dev/kfd ] || return 1
+	for node in /dev/dri/renderD*; do
+		[ -e "$node" ] && return 0
+	done
+	return 1
+}
 ready=0
 for _ in $(seq 1 60); do
 	if devices_ready; then
