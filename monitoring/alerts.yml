@@ -2,7 +2,7 @@
 # rule_files in prometheus.yml and mounted read-only into the prometheus
 # container. Without an Alertmanager (a documented follow-up) these still
 # surface as pending/firing in the Prometheus UI and the ALERTS series, so a
-# dashboard or a manual `up{alertstate="firing"}` check already catches them.
+# dashboard or a manual `ALERTS{alertstate="firing"}` check already catches them.
 groups:
   - name: whisper-ui
     rules:
