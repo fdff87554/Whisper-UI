@@ -114,8 +114,6 @@ services:
       TRUSTED_PROXY_COUNT: ${TRUSTED_PROXY_COUNT:-1}
       # Registration gate (frontend-only).
       ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
-      # Optional bearer token protecting /metrics (empty = open, the default).
-      METRICS_TOKEN: ${METRICS_TOKEN:-}
     volumes:
       - app-data:/app/data
     depends_on:

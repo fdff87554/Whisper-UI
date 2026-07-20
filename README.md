@@ -550,10 +550,9 @@ ceiling is sized for small-office deployments only.
 
 ### Observability: metrics & monitoring (minimal)
 
-The frontend exposes Prometheus metrics at **`/metrics`** — unauthenticated by
-default (same posture as `/health`), so keep it internal, or set `METRICS_TOKEN`
-to require scrapes to send `Authorization: Bearer <token>`. They are computed at
-scrape time from RQ/Redis and the SQLite `jobs` table, with no persistent counters:
+The frontend exposes Prometheus metrics at **`/metrics`** — unauthenticated,
+same posture as `/health`, so keep it internal. They are computed at scrape
+time from RQ/Redis and the SQLite `jobs` table, with no persistent counters:
 
 | Metric                                         | Type  | Labels   | Source             |
 | ---------------------------------------------- | ----- | -------- | ------------------ |

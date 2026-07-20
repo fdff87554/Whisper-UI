@@ -18,7 +18,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # Deployer-facing env vars the web app reads and must receive via Compose.
 _REQUIRED_FRONTEND_ENV = {
     "DIARIZATION_DEFAULT_ENABLED",
-    "METRICS_TOKEN",
     "TRUSTED_PROXY_COUNT",
     "MAX_REGISTER_ATTEMPTS_PER_IP",
     "REDIS_SOCKET_TIMEOUT",
